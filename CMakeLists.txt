@@ -24,7 +24,8 @@ set(QTIDM_FIREFOX_EXTENSION_ID "qtidm@io.github.qtidm" CACHE STRING "Firefox ext
 option(QTIDM_ENABLE_NATIVE_TUNING "Build for the current CPU with -march=native" OFF)
 option(QTIDM_INSTALL_NATIVE_MESSAGING_HOSTS "Install browser native messaging host manifests" ON)
 
-if(NOT QTIDM_CHROME_EXTENSION_ID MATCHES "^[a-p]{32}$")
+string(LENGTH "${QTIDM_CHROME_EXTENSION_ID}" QTIDM_CHROME_EXTENSION_ID_LENGTH)
+if(NOT QTIDM_CHROME_EXTENSION_ID_LENGTH EQUAL 32 OR NOT QTIDM_CHROME_EXTENSION_ID MATCHES "^[a-p]+$")
     message(FATAL_ERROR "QTIDM_CHROME_EXTENSION_ID must be a 32-character Chrome extension ID using letters a-p.")
 endif()
 
