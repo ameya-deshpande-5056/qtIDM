@@ -102,7 +102,9 @@ QString writeArchive(QTemporaryDir& dir, const QByteArray& data)
 {
     const auto path = dir.path() + QStringLiteral("/fixture.zip");
     QFile file(path);
-    Q_ASSERT(file.open(QIODevice::WriteOnly));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qFatal("failed to create ZIP fixture");
+    }
     file.write(data);
     file.close();
     return path;
