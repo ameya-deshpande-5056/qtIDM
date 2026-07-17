@@ -1,0 +1,38 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+install_manifest.txt
+
+# Release artifacts
+dist/
+*.AppImage
+*.deb
+*.changes
+*.buildinfo
+*.flatpak
+*.tar.gz
+*.zip
+
+# Runtime/generated data
+*.sqlite3
+*.sqlite3-*
+*.log
+*.tmp
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Flatpak/AppImage staging
+.flatpak-builder/
+repo/
+AppDir/

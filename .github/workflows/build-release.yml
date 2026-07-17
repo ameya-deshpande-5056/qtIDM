@@ -1,0 +1,125 @@
+name: Build Release
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v*.*.*'
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ python3 xvfb dbus-x11 qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper devscripts appstream flatpak flatpak-builder fuse libfuse2
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Performance smoke
+        if: github.event_name == 'schedule'
+        env:
+          QTIDM_RUN_PERF_TESTS: 1
+        run: ctest --test-dir build -R qtIDM_performance_smoke_tests --output-on-failure
+
+      - name: Prepare release metadata
+        id: version
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        run: |
+          VERSION="$(sh packaging/release/version-info.sh)"
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "${GITHUB_REF_NAME:-}" != "v$VERSION" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match CMake version v$VERSION" >&2
+            exit 1
+          fi
+          sh packaging/release/extract-changelog.sh "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build Debian package
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        run: |
+          chmod +x packaging/build-deb.sh
+          sh packaging/build-deb.sh
+          mkdir -p dist
+          find . -maxdepth 2 -type f \( -name '*.deb' -o -name '*.changes' -o -name '*.buildinfo' \) -exec cp {} dist/ \;
+
+      - name: Smoke Debian package
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        run: |
+          test -n "$(find dist -type f -name '*.deb' -print -quit)"
+          sudo apt-get install -y ./dist/*.deb
+          xvfb-run -a qtIDM --version
+
+      - name: Install linuxdeploy
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        run: |
+          curl -L -o linuxdeploy.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -L -o linuxdeploy-plugin-qt.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
+          sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
+          sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
+
+      - name: Build AppImage
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          chmod +x packaging/build-appimage.sh packaging/appimage/AppRun
+          sh packaging/build-appimage.sh
+          mkdir -p dist
+          APPIMAGE="$(find . -maxdepth 2 -type f -name '*.AppImage' -print -quit)"
+          test -n "$APPIMAGE"
+          cp "$APPIMAGE" "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage"
+
+      - name: Smoke AppImage
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: |
+          chmod +x "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage"
+          xvfb-run -a "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage" --version
+
+      - name: Build Flatpak bundle
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        run: |
+          chmod +x packaging/release/build-flatpak-bundle.sh
+          sh packaging/release/build-flatpak-bundle.sh
+
+      - name: Smoke Flatpak bundle
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        run: |
+          test -f "dist/qtIDM-${{ steps.version.outputs.version }}.flatpak"
+          flatpak install --user -y "dist/qtIDM-${{ steps.version.outputs.version }}.flatpak"
+          dbus-run-session -- xvfb-run -a flatpak run io.github.qtidm.qtidm --version
+
+      - name: Upload workflow artifacts
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qtIDM-${{ steps.version.outputs.version }}-linux-packages
+          path: dist/*
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: qtIDM ${{ steps.version.outputs.version }}
+          body_path: dist/CHANGELOG-${{ steps.version.outputs.version }}.md
+          files: dist/*

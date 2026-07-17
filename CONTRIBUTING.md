@@ -1,0 +1,26 @@
+# Contributing
+
+## Requirements
+
+- Linux.
+- C++20 compiler.
+- Qt6 Core, Gui, Widgets, DBus, Test.
+- libcurl.
+- SQLite3.
+- CMake and Ninja.
+
+## Local Check
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+## Rules
+
+- Keep the project Linux-only.
+- Do not add Electron, QML, WebEngine, or heavy runtimes.
+- Do not add proprietary IDM assets, copied UI resources, trademarks, or reverse-engineered internals.
+- Add tests for core behavior changes.
+- Keep generated build artifacts out of git.

@@ -1,0 +1,8 @@
+{
+  "manifest_version": 2,
+  "name": "qtIDM Integration",
+  "version": "0.1.0",
+  "permissions": ["contextMenus", "nativeMessaging", "downloads", "cookies", "tabs", "webRequest", "<all_urls>"],
+  "background": { "scripts": ["background.js"] },
+  "applications": { "gecko": { "id": "qtidm@io.github.qtidm" } }
+}
