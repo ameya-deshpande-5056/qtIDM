@@ -16,6 +16,7 @@ CMakeLists.txt text eol=lf
 *.desktop text eol=lf
 *.xml text eol=lf
 *.json text eol=lf
+*.json.in text eol=lf
 *.md text eol=lf
 
 *.svg text eol=lf
