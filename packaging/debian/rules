@@ -1,4 +1,10 @@
 #!/usr/bin/make -f
 
+QTIDM_CHROME_EXTENSION_ID ?= aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+export QTIDM_CHROME_EXTENSION_ID
+
 %:
 	dh $@ --buildsystem=cmake
+
+override_dh_auto_configure:
+	dh_auto_configure -- -DQTIDM_CHROME_EXTENSION_ID=$(QTIDM_CHROME_EXTENSION_ID)

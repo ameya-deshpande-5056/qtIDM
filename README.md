@@ -33,6 +33,12 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
+For release builds with Chrome native messaging, pass the published Chrome extension ID:
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DQTIDM_CHROME_EXTENSION_ID=<chrome-extension-id>
+```
+
 ## Test
 
 ```bash

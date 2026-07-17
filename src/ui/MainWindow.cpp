@@ -7,6 +7,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QDateTimeEdit>
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -151,7 +152,8 @@ void MainWindow::onDownloadAdded(const DownloadRecord& record)
     downloads_->setItem(row, 1, new QTableWidgetItem(record.url.toString()));
     downloads_->setItem(row, 2, new QTableWidgetItem(record.targetPath));
     downloads_->setItem(row, 3, new QTableWidgetItem(statusText(record.status)));
-    downloads_->setItem(row, 4, new QTableWidgetItem(QStringLiteral("0%")));
+    const int percent = record.totalBytes > 0 ? static_cast<int>((record.completedBytes * 100) / record.totalBytes) : 0;
+    downloads_->setItem(row, 4, new QTableWidgetItem(QString::number(percent) + QLatin1Char('%')));
     downloads_->setItem(row, 5, new QTableWidgetItem(QStringLiteral("0 B/s")));
     auto* grid = new SegmentGrid(downloads_);
     grid->setSegments(record.segments);
@@ -296,6 +298,35 @@ void MainWindow::showQueue()
     dialog.exec();
 }
 
+void MainWindow::showOptions()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("Options"));
+    auto* form = new QFormLayout(&dialog);
+    auto* defaultSegments = new QSpinBox;
+    defaultSegments->setRange(1, 32);
+    defaultSegments->setValue(8);
+    auto* defaultSpeedLimit = new QSpinBox;
+    defaultSpeedLimit->setRange(0, 1024 * 1024);
+    defaultSpeedLimit->setSuffix(QStringLiteral(" KB/s"));
+    auto* clipboardMonitor = new QCheckBox(QStringLiteral("Clipboard monitor"));
+    clipboardMonitor->setChecked(false);
+    form->addRow(QStringLiteral("Default segments:"), defaultSegments);
+    form->addRow(QStringLiteral("Default speed limit:"), defaultSpeedLimit);
+    form->addRow(QStringLiteral("Integration:"), clipboardMonitor);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    form->addWidget(buttons);
+    dialog.exec();
+}
+
+void MainWindow::showAbout()
+{
+    QMessageBox::about(this,
+                       QStringLiteral("qtIDM"),
+                       QStringLiteral("qtIDM\nLinux-native Qt download manager\nOriginal implementation."));
+}
+
 void MainWindow::resumeSelected()
 {
     const auto selected = downloads_->selectedItems();
@@ -373,8 +404,8 @@ void MainWindow::buildActions()
     toolbar->addAction(QIcon::fromTheme(QStringLiteral("folder-remote")), QStringLiteral("Grabber"), this, &MainWindow::grabSite);
     toolbar->addAction(QIcon::fromTheme(QStringLiteral("package-x-generic")), QStringLiteral("ZIP"), this, &MainWindow::previewZip);
     toolbar->addSeparator();
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("preferences-system")), QStringLiteral("Options"));
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("help-about")), QStringLiteral("Tell a Friend"));
+    toolbar->addAction(QIcon::fromTheme(QStringLiteral("preferences-system")), QStringLiteral("Options"), this, &MainWindow::showOptions);
+    toolbar->addAction(QIcon::fromTheme(QStringLiteral("help-about")), QStringLiteral("About"), this, &MainWindow::showAbout);
 }
 
 void MainWindow::buildLayout()

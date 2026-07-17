@@ -17,17 +17,39 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Test)
 find_package(CURL REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
+include(GNUInstallDirs)
 
-add_compile_options(
-    -Wall
-    -Wextra
-    -Wpedantic
-    -O3
-    -march=native
-    -flto
+set(QTIDM_CHROME_EXTENSION_ID "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" CACHE STRING "Chrome extension ID allowed to use native messaging")
+set(QTIDM_FIREFOX_EXTENSION_ID "qtidm@io.github.qtidm" CACHE STRING "Firefox extension ID allowed to use native messaging")
+option(QTIDM_ENABLE_NATIVE_TUNING "Build for the current CPU with -march=native" OFF)
+option(QTIDM_INSTALL_NATIVE_MESSAGING_HOSTS "Install browser native messaging host manifests" ON)
+
+if(NOT QTIDM_CHROME_EXTENSION_ID MATCHES "^[a-p]{32}$")
+    message(FATAL_ERROR "QTIDM_CHROME_EXTENSION_ID must be a 32-character Chrome extension ID using letters a-p.")
+endif()
+
+configure_file(
+    browser/native/io.github.qtidm.native.chrome.json.in
+    ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.chrome.json
+    @ONLY
 )
 
-add_link_options(-flto)
+configure_file(
+    browser/native/io.github.qtidm.native.firefox.json.in
+    ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.firefox.json
+    @ONLY
+)
+
+add_compile_options(-Wall -Wextra -Wpedantic)
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_compile_options(-O3 -flto)
+    add_link_options(-flto)
+endif()
+
+if(QTIDM_ENABLE_NATIVE_TUNING)
+    add_compile_options(-march=native)
+endif()
 
 set(QTIDM_SOURCES
     src/app/Paths.cpp
@@ -159,6 +181,7 @@ add_executable(qtIDM_packaging_metadata_tests
 )
 
 target_compile_definitions(qtIDM_packaging_metadata_tests PRIVATE QTIDM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(qtIDM_packaging_metadata_tests PRIVATE QTIDM_BINARY_DIR="${CMAKE_BINARY_DIR}")
 target_link_libraries(qtIDM_packaging_metadata_tests PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME qtIDM_packaging_metadata_tests COMMAND qtIDM_packaging_metadata_tests)
 
@@ -176,7 +199,9 @@ install(FILES assets/io.github.qtidm.qtidm.desktop DESTINATION share/application
 install(FILES assets/io.github.qtidm.qtidm.svg DESTINATION share/icons/hicolor/scalable/apps)
 install(FILES assets/io.github.qtidm.qtidm.metainfo.xml DESTINATION share/metainfo)
 install(FILES assets/io.github.qtidm.qtidm.xml DESTINATION share/mime/packages)
-install(FILES browser/native/io.github.qtidm.native.firefox.json DESTINATION lib/mozilla/native-messaging-hosts)
-install(FILES browser/native/io.github.qtidm.native.chrome.json DESTINATION etc/opt/chrome/native-messaging-hosts)
+if(QTIDM_INSTALL_NATIVE_MESSAGING_HOSTS)
+    install(FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.firefox.json DESTINATION ${CMAKE_INSTALL_LIBDIR}/mozilla/native-messaging-hosts)
+    install(FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.chrome.json DESTINATION ${CMAKE_INSTALL_FULL_SYSCONFDIR}/opt/chrome/native-messaging-hosts)
+endif()
 install(DIRECTORY browser/chrome DESTINATION share/qtidm/browser)
 install(DIRECTORY browser/firefox DESTINATION share/qtidm/browser)

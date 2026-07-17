@@ -5,5 +5,5 @@ usr/share/icons/hicolor/scalable/apps/io.github.qtidm.qtidm.svg
 usr/share/metainfo/io.github.qtidm.qtidm.metainfo.xml
 usr/share/mime/packages/io.github.qtidm.qtidm.xml
 usr/lib/mozilla/native-messaging-hosts/io.github.qtidm.native.firefox.json
-usr/etc/opt/chrome/native-messaging-hosts/io.github.qtidm.native.chrome.json etc/opt/chrome/native-messaging-hosts
+etc/opt/chrome/native-messaging-hosts/io.github.qtidm.native.chrome.json
 usr/share/qtidm/browser

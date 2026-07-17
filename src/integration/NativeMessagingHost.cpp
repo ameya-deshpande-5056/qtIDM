@@ -1,8 +1,11 @@
 #include <QCoreApplication>
 #include <QDBusConnection>
 #include <QDBusInterface>
+#include <QDBusMessage>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
+#include <QThread>
 #include <QVariantMap>
 #include <iostream>
 
@@ -32,15 +35,26 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    QDBusInterface iface(QStringLiteral("io.github.qtidm"),
-                         QStringLiteral("/io/github/qtidm/Application"),
-                         QStringLiteral("io.github.qtidm.Application"),
-                         QDBusConnection::sessionBus());
     QVariantMap headers;
     const auto headerObject = object.value(QStringLiteral("headers")).toObject();
     for (auto it = headerObject.begin(); it != headerObject.end(); ++it) {
         headers.insert(it.key(), it.value().toVariant());
     }
-    iface.call(QStringLiteral("AddUrl"), url, headers);
-    return 0;
+    for (int attempt = 0; attempt < 50; ++attempt) {
+        QDBusInterface iface(QStringLiteral("io.github.qtidm"),
+                             QStringLiteral("/io/github/qtidm/Application"),
+                             QStringLiteral("io.github.qtidm.Application"),
+                             QDBusConnection::sessionBus());
+        if (iface.isValid()) {
+            const auto reply = iface.call(QStringLiteral("AddUrl"), url, headers);
+            if (reply.type() != QDBusMessage::ErrorMessage) {
+                return 0;
+            }
+        }
+        if (attempt == 0) {
+            QProcess::startDetached(QStringLiteral("qtIDM"));
+        }
+        QThread::msleep(100);
+    }
+    return 2;
 }

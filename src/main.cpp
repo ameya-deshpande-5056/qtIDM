@@ -8,6 +8,9 @@
 
 #include <QApplication>
 #include <QMessageBox>
+#include <QStringList>
+#include <QTimer>
+#include <QUrl>
 #include <cstdio>
 
 int main(int argc, char** argv)
@@ -28,11 +31,18 @@ int main(int argc, char** argv)
     qRegisterMetaType<qtidm::DownloadStatus>("qtidm::DownloadStatus");
     qRegisterMetaType<QVector<qtidm::SegmentInfo>>("QVector<qtidm::SegmentInfo>");
 
+    QStringList startupArgs;
+    for (const auto& arg : app.arguments().mid(1)) {
+        const QUrl url(arg);
+        if (!arg.startsWith(QLatin1String("--")) && url.isValid() && !url.scheme().isEmpty()) {
+            startupArgs.append(arg);
+        }
+    }
     qtidm::Paths::ensureRuntimeDirs();
 
     qtidm::SingleInstance singleInstance;
     if (!singleInstance.acquire()) {
-        singleInstance.notifyExistingInstance(app.arguments().mid(1));
+        singleInstance.notifyExistingInstance(startupArgs);
         return 0;
     }
 
@@ -53,6 +63,11 @@ int main(int argc, char** argv)
 
     downloader.start();
     window.show();
+    QTimer::singleShot(0, &window, [&window, startupArgs] {
+        for (const auto& arg : startupArgs) {
+            window.addUrl(arg);
+        }
+    });
     const int rc = app.exec();
     downloader.stop();
     return rc;

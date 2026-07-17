@@ -37,6 +37,7 @@ struct CurlEpollDownloader::SegmentTransfer {
     QByteArray userPwdBytes;
     QByteArray proxyBytes;
     curl_slist* headers = nullptr;
+    bool requiresHttpPartialResponse = false;
 
     ~SegmentTransfer()
     {
@@ -72,6 +73,11 @@ qint64 batchReceived(const CurlEpollDownloader::DownloadBatch& batch)
     return received;
 }
 
+size_t discardCallback(char*, size_t size, size_t nmemb, void*)
+{
+    return size * nmemb;
+}
+
 void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDownloader::SegmentTransfer* transfer)
 {
     transfer->urlBytes = request.url.toString().toUtf8();
@@ -83,6 +89,7 @@ void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDo
     curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(easy, CURLOPT_FTP_RESPONSE_TIMEOUT, 30L);
     curl_easy_setopt(easy, CURLOPT_USE_SSL, CURLUSESSL_TRY);
+    curl_easy_setopt(easy, CURLOPT_FAILONERROR, 1L);
 
     if (!request.username.isEmpty() || !request.password.isEmpty()) {
         transfer->userPwdBytes = (request.username + QLatin1Char(':') + request.password).toUtf8();
@@ -348,6 +355,7 @@ void CurlEpollDownloader::addTransfer(QueuedRequest queued)
         const auto rangeStart = segment.start + segment.written;
         if (segment.end >= rangeStart && segmentCount > 1) {
             transfer->rangeBytes = QByteArray::number(rangeStart) + "-" + QByteArray::number(segment.end);
+            transfer->requiresHttpPartialResponse = queued.request.url.scheme().startsWith(QStringLiteral("http"));
             curl_easy_setopt(easy, CURLOPT_RANGE, transfer->rangeBytes.constData());
         }
         curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, &CurlEpollDownloader::writeCallback);
@@ -392,7 +400,7 @@ qint64 CurlEpollDownloader::probeSize(const DownloadRequest& request, bool* rang
     auto* easy = curl_easy_init();
     applyRequestOptions(easy, request, transfer.get());
     curl_easy_setopt(easy, CURLOPT_NOBODY, 1L);
-    curl_easy_setopt(easy, CURLOPT_HEADER, 1L);
+    curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, discardCallback);
     const auto rc = curl_easy_perform(easy);
     curl_off_t contentLength = -1;
     curl_easy_getinfo(easy, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &contentLength);
@@ -408,7 +416,7 @@ qint64 CurlEpollDownloader::probeSize(const DownloadRequest& request, bool* rang
     applyRequestOptions(easy, request, rangeProbe.get());
     rangeProbe->rangeBytes = "0-0";
     curl_easy_setopt(easy, CURLOPT_RANGE, rangeProbe->rangeBytes.constData());
-    curl_easy_setopt(easy, CURLOPT_NOBODY, 1L);
+    curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, discardCallback);
     rc = curl_easy_perform(easy);
     response = 0;
     curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &response);
@@ -469,18 +477,23 @@ void CurlEpollDownloader::checkCompleted()
         }
         auto transfer = std::move(transferIt->second);
         transfers_.erase(transferIt);
+        long response = 0;
+        curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &response);
         curl_multi_remove_handle(multi_, easy);
         curl_easy_cleanup(easy);
 
         auto batch = transfer->batch;
         auto& segment = batch->segments[transfer->segmentIndex];
         batch->activeSegments--;
-        if (message->data.result == CURLE_OK) {
+        if (message->data.result == CURLE_OK && response < 400 && (!transfer->requiresHttpPartialResponse || response == 206)) {
             segment.status = DownloadStatus::Completed;
         } else {
             batch->failed = true;
             segment.status = DownloadStatus::Failed;
-            emit statusChanged(batch->id, DownloadStatus::Failed, QString::fromUtf8(curl_easy_strerror(message->data.result)));
+            const auto messageText = transfer->requiresHttpPartialResponse && response != 206
+                ? QStringLiteral("server did not honor requested byte range")
+                : QString::fromUtf8(curl_easy_strerror(message->data.result));
+            emit statusChanged(batch->id, DownloadStatus::Failed, messageText);
         }
 
         emit segmentsChanged(batch->id, batch->segments);

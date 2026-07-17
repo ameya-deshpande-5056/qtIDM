@@ -32,6 +32,8 @@ private slots:
     void previewZip();
     void grabSite();
     void showQueue();
+    void showOptions();
+    void showAbout();
     void resumeSelected();
     void pauseSelected();
     void cancelSelected();

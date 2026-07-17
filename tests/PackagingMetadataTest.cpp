@@ -20,8 +20,8 @@ private slots:
     void browserNativeManifestsAreValidJson()
     {
         const QStringList paths {
-            QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/browser/native/io.github.qtidm.native.chrome.json"),
-            QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/browser/native/io.github.qtidm.native.firefox.json")
+            QStringLiteral(QTIDM_BINARY_DIR) + QStringLiteral("/generated/browser/native/io.github.qtidm.native.chrome.json"),
+            QStringLiteral(QTIDM_BINARY_DIR) + QStringLiteral("/generated/browser/native/io.github.qtidm.native.firefox.json")
         };
         for (const auto& path : paths) {
             QFile file(path);

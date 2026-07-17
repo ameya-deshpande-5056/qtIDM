@@ -16,6 +16,9 @@ permissions:
 jobs:
   build-release:
     runs-on: ubuntu-24.04
+    env:
+      DEV_CHROME_EXTENSION_ID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      QTIDM_CHROME_EXTENSION_ID: ${{ vars.QTIDM_CHROME_EXTENSION_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -24,8 +27,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build g++ python3 xvfb dbus-x11 qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper devscripts appstream flatpak flatpak-builder fuse libfuse2
 
+      - name: Validate release extension IDs
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [ -z "${QTIDM_CHROME_EXTENSION_ID:-}" ] || [ "${QTIDM_CHROME_EXTENSION_ID}" = "${DEV_CHROME_EXTENSION_ID}" ]; then
+            echo "Set repository variable QTIDM_CHROME_EXTENSION_ID to the published Chrome extension ID before tagging a release." >&2
+            exit 1
+          fi
+
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: |
+          CHROME_ID="${QTIDM_CHROME_EXTENSION_ID:-$DEV_CHROME_EXTENSION_ID}"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DQTIDM_CHROME_EXTENSION_ID="$CHROME_ID"
 
       - name: Build
         run: cmake --build build

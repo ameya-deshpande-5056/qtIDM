@@ -27,5 +27,6 @@ Implemented original Linux-native functionality:
 
 Known limitations:
 
-- Browser extension IDs must be filled in after local signing/installation.
+- Chrome release builds require `QTIDM_CHROME_EXTENSION_ID`; Firefox uses `qtidm@io.github.qtidm`.
+- Flatpak builds do not install host browser native messaging manifests; use a host package for browser integration.
 - This is an original IDM-like Linux application, not a proprietary IDM clone.

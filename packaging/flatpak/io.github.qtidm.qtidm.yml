@@ -11,6 +11,8 @@ finish-args:
 modules:
   - name: qtIDM
     buildsystem: cmake-ninja
+    config-opts:
+      - -DQTIDM_INSTALL_NATIVE_MESSAGING_HOSTS=OFF
     sources:
       - type: dir
         path: ../..

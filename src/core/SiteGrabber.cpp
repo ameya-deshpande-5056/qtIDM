@@ -1,5 +1,6 @@
 #include "core/SiteGrabber.h"
 
+#include <QDir>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QtGlobal>
@@ -15,13 +16,21 @@ size_t collect(char* ptr, size_t size, size_t nmemb, void* userdata)
     return size * nmemb;
 }
 
-QString safeFileName(const QUrl& url)
+QString safePath(const QUrl& url)
 {
-    auto name = QFileInfo(url.path()).fileName();
-    if (name.isEmpty()) {
-        name = QStringLiteral("index.html");
+    auto path = url.path();
+    if (path.isEmpty() || path.endsWith(QLatin1Char('/'))) {
+        path += QStringLiteral("index.html");
     }
-    return name.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")), QStringLiteral("_"));
+    if (path.startsWith(QLatin1Char('/'))) {
+        path.remove(0, 1);
+    }
+    const auto parts = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    QStringList safeParts;
+    for (auto part : parts) {
+        safeParts.append(part.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")), QStringLiteral("_")));
+    }
+    return safeParts.isEmpty() ? QStringLiteral("index.html") : safeParts.join(QLatin1Char('/'));
 }
 }
 
@@ -60,7 +69,7 @@ void SiteGrabber::crawl(const QUrl& url, const QString& targetDir, int depth, QL
 
     DownloadRequest page;
     page.url = url;
-    page.targetPath = targetDir + QLatin1Char('/') + safeFileName(url);
+    page.targetPath = QDir(targetDir).filePath(safePath(url));
     page.category = QStringLiteral("Site");
     page.segments = 4;
     output->append(page);

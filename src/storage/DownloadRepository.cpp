@@ -82,6 +82,7 @@ bool DownloadRepository::upsertDownload(const DownloadRecord& record)
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        execSql(db_, "ROLLBACK;", nullptr);
         return false;
     }
     sqlite3_bind_text(stmt, 1, record.id.toUtf8().constData(), -1, SQLITE_TRANSIENT);
@@ -101,9 +102,18 @@ bool DownloadRepository::upsertDownload(const DownloadRecord& record)
         return false;
     }
     sqlite3_stmt* deleteStmt = nullptr;
-    sqlite3_prepare_v2(db_, "DELETE FROM segments WHERE download_id=?;", -1, &deleteStmt, nullptr);
+    if (sqlite3_prepare_v2(db_, "DELETE FROM segments WHERE download_id=?;", -1, &deleteStmt, nullptr) != SQLITE_OK) {
+        lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        execSql(db_, "ROLLBACK;", nullptr);
+        return false;
+    }
     sqlite3_bind_text(deleteStmt, 1, record.id.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-    sqlite3_step(deleteStmt);
+    if (sqlite3_step(deleteStmt) != SQLITE_DONE) {
+        lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        sqlite3_finalize(deleteStmt);
+        execSql(db_, "ROLLBACK;", nullptr);
+        return false;
+    }
     sqlite3_finalize(deleteStmt);
 
     constexpr auto segmentSql =
@@ -183,9 +193,18 @@ bool DownloadRepository::updateSegments(const QString& id, const QVector<Segment
         return false;
     }
     sqlite3_stmt* deleteStmt = nullptr;
-    sqlite3_prepare_v2(db_, "DELETE FROM segments WHERE download_id=?;", -1, &deleteStmt, nullptr);
+    if (sqlite3_prepare_v2(db_, "DELETE FROM segments WHERE download_id=?;", -1, &deleteStmt, nullptr) != SQLITE_OK) {
+        lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        execSql(db_, "ROLLBACK;", nullptr);
+        return false;
+    }
     sqlite3_bind_text(deleteStmt, 1, id.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-    sqlite3_step(deleteStmt);
+    if (sqlite3_step(deleteStmt) != SQLITE_DONE) {
+        lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        sqlite3_finalize(deleteStmt);
+        execSql(db_, "ROLLBACK;", nullptr);
+        return false;
+    }
     sqlite3_finalize(deleteStmt);
 
     constexpr auto sql = "INSERT INTO segments(download_id,segment_index,range_start,range_end,written,status) VALUES(?,?,?,?,?,?);";
@@ -219,13 +238,26 @@ bool DownloadRepository::removeDownload(const QString& id)
         return false;
     }
     sqlite3_stmt* segmentStmt = nullptr;
-    sqlite3_prepare_v2(db_, "DELETE FROM segments WHERE download_id=?;", -1, &segmentStmt, nullptr);
+    if (sqlite3_prepare_v2(db_, "DELETE FROM segments WHERE download_id=?;", -1, &segmentStmt, nullptr) != SQLITE_OK) {
+        lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        execSql(db_, "ROLLBACK;", nullptr);
+        return false;
+    }
     sqlite3_bind_text(segmentStmt, 1, id.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-    sqlite3_step(segmentStmt);
+    if (sqlite3_step(segmentStmt) != SQLITE_DONE) {
+        lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        sqlite3_finalize(segmentStmt);
+        execSql(db_, "ROLLBACK;", nullptr);
+        return false;
+    }
     sqlite3_finalize(segmentStmt);
 
     sqlite3_stmt* stmt = nullptr;
-    sqlite3_prepare_v2(db_, "DELETE FROM downloads WHERE id=?;", -1, &stmt, nullptr);
+    if (sqlite3_prepare_v2(db_, "DELETE FROM downloads WHERE id=?;", -1, &stmt, nullptr) != SQLITE_OK) {
+        lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        execSql(db_, "ROLLBACK;", nullptr);
+        return false;
+    }
     sqlite3_bind_text(stmt, 1, id.toUtf8().constData(), -1, SQLITE_TRANSIENT);
     const auto rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);

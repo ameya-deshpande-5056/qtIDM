@@ -76,9 +76,15 @@ REPLACE_WITH_EXTENSION_ID
 
 Release builds should fail if the Chrome native host manifest still contains that value.
 
+## Flatpak Boundary
+
+Browser native messaging manifests must be installed on the host browser side. The Flatpak package does not install those host manifests because a browser cannot launch `/usr/bin/qtIDM-native-host` from inside the app sandbox.
+
+Use the `.deb` package or a separate host-side installer for browser integration.
+
 ## Future Improvement
 
-Use manifest templates:
+The repo uses manifest templates:
 
 ```text
 browser/native/io.github.qtidm.native.chrome.json.in

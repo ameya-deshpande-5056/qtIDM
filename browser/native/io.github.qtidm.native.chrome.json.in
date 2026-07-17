@@ -3,7 +3,7 @@
   "description": "qtIDM native messaging host",
   "path": "/usr/bin/qtIDM-native-host",
   "type": "stdio",
-  "allowed_extensions": [
-    "qtidm@io.github.qtidm"
+  "allowed_origins": [
+    "chrome-extension://@QTIDM_CHROME_EXTENSION_ID@/"
   ]
 }
