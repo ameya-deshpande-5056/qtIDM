@@ -59,6 +59,49 @@ sh packaging/build-appimage.sh
 sh packaging/build-flatpak.sh
 ```
 
+Local package prerequisites on Ubuntu:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y cmake ninja-build g++ qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper devscripts appstream flatpak flatpak-builder libfuse2
+```
+
+Build and test the Debian package:
+
+```bash
+sh packaging/build-deb.sh
+sudo apt-get install -y ../qtidm_0.1.0-1_amd64.deb
+qtIDM --version
+```
+
+Build and test the AppImage:
+
+```bash
+curl -L -o linuxdeploy.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+curl -L -o linuxdeploy-plugin-qt.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
+sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
+sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
+APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh
+chmod +x ./*.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./*.AppImage --version
+```
+
+Build and test the Flatpak bundle:
+
+```bash
+sh packaging/release/version-info.sh
+sh packaging/release/build-flatpak-bundle.sh
+flatpak install --user -y dist/qtIDM-0.1.0.flatpak
+flatpak run io.github.qtidm.qtidm --version
+```
+
+For release-equivalent local packaging with browser integration, set:
+
+```bash
+export QTIDM_CHROME_EXTENSION_ID=<your 32-character Chrome extension ID>
+```
+
 ## GitHub Actions
 
 The repo uses one workflow:
