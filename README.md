@@ -59,6 +59,42 @@ sh packaging/build-appimage.sh
 sh packaging/build-flatpak.sh
 ```
 
+## GitHub Actions
+
+The repo uses one workflow:
+
+```text
+.github/workflows/build-release.yml
+```
+
+Normal push or pull request:
+
+- installs dependencies,
+- configures CMake,
+- builds,
+- runs the full CTest suite.
+
+Weekly scheduled run:
+
+- runs the normal build and tests,
+- also runs the performance smoke test.
+
+Manual workflow dispatch:
+
+- runs build and tests,
+- builds `.deb`, AppImage, and Flatpak,
+- smoke-tests the packages,
+- uploads workflow artifacts,
+- does not publish a GitHub Release.
+
+Version tag push:
+
+- validates `QTIDM_CHROME_EXTENSION_ID`,
+- runs build and tests,
+- builds and smoke-tests packages,
+- uploads artifacts,
+- publishes the GitHub Release.
+
 ## Release
 
 Update `CMakeLists.txt` and `CHANGELOG.md`, then tag with the matching version:
