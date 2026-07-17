@@ -68,3 +68,4 @@ The single workflow `.github/workflows/build-release.yml` builds, tests, package
 
 - `docs/TEST_PLAN.md`
 - `docs/LINUX_DIFFERENCES.md`
+- `docs/BROWSER_EXTENSION_PUBLISHING.md`
