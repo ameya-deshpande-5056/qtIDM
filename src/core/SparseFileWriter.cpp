@@ -31,7 +31,10 @@ bool SparseFileWriter::open(const QString& path, std::int64_t size)
         return false;
     }
     fileSize_ = size;
-    if (size > 0 && ::ftruncate(fd_, size) != 0) {
+    // Unknown-length downloads start from an empty file. Without truncation,
+    // a shorter replacement download could leave bytes from an older file.
+    const auto initialSize = size > 0 ? size : 0;
+    if (::ftruncate(fd_, initialSize) != 0) {
         lastError_ = QString::fromLocal8Bit(std::strerror(errno));
         ::close(fd_);
         fd_ = -1;

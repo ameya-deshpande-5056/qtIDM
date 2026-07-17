@@ -1,4 +1,5 @@
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QtTest/QtTest>
@@ -46,6 +47,14 @@ private slots:
             const auto doc = QJsonDocument::fromJson(file.readAll());
             QVERIFY(doc.isObject());
             QCOMPARE(doc.object().value(QStringLiteral("name")).toString(), QStringLiteral("qtIDM Integration"));
+            const auto root = QFileInfo(path).absolutePath();
+            const auto action = doc.object().value(
+                doc.object().value(QStringLiteral("manifest_version")).toInt() == 3
+                    ? QStringLiteral("action") : QStringLiteral("browser_action")).toObject();
+            QCOMPARE(action.value(QStringLiteral("default_popup")).toString(), QStringLiteral("popup.html"));
+            QVERIFY(QFileInfo::exists(root + QStringLiteral("/popup.html")));
+            QVERIFY(QFileInfo::exists(root + QStringLiteral("/popup.css")));
+            QVERIFY(QFileInfo::exists(root + QStringLiteral("/popup.js")));
         }
     }
 };

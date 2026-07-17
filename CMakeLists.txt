@@ -23,6 +23,7 @@ set(QTIDM_CHROME_EXTENSION_ID "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" CACHE STRING "C
 set(QTIDM_FIREFOX_EXTENSION_ID "qtidm@io.github.qtidm" CACHE STRING "Firefox extension ID allowed to use native messaging")
 option(QTIDM_ENABLE_NATIVE_TUNING "Build for the current CPU with -march=native" OFF)
 option(QTIDM_INSTALL_NATIVE_MESSAGING_HOSTS "Install browser native messaging host manifests" ON)
+option(QTIDM_BUILD_TESTS "Build qtIDM test executables" ON)
 
 string(LENGTH "${QTIDM_CHROME_EXTENSION_ID}" QTIDM_CHROME_EXTENSION_ID_LENGTH)
 if(NOT QTIDM_CHROME_EXTENSION_ID_LENGTH EQUAL 32 OR NOT QTIDM_CHROME_EXTENSION_ID MATCHES "^[a-p]+$")
@@ -53,12 +54,14 @@ if(QTIDM_ENABLE_NATIVE_TUNING)
 endif()
 
 set(QTIDM_SOURCES
+    src/app/Logger.cpp
     src/app/Paths.cpp
     src/app/SingleInstance.cpp
     src/core/DownloadTypes.cpp
     src/core/CurlEpollDownloader.cpp
     src/core/DownloadScheduler.cpp
     src/core/SiteGrabber.cpp
+    src/core/MediaDownloader.cpp
     src/core/SparseFileWriter.cpp
     src/core/ZipPreview.cpp
     src/integration/ImportExportService.cpp
@@ -87,10 +90,14 @@ target_link_libraries(qtIDM PRIVATE
 
 add_executable(qtIDM-native-host
     src/integration/NativeMessagingHost.cpp
+    src/app/Logger.cpp
+    src/app/Paths.cpp
 )
 
+target_include_directories(qtIDM-native-host PRIVATE src)
 target_link_libraries(qtIDM-native-host PRIVATE Qt6::Core Qt6::DBus)
 
+if(QTIDM_BUILD_TESTS)
 enable_testing()
 
 add_executable(qtIDM_core_tests
@@ -167,6 +174,18 @@ target_compile_definitions(qtIDM_downloader_integration_tests PRIVATE QTIDM_SOUR
 target_link_libraries(qtIDM_downloader_integration_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl Threads::Threads)
 add_test(NAME qtIDM_downloader_integration_tests COMMAND qtIDM_downloader_integration_tests)
 
+add_executable(qtIDM_media_downloader_tests
+    tests/MediaDownloaderTest.cpp
+    src/app/Logger.cpp
+    src/app/Paths.cpp
+    src/core/DownloadTypes.cpp
+    src/core/MediaDownloader.cpp
+)
+
+target_include_directories(qtIDM_media_downloader_tests PRIVATE src)
+target_link_libraries(qtIDM_media_downloader_tests PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME qtIDM_media_downloader_tests COMMAND qtIDM_media_downloader_tests)
+
 add_executable(qtIDM_performance_smoke_tests
     tests/PerformanceSmokeTest.cpp
     src/core/DownloadTypes.cpp
@@ -194,6 +213,7 @@ add_executable(qtIDM_zip_preview_tests
 target_include_directories(qtIDM_zip_preview_tests PRIVATE src)
 target_link_libraries(qtIDM_zip_preview_tests PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME qtIDM_zip_preview_tests COMMAND qtIDM_zip_preview_tests)
+endif()
 
 install(TARGETS qtIDM qtIDM-native-host RUNTIME DESTINATION bin)
 install(FILES assets/io.github.qtidm.qtidm.desktop DESTINATION share/applications)

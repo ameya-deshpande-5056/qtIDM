@@ -12,6 +12,7 @@ modules:
   - name: qtIDM
     buildsystem: cmake-ninja
     config-opts:
+      - -DQTIDM_BUILD_TESTS=OFF
       - -DQTIDM_INSTALL_NATIVE_MESSAGING_HOSTS=OFF
     sources:
       - type: dir

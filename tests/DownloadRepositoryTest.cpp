@@ -74,6 +74,16 @@ private slots:
         records = repository.listDownloads();
         QCOMPARE(static_cast<int>(records.first().status), static_cast<int>(qtidm::DownloadStatus::Canceled));
 
+        record.url = QUrl(QStringLiteral("https://mirror.example/archive.zip?refreshed=1"));
+        record.category = QStringLiteral("Documents");
+        record.status = qtidm::DownloadStatus::Paused;
+        record.completedBytes = 110;
+        QVERIFY(repository.upsertDownload(record));
+        records = repository.listDownloads();
+        QCOMPARE(records.first().url, record.url);
+        QCOMPARE(records.first().category, QStringLiteral("Documents"));
+        QCOMPARE(records.first().segments.size(), 3);
+
         QVERIFY(repository.removeDownload(record.id));
         QVERIFY(repository.listDownloads().isEmpty());
     }

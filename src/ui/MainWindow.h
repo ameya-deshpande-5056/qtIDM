@@ -2,10 +2,12 @@
 
 #include "core/CurlEpollDownloader.h"
 #include "core/DownloadScheduler.h"
+#include "core/MediaDownloader.h"
 #include "storage/DownloadRepository.h"
 #include "theme/ThemeManager.h"
 
 #include <QMainWindow>
+#include <QMetaObject>
 #include <QSystemTrayIcon>
 #include <QTableWidget>
 #include <QTreeWidget>
@@ -19,6 +21,7 @@ public:
 
 public slots:
     void addUrl(QString url = {}, QVariantMap headers = {});
+    void addUrls(QStringList urls, QVariantMap headers = {});
     void raiseAndActivate();
 
 private slots:
@@ -38,22 +41,28 @@ private slots:
     void pauseSelected();
     void cancelSelected();
     void deleteSelected();
+    void propertiesSelected();
 
 private:
     void buildActions();
     void buildLayout();
     void buildTray();
     void loadPersistedDownloads();
+    void configureClipboardMonitor();
+    void applyCategoryFilter();
     int rowForId(const QString& id) const;
     QString statusText(DownloadStatus status) const;
 
     CurlEpollDownloader& downloader_;
+    MediaDownloader mediaDownloader_;
     DownloadScheduler& scheduler_;
     DownloadRepository& repository_;
     ThemeManager& themeManager_;
     QTreeWidget* categories_ = nullptr;
     QTableWidget* downloads_ = nullptr;
     QSystemTrayIcon* tray_ = nullptr;
+    QMetaObject::Connection clipboardConnection_;
+    QString lastClipboardUrl_;
 };
 
 }

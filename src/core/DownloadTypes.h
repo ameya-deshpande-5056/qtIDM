@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QJsonObject>
 #include <QString>
+#include <QTime>
 #include <QUrl>
 #include <QVariantMap>
 #include <QVector>
@@ -20,6 +21,12 @@ enum class DownloadStatus {
     Canceled
 };
 
+enum class FileConflictPolicy {
+    AutoRename,
+    Overwrite,
+    Skip
+};
+
 struct SegmentInfo {
     int index = 0;
     std::int64_t start = 0;
@@ -29,16 +36,30 @@ struct SegmentInfo {
 };
 
 struct DownloadRequest {
+    QString scheduleId;
     QString existingId;
     QUrl url;
     QString targetPath;
     QString category;
+    QString queueName = QStringLiteral("Main");
     QString username;
     QString password;
     QString proxyUrl;
+    QString expectedSha256;
+    QString completionCommand;
     QDateTime scheduledAt;
+    QTime windowStart;
+    QTime windowEnd;
+    int allowedWeekdays = 0x7f;
     QVariantMap headers;
     int segments = 8;
+    int perHostConnectionLimit = 16;
+    bool dynamicSegmentation = true;
+    int maxRetries = 5;
+    int retryBaseDelayMs = 500;
+    int priority = 0;
+    int repeatIntervalSeconds = 0;
+    FileConflictPolicy fileConflictPolicy = FileConflictPolicy::AutoRename;
     qint64 speedLimitBytesPerSecond = 0;
     qint64 expectedTotalBytes = -1;
     QVector<SegmentInfo> resumeSegments;
@@ -59,6 +80,8 @@ struct DownloadRecord {
 
 QString toStorageValue(DownloadStatus status);
 DownloadStatus downloadStatusFromStorage(QStringView value);
+QString toStorageValue(FileConflictPolicy policy);
+FileConflictPolicy fileConflictPolicyFromStorage(QStringView value);
 QJsonObject requestToJson(const DownloadRequest& request);
 DownloadRequest requestFromJson(const QJsonObject& object);
 QJsonObject recordToJson(const DownloadRecord& record);
@@ -67,6 +90,7 @@ DownloadRecord recordFromJson(const QJsonObject& object);
 }
 
 Q_DECLARE_METATYPE(qtidm::DownloadStatus)
+Q_DECLARE_METATYPE(qtidm::DownloadRequest)
 Q_DECLARE_METATYPE(qtidm::DownloadRecord)
 Q_DECLARE_METATYPE(qtidm::SegmentInfo)
 Q_DECLARE_METATYPE(QVector<qtidm::SegmentInfo>)

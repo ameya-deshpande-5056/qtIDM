@@ -3,6 +3,9 @@
 #include <QObject>
 #include <QString>
 
+class QFileSystemWatcher;
+class QTimer;
+
 namespace qtidm {
 
 enum class ThemeMode {
@@ -16,15 +19,24 @@ public:
     explicit ThemeManager(QObject* parent = nullptr);
     ThemeMode mode() const;
     QString styleSheet() const;
+    static ThemeMode detectSystemTheme();
 
 public slots:
     void refreshFromPortal();
+    void refreshFromSystemTheme();
 
 signals:
     void themeChanged();
 
 private:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void setupThemeWatchers();
+    void scheduleThemeRefresh();
+    void refreshTheme();
+
     ThemeMode mode_ = ThemeMode::Light;
+    QFileSystemWatcher* watcher_ = nullptr;
+    QTimer* refreshTimer_ = nullptr;
 };
 
 }

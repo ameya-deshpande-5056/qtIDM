@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="mark">q</div>
+    <div><strong>qtIDM Capture</strong><span id="pageTitle">Current tab</span></div>
+    <span id="count" class="count">0</span>
+  </header>
+  <nav>
+    <button class="tab active" data-panel="captures">CAPTURES</button>
+    <button class="tab" data-panel="add">ADD URL</button>
+    <button class="tab" data-panel="settings">SETTINGS</button>
+  </nav>
+  <section id="captures" class="panel active">
+    <div class="section-head"><span id="status">Scanning this tab...</span><button id="clear" class="text-button">Clear</button></div>
+    <main id="items"></main>
+    <div id="empty" class="empty" hidden><b>No downloadable media yet</b><span>Start playback on the page, then reopen this panel.</span></div>
+  </section>
+  <section id="add" class="panel">
+    <label for="manualUrl">Download addresses, one per line</label>
+    <textarea id="manualUrl" rows="6" placeholder="https://example.com/file-1.zip&#10;https://example.com/file-2.zip"></textarea>
+    <button id="sendManual" class="primary">SEND TO qtIDM</button>
+    <p class="hint">Cookies, referrer, and your browser user agent are attached automatically.</p>
+  </section>
+  <section id="settings" class="panel">
+    <label class="switch-row"><span><b>Intercept browser downloads</b><small>Cancel new browser downloads and send them to qtIDM.</small></span><input id="interceptDownloads" type="checkbox"><i></i></label>
+    <label class="switch-row"><span><b>Capture page media</b><small>Detect HLS, DASH, direct video, and direct audio.</small></span><input id="captureMedia" type="checkbox"><i></i></label>
+    <p class="hint">DRM-protected streams cannot be downloaded.</p>
+  </section>
+  <footer id="notice">Ready</footer>
+  <script src="popup.js"></script>
+</body>
+</html>

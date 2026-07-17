@@ -16,10 +16,12 @@ public:
 public slots:
     Q_SCRIPTABLE void Activate();
     Q_SCRIPTABLE void AddUrl(const QString& url, const QVariantMap& headers);
+    Q_SCRIPTABLE void AddUrls(const QStringList& urls, const QVariantMap& headers);
 
 signals:
     void activateRequested();
     void urlReceived(QString url, QVariantMap headers);
+    void urlsReceived(QStringList urls, QVariantMap headers);
 };
 
 }

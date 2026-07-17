@@ -1,8 +1,12 @@
 {
   "manifest_version": 2,
   "name": "qtIDM Integration",
-  "version": "0.1.0",
-  "permissions": ["contextMenus", "nativeMessaging", "downloads", "cookies", "tabs", "webRequest", "<all_urls>"],
+  "version": "0.3.0",
+  "permissions": ["contextMenus", "nativeMessaging", "downloads", "cookies", "tabs", "storage", "webRequest", "<all_urls>"],
   "background": { "scripts": ["background.js"] },
+  "browser_action": {
+    "default_title": "Download detected media with qtIDM",
+    "default_popup": "popup.html"
+  },
   "applications": { "gecko": { "id": "qtidm@io.github.qtidm" } }
 }

@@ -33,6 +33,7 @@ signals:
     void progressChanged(QString id, qint64 received, qint64 total, double bytesPerSecond);
     void segmentsChanged(QString id, QVector<qtidm::SegmentInfo> segments);
     void statusChanged(QString id, qtidm::DownloadStatus status, QString message);
+    void hostConnectionCountChanged(QString host, int activeConnections);
 
 public:
     struct DownloadBatch;
@@ -51,12 +52,20 @@ private:
     void run();
     void wake();
     void addPendingTransfers();
+    void addDueRetries();
     void addTransfer(QueuedRequest queued);
+    void addSegmentTransfer(const std::shared_ptr<DownloadBatch>& batch, int segmentIndex, int attempt = 0);
+    void startQueuedSegments(const std::shared_ptr<DownloadBatch>& batch);
+    void refillQueuedSegments();
+    int activeConnectionsForHost(const QString& host) const;
     void updateSocket(curl_socket_t socket, int action);
     void removeSocket(curl_socket_t socket);
     qint64 probeSize(const DownloadRequest& request, bool* rangeSupported);
     void applyControlRequests();
     void checkCompleted();
+    void retryTransfer(std::unique_ptr<SegmentTransfer> transfer, long responseCode, CURLcode result);
+    bool verifyCompletedDownload(const std::shared_ptr<DownloadBatch>& batch, QString* error) const;
+    bool publishCompletedDownload(const std::shared_ptr<DownloadBatch>& batch, QString* error) const;
 
     std::atomic_bool running_ = false;
     std::jthread thread_;
@@ -70,6 +79,13 @@ private:
     std::unordered_map<CURL*, std::unique_ptr<SegmentTransfer>> transfers_;
     std::unordered_map<curl_socket_t, int> sockets_;
     QHash<QString, std::shared_ptr<DownloadBatch>> batches_;
+    struct DelayedRetry {
+        qint64 dueAtMs = 0;
+        std::shared_ptr<DownloadBatch> batch;
+        int segmentIndex = 0;
+        int attempt = 0;
+    };
+    QVector<DelayedRetry> retries_;
 };
 
 }

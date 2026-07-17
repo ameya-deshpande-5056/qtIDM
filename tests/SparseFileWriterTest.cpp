@@ -49,6 +49,27 @@ private slots:
         QVERIFY(!writer.writeAt(0, data.constData(), data.size()));
         QCOMPARE(writer.lastError(), QStringLiteral("writer is not open"));
     }
+
+    void truncatesExistingFileForUnknownLengthDownload()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const auto path = dir.path() + QStringLiteral("/unknown-length.bin");
+        QFile existing(path);
+        QVERIFY(existing.open(QIODevice::WriteOnly));
+        QVERIFY(existing.write(QByteArray(1024, 'x')) == 1024);
+        existing.close();
+
+        qtidm::SparseFileWriter writer;
+        QVERIFY(writer.open(path, -1));
+        const QByteArray data("new");
+        QVERIFY(writer.writeAt(0, data.constData(), data.size()));
+        writer.close();
+
+        QVERIFY(existing.open(QIODevice::ReadOnly));
+        QCOMPARE(existing.readAll(), data);
+    }
 };
 
 QTEST_MAIN(SparseFileWriterTest)

@@ -1,6 +1,7 @@
 #include "core/CurlEpollDownloader.h"
 
 #include <QElapsedTimer>
+#include <QCryptographicHash>
 #include <QFile>
 #include <QProcess>
 #include <QSignalSpy>
@@ -52,12 +53,14 @@ private slots:
 
         server_.setProgram(QStringLiteral("python3"));
         server_.setArguments({ QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/tests/fixtures/http_test_server.py") });
-        server_.setProcessChannelMode(QProcess::MergedChannels);
+        server_.setProcessChannelMode(QProcess::SeparateChannels);
         server_.start();
         QVERIFY(server_.waitForStarted());
-        QVERIFY(server_.waitForReadyRead(5000));
-        port_ = QString::fromUtf8(server_.readLine()).trimmed().toInt();
-        QVERIFY(port_ > 0);
+        QVERIFY2(server_.waitForReadyRead(5000), qPrintable(server_.errorString()));
+        const auto portText = QString::fromUtf8(server_.readLine()).trimmed();
+        port_ = portText.toInt();
+        QVERIFY2(port_ > 0, qPrintable(QStringLiteral("HTTP fixture did not report a port: %1")
+                                       .arg(QString::fromUtf8(server_.readAllStandardError()))));
     }
 
     void cleanupTestCase()
@@ -89,6 +92,60 @@ private slots:
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(file.size(), fixtureSize);
         QCOMPARE(file.readAll(), expectedPayload(fixtureSize));
+        QVERIFY(!QFileInfo::exists(request.targetPath + QStringLiteral(".part")));
+    }
+
+    void dynamicallyPlansMoreRangesThanConnections()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy addedSpy(&downloader, &qtidm::CurlEpollDownloader::downloadAdded);
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/range.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/dynamic.bin");
+        request.segments = 2;
+        request.dynamicSegmentation = true;
+        const auto id = downloader.enqueue(request);
+
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 15000));
+        downloader.stop();
+        QCOMPARE(addedSpy.size(), 1);
+        const auto record = addedSpy.first().first().value<qtidm::DownloadRecord>();
+        QVERIFY(record.segments.size() > request.segments);
+
+        QFile file(request.targetPath);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), expectedPayload(fixtureSize));
+    }
+
+    void enforcesSharedPerHostConnectionLimit()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        QSignalSpy connectionSpy(&downloader, &qtidm::CurlEpollDownloader::hostConnectionCountChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/slow.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/host-limited.bin");
+        request.segments = 8;
+        request.perHostConnectionLimit = 2;
+        const auto id = downloader.enqueue(request);
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 15000));
+        downloader.stop();
+
+        int maximumConnections = 0;
+        for (const auto& event : connectionSpy) {
+            maximumConnections = qMax(maximumConnections, event.at(1).toInt());
+        }
+        QCOMPARE(maximumConnections, 2);
     }
 
     void fallsBackWhenServerDoesNotSupportRanges()
@@ -136,6 +193,97 @@ private slots:
         downloader.stop();
     }
 
+    void retriesTemporaryServerFailures()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/flaky.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/flaky.bin");
+        request.segments = 1;
+        request.maxRetries = 3;
+        request.retryBaseDelayMs = 10;
+        const auto id = downloader.enqueue(request);
+
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 15000));
+        downloader.stop();
+
+        QFile file(request.targetPath);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), expectedPayload(fixtureSize));
+    }
+
+    void verifiesExpectedSha256()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest valid;
+        valid.url = QUrl(QStringLiteral("http://127.0.0.1:%1/range.bin").arg(port_));
+        valid.targetPath = dir.path() + QStringLiteral("/verified.bin");
+        valid.expectedSha256 = QString::fromLatin1(
+            QCryptographicHash::hash(expectedPayload(fixtureSize), QCryptographicHash::Sha256).toHex());
+        const auto validId = downloader.enqueue(valid);
+        QVERIFY(waitForStatus(statusSpy, validId, qtidm::DownloadStatus::Completed, 15000));
+
+        qtidm::DownloadRequest invalid = valid;
+        invalid.targetPath = dir.path() + QStringLiteral("/corrupt.bin");
+        invalid.expectedSha256 = QString(64, QLatin1Char('0'));
+        const auto invalidId = downloader.enqueue(invalid);
+        QString message;
+        QVERIFY(waitForStatus(statusSpy, invalidId, qtidm::DownloadStatus::Failed, 15000, &message));
+        QVERIFY(message.startsWith(QStringLiteral("SHA-256 mismatch:")));
+        downloader.stop();
+    }
+
+    void appliesDestinationConflictPolicies()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const auto target = dir.path() + QStringLiteral("/existing.bin");
+        QFile existing(target);
+        QVERIFY(existing.open(QIODevice::WriteOnly));
+        QCOMPARE(existing.write("keep"), qint64(4));
+        existing.close();
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy addedSpy(&downloader, &qtidm::CurlEpollDownloader::downloadAdded);
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest skip;
+        skip.url = QUrl(QStringLiteral("http://127.0.0.1:%1/range.bin").arg(port_));
+        skip.targetPath = target;
+        skip.fileConflictPolicy = qtidm::FileConflictPolicy::Skip;
+        const auto skipId = downloader.enqueue(skip);
+        QVERIFY(waitForStatus(statusSpy, skipId, qtidm::DownloadStatus::Canceled, 5000));
+        QVERIFY(existing.open(QIODevice::ReadOnly));
+        QCOMPARE(existing.readAll(), QByteArray("keep"));
+        existing.close();
+
+        qtidm::DownloadRequest rename = skip;
+        rename.fileConflictPolicy = qtidm::FileConflictPolicy::AutoRename;
+        const auto renameId = downloader.enqueue(rename);
+        QVERIFY(waitForStatus(statusSpy, renameId, qtidm::DownloadStatus::Completed, 15000));
+        downloader.stop();
+
+        QCOMPARE(addedSpy.size(), 1);
+        const auto renamedPath = addedSpy.first().first().value<qtidm::DownloadRecord>().targetPath;
+        QVERIFY(renamedPath.endsWith(QStringLiteral("existing (1).bin")));
+        QVERIFY(QFileInfo::exists(renamedPath));
+        QVERIFY(existing.open(QIODevice::ReadOnly));
+        QCOMPARE(existing.readAll(), QByteArray("keep"));
+    }
+
     void rejectsResumeWhenRemoteSizeChanged()
     {
         QTemporaryDir dir;
@@ -177,6 +325,8 @@ private slots:
         QTest::qWait(100);
         downloader.pause(pauseId);
         QVERIFY(waitForStatus(statusSpy, pauseId, qtidm::DownloadStatus::Paused, 5000));
+        QVERIFY(!QFileInfo::exists(pauseRequest.targetPath));
+        QVERIFY(QFileInfo::exists(pauseRequest.targetPath + QStringLiteral(".part")));
 
         qtidm::DownloadRequest cancelRequest;
         cancelRequest.url = QUrl(QStringLiteral("http://127.0.0.1:%1/slow.bin").arg(port_));

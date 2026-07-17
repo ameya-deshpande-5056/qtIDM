@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import base64
+import threading
 import time
 
 SIZE = 256 * 1024
 SLOW_SIZE = 1024 * 1024
+flaky_requests = 0
+active_slow_requests = 0
+maximum_slow_requests = 0
+stats_lock = threading.Lock()
 
 
 def byte_at(index):
@@ -28,6 +33,34 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_request(head_only=False)
 
     def handle_request(self, head_only):
+        global flaky_requests, maximum_slow_requests
+        if self.path.startswith("/reset-stats"):
+            with stats_lock:
+                maximum_slow_requests = 0
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if self.path.startswith("/stats"):
+            with stats_lock:
+                data = str(maximum_slow_requests).encode("ascii")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            if not head_only:
+                self.wfile.write(data)
+            return
+        if self.path.startswith("/flaky.bin"):
+            if not head_only and not self.headers.get("Range") and flaky_requests < 2:
+                flaky_requests += 1
+                self.send_response(503)
+                self.send_header("Retry-After", "0")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self.send_range(SIZE, head_only, accept_range=True)
+            return
         if self.path.startswith("/auth.bin"):
             expected = "Basic " + base64.b64encode(b"user:pass").decode("ascii")
             if self.headers.get("Authorization") != expected:
@@ -92,15 +125,25 @@ class Handler(BaseHTTPRequestHandler):
             self.write_body(0, size - 1, slow)
 
     def write_body(self, start, end, slow):
+        global active_slow_requests, maximum_slow_requests
+        if slow:
+            with stats_lock:
+                active_slow_requests += 1
+                maximum_slow_requests = max(maximum_slow_requests, active_slow_requests)
         chunk = 8192
         pos = start
-        while pos <= end:
-            next_end = min(end, pos + chunk - 1)
-            self.wfile.write(payload(pos, next_end))
-            self.wfile.flush()
-            pos = next_end + 1
+        try:
+            while pos <= end:
+                next_end = min(end, pos + chunk - 1)
+                self.wfile.write(payload(pos, next_end))
+                self.wfile.flush()
+                pos = next_end + 1
+                if slow:
+                    time.sleep(0.01)
+        finally:
             if slow:
-                time.sleep(0.01)
+                with stats_lock:
+                    active_slow_requests -= 1
 
 
 if __name__ == "__main__":

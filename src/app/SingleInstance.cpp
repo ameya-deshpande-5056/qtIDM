@@ -54,4 +54,9 @@ void SingleInstance::AddUrl(const QString& url, const QVariantMap& headers)
     emit urlReceived(url, headers);
 }
 
+void SingleInstance::AddUrls(const QStringList& urls, const QVariantMap& headers)
+{
+    emit urlsReceived(urls, headers);
+}
+
 }

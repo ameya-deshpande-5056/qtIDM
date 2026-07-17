@@ -1,4 +1,5 @@
 #include "app/Paths.h"
+#include "app/Logger.h"
 #include "app/SingleInstance.h"
 #include "core/CurlEpollDownloader.h"
 #include "core/DownloadScheduler.h"
@@ -8,6 +9,7 @@
 
 #include <QApplication>
 #include <QMessageBox>
+#include <QProcess>
 #include <QStringList>
 #include <QTimer>
 #include <QUrl>
@@ -19,6 +21,8 @@ int main(int argc, char** argv)
     QApplication::setApplicationName(QStringLiteral("qtIDM"));
     QApplication::setOrganizationName(QStringLiteral("qtIDM"));
     QApplication::setApplicationVersion(QStringLiteral(QTIDM_VERSION));
+    qtidm::Paths::ensureRuntimeDirs();
+    qtidm::Logger::install();
     if (app.arguments().contains(QStringLiteral("--version"))) {
         std::printf("qtIDM %s\n", QTIDM_VERSION);
         return 0;
@@ -38,8 +42,6 @@ int main(int argc, char** argv)
             startupArgs.append(arg);
         }
     }
-    qtidm::Paths::ensureRuntimeDirs();
-
     qtidm::SingleInstance singleInstance;
     if (!singleInstance.acquire()) {
         singleInstance.notifyExistingInstance(startupArgs);
@@ -57,9 +59,14 @@ int main(int argc, char** argv)
     scheduler.load();
     qtidm::ThemeManager themeManager;
     qtidm::MainWindow window(downloader, scheduler, repository, themeManager);
+    QObject::connect(&scheduler, &qtidm::DownloadScheduler::completionCommandRequested,
+                     &app, [](const QString& program, const QStringList& arguments) {
+                         QProcess::startDetached(program, arguments);
+                     });
 
     QObject::connect(&singleInstance, &qtidm::SingleInstance::activateRequested, &window, &qtidm::MainWindow::raiseAndActivate);
     QObject::connect(&singleInstance, &qtidm::SingleInstance::urlReceived, &window, [&window](const QString& url, const QVariantMap& headers) { window.addUrl(url, headers); });
+    QObject::connect(&singleInstance, &qtidm::SingleInstance::urlsReceived, &window, [&window](const QStringList& urls, const QVariantMap& headers) { window.addUrls(urls, headers); });
 
     downloader.start();
     window.show();

@@ -1,9 +1,12 @@
 {
   "manifest_version": 3,
   "name": "qtIDM Integration",
-  "version": "0.1.0",
-  "permissions": ["contextMenus", "nativeMessaging", "downloads", "cookies", "tabs", "webRequest"],
+  "version": "0.3.0",
+  "permissions": ["contextMenus", "nativeMessaging", "downloads", "cookies", "tabs", "storage", "webRequest"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "service_worker.js" },
-  "action": { "default_title": "Send to qtIDM" }
+  "action": {
+    "default_title": "Download detected media with qtIDM",
+    "default_popup": "popup.html"
+  }
 }

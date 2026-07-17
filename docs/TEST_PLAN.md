@@ -38,6 +38,9 @@
   - Persist future queue.
   - Reload queued requests.
   - Preserve URL and segment count.
+  - Persist named-queue concurrency and enabled state.
+  - Prevent paused queues from dispatching and resume them on enable.
+  - Assign stable schedule IDs and edit, reorder, and remove pending entries.
 
 - `qtIDM_packaging_metadata_tests`
   - Validate `.desktop` launch metadata.
@@ -63,6 +66,10 @@
   - Reject resume when remote size changes.
   - Pause active transfer.
   - Cancel active transfer.
+
+- `qtIDM_media_downloader_tests`
+  - Recognize HLS and MPEG-DASH manifest URLs.
+  - Download and mux separate DASH audio/video tracks with FFmpeg.
 
 - `qtIDM_performance_smoke_tests`
   - Seed 10,000 persisted downloads.
@@ -101,6 +108,8 @@ ctest --test-dir build --output-on-failure
 - ZIP preview shows ZIP64 entries over 4 GiB.
 - Import restores exported history.
 - Scheduler dispatches due queued download.
+- Scheduler edits, reorders, and removes pending entries.
+- Scheduler persists per-queue concurrency and pause/resume state.
 - `.deb` installs, launches, and removes cleanly.
 - AppImage runs on a clean supported distribution.
 - Flatpak bundle installs, launches, and has network/session-bus access.
