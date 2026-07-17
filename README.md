@@ -95,6 +95,40 @@ Version tag push:
 - uploads artifacts,
 - publishes the GitHub Release.
 
+## Chrome Extension ID
+
+For normal branch pushes, no Chrome extension ID is required. The workflow uses a development ID.
+
+Before publishing a release tag, add the real Chrome Web Store extension ID as a GitHub Actions repository variable:
+
+```text
+GitHub repo -> Settings -> Secrets and variables -> Actions -> Variables -> New repository variable
+```
+
+```text
+Name: QTIDM_CHROME_EXTENSION_ID
+Value: <your 32-character Chrome extension ID>
+```
+
+Do not hardcode the published ID in source files. The workflow passes it to CMake during release builds.
+
+## Browser Extensions
+
+The workflow does not currently build Chrome Web Store or Firefox AMO upload packages.
+
+Current behavior:
+
+- browser extension source is kept under `browser/chrome` and `browser/firefox`,
+- native messaging host manifests are generated during CMake configure,
+- app packages include the extension source for manual/developer installation,
+- release app packages use `QTIDM_CHROME_EXTENSION_ID` for the Chrome native host allowlist.
+
+Publishing browser extensions is a separate process. See:
+
+```text
+docs/BROWSER_EXTENSION_PUBLISHING.md
+```
+
 ## Release
 
 Update `CMakeLists.txt` and `CHANGELOG.md`, then tag with the matching version:
