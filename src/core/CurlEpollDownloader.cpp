@@ -401,7 +401,7 @@ qint64 CurlEpollDownloader::probeSize(const DownloadRequest& request, bool* rang
     applyRequestOptions(easy, request, transfer.get());
     curl_easy_setopt(easy, CURLOPT_NOBODY, 1L);
     curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, discardCallback);
-    const auto rc = curl_easy_perform(easy);
+    auto rc = curl_easy_perform(easy);
     curl_off_t contentLength = -1;
     curl_easy_getinfo(easy, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &contentLength);
     long response = 0;
