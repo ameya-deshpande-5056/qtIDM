@@ -279,7 +279,7 @@ The application and browser integrations have independent version tracks:
 | Component | Current version | Authoritative files |
 | --- | --- | --- |
 | qtIDM application and release tag | `0.1.1` / `v0.1.1` | `CMakeLists.txt`, with release notes in `CHANGELOG.md` |
-| Chrome and Firefox extensions | `0.3.1` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
+| Chrome and Firefox extensions | `0.3.2` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
 
 The two browser manifest versions must always match each other, but they do not
 need to match the application version. Increment the browser version before
@@ -380,7 +380,7 @@ Current behavior:
 - media captures can be reviewed and submitted individually,
 - manual batches are forwarded to one application-side batch editor,
 - interception and media capture can be toggled independently,
-- Firefox extension `0.3.1` requires Firefox 140 or newer for Mozilla's built-in
+- Firefox extension `0.3.2` requires Firefox 140 or newer for Mozilla's built-in
   data-collection consent declaration,
 - real Chrome and Firefox automation verifies download interception through a temporary native host.
 

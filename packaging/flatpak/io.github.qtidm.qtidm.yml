@@ -48,6 +48,7 @@ modules:
       - type: archive
         url: https://www.7-zip.org/a/7z2602-linux-x64.tar.xz
         sha256: 41aaba7b1235304ab5aa0624530c67ae829496cd29e875925271efdccc28c03e
+        strip-components: 0
 
   - name: yt-dlp
     buildsystem: simple
