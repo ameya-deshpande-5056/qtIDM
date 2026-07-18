@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added collision-free browser-extension version generation for signed CI runs and reruns.
+
 ## 0.1.1
 
 - Added generic MD5, SHA-1, SHA-256, and SHA-512 verification.

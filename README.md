@@ -281,11 +281,13 @@ The application and browser integrations have independent version tracks:
 | qtIDM application and release tag | `0.1.1` / `v0.1.1` | `CMakeLists.txt`, with release notes in `CHANGELOG.md` |
 | Chrome and Firefox extensions | `0.3.2` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
 
-The two browser manifest versions must always match each other, but they do not
-need to match the application version. Increment the browser version before
-every signed Firefox submission because AMO does not allow an already submitted
-version to be reused. Version changes do not alter the Chrome extension ID,
-Firefox add-on ID, Chrome signing key, or AMO API credentials.
+The two checked-in browser manifest versions must always match each other, but
+they do not need to match the application version. Signed CI builds derive a
+higher four-part version from this three-part base version, the GitHub workflow
+run number, and the run attempt. New runs and reruns therefore cannot reuse an
+AMO version. Local signing builds still use the checked-in version and must bump
+it manually before resubmission. Version changes do not alter the Chrome
+extension ID, Firefox add-on ID, Chrome signing key, or AMO API credentials.
 
 ## GitHub Actions
 
@@ -439,10 +441,11 @@ only version and release-metadata updates.
 
 1. Update the project version in `CMakeLists.txt` and the release notes in
    `CHANGELOG.md`.
-2. Increment the versions in `browser/chrome/manifest.json` and
-   `browser/firefox/manifest.json`. They must match each other, are independent
-   of the project version, and must not reuse a version previously submitted to
-   AMO.
+2. Review the three-part base versions in `browser/chrome/manifest.json` and
+   `browser/firefox/manifest.json`. They must match each other and are
+   independent of the project version. The release workflow automatically
+   derives a unique, increasing signed-package version; increment the base
+   manually only when starting a new extension release line or signing locally.
 3. Update the current-version table in this README.
 4. Confirm the signing variable and secrets described above are configured.
 5. Build and test the release candidate before committing:

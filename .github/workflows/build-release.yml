@@ -91,7 +91,8 @@ jobs:
 
       - name: Validate packaging metadata
         run: |
-          sh -n packaging/build-deb.sh packaging/build-appimage.sh packaging/build-flatpak.sh packaging/release/build-flatpak-bundle.sh packaging/appimage/AppRun
+          sh -n packaging/build-deb.sh packaging/build-appimage.sh packaging/build-flatpak.sh packaging/browser/ci-extension-version.sh packaging/release/build-flatpak-bundle.sh packaging/appimage/AppRun
+          sh packaging/browser/ci-extension-version.sh 1 1 >/dev/null
           desktop-file-validate assets/io.github.qtidm.qtidm.desktop
           appstreamcli validate --pedantic --no-net assets/io.github.qtidm.qtidm.appdata.xml
           flatpak-builder --show-manifest packaging/flatpak/io.github.qtidm.qtidm.yml >/dev/null
@@ -121,6 +122,14 @@ jobs:
           fi
           sh packaging/release/extract-changelog.sh "$VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Auto-increment browser extension version
+        id: extension-version
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign_extensions)
+        run: |
+          VERSION="$(sh packaging/browser/ci-extension-version.sh --apply "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Signing browser extensions as version $VERSION"
 
       - name: Build signed browser packages
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign_extensions)
