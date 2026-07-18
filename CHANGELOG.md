@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.1
+
 - Added generic MD5, SHA-1, SHA-256, and SHA-512 verification.
 - Persisted complete request options so resumed downloads retain headers, credentials, proxy, checksum, timeout, retry, and automation settings.
 - Added configurable concurrency, retry, timeout, redirects, proxy, User-Agent, and HTTP/FTP session data-quota defaults.

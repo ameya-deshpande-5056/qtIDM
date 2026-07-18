@@ -191,7 +191,7 @@ Build and test the Debian package:
 
 ```bash
 sh packaging/build-deb.sh
-sudo apt-get install -y ./dist/qtidm_0.1.0-1_amd64.deb
+sudo apt-get install -y ./dist/qtidm_0.1.1-1_amd64.deb
 qtIDM --version
 ```
 
@@ -216,7 +216,7 @@ Build and test the Flatpak bundle:
 ```bash
 sh packaging/release/version-info.sh
 sh packaging/release/build-flatpak-bundle.sh
-flatpak install --user -y dist/qtIDM-0.1.0.flatpak
+flatpak install --user -y dist/qtIDM-0.1.1.flatpak
 flatpak run io.github.qtidm.qtidm --version
 ```
 
@@ -412,8 +412,9 @@ Before tagging:
 4. Tag with the project version:
 
 ```bash
-git tag v0.1.0
-git push origin main --tags
+VERSION="$(sh packaging/release/version-info.sh)"
+git tag "v$VERSION"
+git push origin main "v$VERSION"
 ```
 
 The single workflow `.github/workflows/build-release.yml` builds, tests, packages, smoke-tests, uploads artifacts, and publishes the GitHub Release for version tags.
