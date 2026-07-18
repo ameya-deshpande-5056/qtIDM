@@ -184,7 +184,7 @@ Local package prerequisites on Ubuntu:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y cmake ninja-build g++ qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper-compat devscripts appstream flatpak flatpak-builder libfuse2 ffmpeg 7zip libsecret-tools yt-dlp
+sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper-compat devscripts appstream flatpak flatpak-builder libfuse2 ffmpeg 7zip libsecret-tools yt-dlp
 ```
 
 Build and test the Debian package:

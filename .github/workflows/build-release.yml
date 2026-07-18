@@ -47,7 +47,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ python3 xvfb dbus-x11 qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper devscripts appstream flatpak flatpak-builder libfuse2 ffmpeg 7zip zip unzip openssl libsecret-tools yt-dlp
+          sudo apt-get install -y build-essential cmake ninja-build python3 xvfb dbus-x11 qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper devscripts appstream flatpak flatpak-builder libfuse2 ffmpeg 7zip zip unzip openssl libsecret-tools yt-dlp
           PUPPETEER_SKIP_DOWNLOAD=true npm install --global puppeteer web-ext
 
       - name: Build development browser packages

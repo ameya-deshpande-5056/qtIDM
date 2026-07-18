@@ -10,7 +10,7 @@ OUTPUT="$ROOT/dist"
 trap 'rm -rf "$BUILD_ROOT"' EXIT HUP INT TERM
 mkdir -p "$WORK" "$OUTPUT"
 assert_not_home_workspace "$BUILD_ROOT"
-tar --exclude=build-deb-src --exclude='.build-deb.*' --exclude=build --exclude='build-*' --exclude=dist --exclude=.git -C "$ROOT" -cf - . | tar -C "$WORK" -xf -
+tar --exclude=build-deb-src --exclude='.build-deb.*' --exclude=build --exclude='build-*' --exclude=dist --exclude=.git --exclude=qtidm-chrome.pem -C "$ROOT" -cf - . | tar -C "$WORK" -xf -
 rm -rf "$WORK/debian"
 cp -r "$ROOT/packaging/debian" "$WORK/debian"
 VERSION="$(sed -n 's/^project(qtIDM VERSION \([^ ]*\).*/\1/p' "$ROOT/CMakeLists.txt")"
