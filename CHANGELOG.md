@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added collision-free browser-extension version generation for signed CI runs and reruns.
+- Added tagged-release version synchronization when a higher GitHub tag is ahead of `CMakeLists.txt`.
 
 ## 0.1.1
 

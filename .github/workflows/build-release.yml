@@ -28,6 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Synchronize version from release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: sh packaging/release/sync-tag-version.sh --apply "$GITHUB_REF_NAME"
+
       - name: Set up Chrome for Testing
         id: setup-chrome
         uses: browser-actions/setup-chrome@v2
@@ -91,8 +95,10 @@ jobs:
 
       - name: Validate packaging metadata
         run: |
-          sh -n packaging/build-deb.sh packaging/build-appimage.sh packaging/build-flatpak.sh packaging/browser/ci-extension-version.sh packaging/release/build-flatpak-bundle.sh packaging/appimage/AppRun
+          sh -n packaging/build-deb.sh packaging/build-appimage.sh packaging/build-flatpak.sh packaging/browser/ci-extension-version.sh packaging/release/build-flatpak-bundle.sh packaging/release/sync-tag-version.sh packaging/appimage/AppRun
           sh packaging/browser/ci-extension-version.sh 1 1 >/dev/null
+          VERSION="$(sh packaging/release/version-info.sh)"
+          sh packaging/release/sync-tag-version.sh "v$VERSION" >/dev/null
           desktop-file-validate assets/io.github.qtidm.qtidm.desktop
           appstreamcli validate --pedantic --no-net assets/io.github.qtidm.qtidm.appdata.xml
           flatpak-builder --show-manifest packaging/flatpak/io.github.qtidm.qtidm.yml >/dev/null

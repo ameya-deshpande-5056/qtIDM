@@ -278,7 +278,7 @@ The application and browser integrations have independent version tracks:
 
 | Component | Current version | Authoritative files |
 | --- | --- | --- |
-| qtIDM application and release tag | `0.1.1` / `v0.1.1` | `CMakeLists.txt`, with release notes in `CHANGELOG.md` |
+| qtIDM application and release tag | `0.1.1` / `v0.1.1` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
 | Chrome and Firefox extensions | `0.3.2` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
 
 The two checked-in browser manifest versions must always match each other, but
@@ -288,6 +288,13 @@ run number, and the run attempt. New runs and reruns therefore cannot reuse an
 AMO version. Local signing builds still use the checked-in version and must bump
 it manually before resubmission. Version changes do not alter the Chrome
 extension ID, Firefox add-on ID, Chrome signing key, or AMO API credentials.
+
+For application releases, a valid tag is authoritative when it is newer than
+the version in `CMakeLists.txt`. For example, a `v0.1.2` tag on a checkout that
+still declares `0.1.1` updates the CI checkout to `0.1.2` before configuration,
+testing, and packaging. This is an ephemeral runner change and is not committed
+back to the branch. Matching versions are left unchanged, and tags older than
+the CMake version are rejected to prevent downgrade releases.
 
 ## GitHub Actions
 
@@ -439,8 +446,9 @@ Prepare application and extension changes before starting the release commit.
 Code changes should already be committed; the release commit should contain
 only version and release-metadata updates.
 
-1. Update the project version in `CMakeLists.txt` and the release notes in
-   `CHANGELOG.md`.
+1. Add the release notes to `CHANGELOG.md`. Updating the project version in
+   `CMakeLists.txt` is recommended, but a higher `vMAJOR.MINOR.PATCH` release
+   tag automatically updates the CI checkout before it is built.
 2. Review the three-part base versions in `browser/chrome/manifest.json` and
    `browser/firefox/manifest.json`. They must match each other and are
    independent of the project version. The release workflow automatically
