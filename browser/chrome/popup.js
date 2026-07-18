@@ -64,6 +64,8 @@ async function loadSettings() {
   const response = await api.runtime.sendMessage({ type: "getSettings" });
   $("#interceptDownloads").checked = response.settings.interceptDownloads;
   $("#captureMedia").checked = response.settings.captureMedia;
+  $("#excludedHosts").value = response.settings.excludedHosts || "";
+  $("#excludedExtensions").value = response.settings.excludedExtensions || "";
 }
 
 async function saveSettings() {
@@ -71,7 +73,9 @@ async function saveSettings() {
     type: "saveSettings",
     settings: {
       interceptDownloads: $("#interceptDownloads").checked,
-      captureMedia: $("#captureMedia").checked
+      captureMedia: $("#captureMedia").checked,
+      excludedHosts: $("#excludedHosts").value,
+      excludedExtensions: $("#excludedExtensions").value
     }
   });
   notice("Integration settings saved.");
@@ -95,5 +99,6 @@ $("#sendManual").addEventListener("click", async () => {
 });
 $("#interceptDownloads").addEventListener("change", saveSettings);
 $("#captureMedia").addEventListener("change", saveSettings);
+$("#saveSettings").addEventListener("click", saveSettings);
 
 Promise.all([refresh(), loadSettings()]).catch((error) => notice(error.message, true));

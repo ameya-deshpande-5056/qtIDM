@@ -17,6 +17,16 @@ private slots:
         QVERIFY(!qtidm::MediaDownloader::supports(QUrl(QStringLiteral("https://example.test/video.mp4"))));
     }
 
+    void detectsUnsupportedDrmDeclarations()
+    {
+        QVERIFY(qtidm::MediaDownloader::declaresUnsupportedDrm(
+            "<ContentProtection schemeIdUri=\"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed\"/>"));
+        QVERIFY(qtidm::MediaDownloader::declaresUnsupportedDrm(
+            "#EXT-X-KEY:METHOD=SAMPLE-AES,KEYFORMAT=\"com.apple.streamingkeydelivery\""));
+        QVERIFY(!qtidm::MediaDownloader::declaresUnsupportedDrm(
+            "#EXT-X-KEY:METHOD=AES-128,URI=\"https://example.test/key\""));
+    }
+
     void downloadsAndMuxesSeparateDashTracks()
     {
         const auto ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));

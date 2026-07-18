@@ -3,6 +3,8 @@
 #include "app/Paths.h"
 
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
@@ -81,6 +83,26 @@ private slots:
         QVERIFY(loaded.isQueueEnabled(QStringLiteral("night")));
     }
 
+    void holdsQueuedDownloadsOnMeteredNetworks()
+    {
+        qtidm::CurlEpollDownloader downloader;
+        qtidm::DownloadScheduler scheduler(downloader);
+        QSignalSpy dispatched(&scheduler, &qtidm::DownloadScheduler::downloadDispatched);
+        scheduler.setMeteredNetworkPolicy(qtidm::MeteredNetworkPolicy::HoldNew);
+        scheduler.setNetworkMetered(true);
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("https://example.com/metered.bin"));
+        request.targetPath = QStringLiteral("/tmp/metered.bin");
+        scheduler.schedule(request);
+        QCOMPARE(dispatched.size(), 0);
+        QCOMPARE(scheduler.queued().size(), 1);
+
+        scheduler.setNetworkMetered(false);
+        QCOMPARE(dispatched.size(), 1);
+        QVERIFY(scheduler.queued().isEmpty());
+    }
+
     void evaluatesWeekdaysAndOvernightWindows()
     {
         qtidm::DownloadRequest request;
@@ -154,6 +176,44 @@ private slots:
         QTRY_COMPARE(commands.size(), 1);
         QCOMPARE(commands.first().at(0).toString(), QStringLiteral("/usr/bin/notify-send"));
         QCOMPARE(commands.first().at(1).toStringList(), QStringList { QStringLiteral("Download complete") });
+    }
+
+    void appliesCompletionMovePlaceholdersAndHistoryRemoval()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        qtidm::CurlEpollDownloader downloader;
+        qtidm::DownloadScheduler scheduler(downloader);
+        QSignalSpy dispatched(&scheduler, &qtidm::DownloadScheduler::downloadDispatched);
+        QSignalSpy moved(&scheduler, &qtidm::DownloadScheduler::completionFileMoved);
+        QSignalSpy commands(&scheduler, &qtidm::DownloadScheduler::completionCommandRequested);
+        QSignalSpy removals(&scheduler, &qtidm::DownloadScheduler::historyRemovalRequested);
+
+        const auto source = dir.path() + QStringLiteral("/source.bin");
+        QFile file(source);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write("data"), qint64(4));
+        file.close();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("https://example.com/source.bin"));
+        request.targetPath = source;
+        request.completionMoveDirectory = dir.path() + QStringLiteral("/finished");
+        request.completionCommand = QStringLiteral("/usr/bin/tool \"{file}\" \"{dir}\" \"{url}\"");
+        request.removeRecordOnCompletion = true;
+        scheduler.schedule(request);
+        QCOMPARE(dispatched.size(), 1);
+        const auto id = dispatched.first().at(0).toString();
+
+        emit downloader.statusChanged(id, qtidm::DownloadStatus::Completed, {});
+        QTRY_COMPARE(moved.size(), 1);
+        const auto target = moved.first().at(1).toString();
+        QVERIFY(QFileInfo::exists(target));
+        QVERIFY(!QFileInfo::exists(source));
+        QCOMPARE(commands.size(), 1);
+        QCOMPARE(commands.first().at(1).toStringList(),
+            QStringList({ target, QFileInfo(target).absolutePath(), request.url.toString() }));
+        QCOMPARE(removals.size(), 1);
     }
 
 private:

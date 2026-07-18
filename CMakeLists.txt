@@ -21,8 +21,10 @@ include(GNUInstallDirs)
 
 set(QTIDM_CHROME_EXTENSION_ID "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" CACHE STRING "Chrome extension ID allowed to use native messaging")
 set(QTIDM_FIREFOX_EXTENSION_ID "qtidm@io.github.qtidm" CACHE STRING "Firefox extension ID allowed to use native messaging")
+set(QTIDM_BROWSER_PACKAGE_DIR "${CMAKE_SOURCE_DIR}/browser/packages" CACHE PATH "Directory containing signed qtidm-chrome.crx and qtidm-firefox.xpi packages")
 option(QTIDM_ENABLE_NATIVE_TUNING "Build for the current CPU with -march=native" OFF)
 option(QTIDM_INSTALL_NATIVE_MESSAGING_HOSTS "Install browser native messaging host manifests" ON)
+option(QTIDM_INSTALL_EXTERNAL_CHROME_EXTENSION "Register a bundled CRX as an external Google Chrome extension" OFF)
 option(QTIDM_BUILD_TESTS "Build qtIDM test executables" ON)
 
 string(LENGTH "${QTIDM_CHROME_EXTENSION_ID}" QTIDM_CHROME_EXTENSION_ID_LENGTH)
@@ -42,6 +44,29 @@ configure_file(
     @ONLY
 )
 
+set(QTIDM_CHROME_EXTENSION_PACKAGE "${QTIDM_BROWSER_PACKAGE_DIR}/qtidm-chrome.crx")
+set(QTIDM_FIREFOX_EXTENSION_PACKAGE "${QTIDM_BROWSER_PACKAGE_DIR}/qtidm-firefox.xpi")
+set(QTIDM_HAVE_BROWSER_PACKAGES OFF)
+if(EXISTS "${QTIDM_CHROME_EXTENSION_PACKAGE}" OR EXISTS "${QTIDM_FIREFOX_EXTENSION_PACKAGE}")
+    if(NOT EXISTS "${QTIDM_CHROME_EXTENSION_PACKAGE}" OR NOT EXISTS "${QTIDM_FIREFOX_EXTENSION_PACKAGE}")
+        message(FATAL_ERROR "QTIDM_BROWSER_PACKAGE_DIR must contain both qtidm-chrome.crx and qtidm-firefox.xpi.")
+    endif()
+    set(QTIDM_HAVE_BROWSER_PACKAGES ON)
+endif()
+
+if(QTIDM_INSTALL_EXTERNAL_CHROME_EXTENSION)
+    if(NOT QTIDM_HAVE_BROWSER_PACKAGES)
+        message(FATAL_ERROR "External Chrome registration requires signed browser packages in QTIDM_BROWSER_PACKAGE_DIR.")
+    endif()
+    file(READ "${CMAKE_SOURCE_DIR}/browser/chrome/manifest.json" QTIDM_CHROME_MANIFEST_JSON)
+    string(JSON QTIDM_BROWSER_EXTENSION_VERSION GET "${QTIDM_CHROME_MANIFEST_JSON}" version)
+    configure_file(
+        browser/chrome/external-extension.json.in
+        "${CMAKE_BINARY_DIR}/generated/browser/chrome/${QTIDM_CHROME_EXTENSION_ID}.json"
+        @ONLY
+    )
+endif()
+
 add_compile_options(-Wall -Wextra -Wpedantic)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -60,11 +85,15 @@ set(QTIDM_SOURCES
     src/core/DownloadTypes.cpp
     src/core/CurlEpollDownloader.cpp
     src/core/DownloadScheduler.cpp
+    src/core/ArchiveExtractor.cpp
     src/core/SiteGrabber.cpp
     src/core/MediaDownloader.cpp
     src/core/SparseFileWriter.cpp
     src/core/ZipPreview.cpp
     src/integration/ImportExportService.cpp
+    src/integration/CredentialVault.cpp
+    src/integration/MeteredNetworkMonitor.cpp
+    src/integration/SocialMediaExtractor.cpp
     src/storage/DownloadRepository.cpp
     src/theme/ThemeManager.cpp
     src/ui/MainWindow.cpp
@@ -99,6 +128,7 @@ target_link_libraries(qtIDM-native-host PRIVATE Qt6::Core Qt6::DBus)
 
 if(QTIDM_BUILD_TESTS)
 enable_testing()
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 add_executable(qtIDM_core_tests
     tests/DownloadRepositoryTest.cpp
@@ -149,18 +179,73 @@ target_include_directories(qtIDM_site_grabber_tests PRIVATE src)
 target_link_libraries(qtIDM_site_grabber_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl)
 add_test(NAME qtIDM_site_grabber_tests COMMAND qtIDM_site_grabber_tests)
 
+add_test(NAME qtIDM_chrome_extension_e2e_tests
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/browser_extension_e2e.py --browser chrome
+)
+set_tests_properties(qtIDM_chrome_extension_e2e_tests PROPERTIES
+    SKIP_RETURN_CODE 77
+    TIMEOUT 60
+)
+
+add_test(NAME qtIDM_firefox_extension_e2e_tests
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/browser_extension_e2e.py --browser firefox
+)
+set_tests_properties(qtIDM_firefox_extension_e2e_tests PROPERTIES
+    SKIP_RETURN_CODE 77
+    TIMEOUT 60
+)
+
+add_test(NAME qtIDM_browser_packaging_tests
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/browser_packaging_test.py
+)
+set_tests_properties(qtIDM_browser_packaging_tests PROPERTIES TIMEOUT 60)
+
 add_executable(qtIDM_scheduler_tests
     tests/DownloadSchedulerTest.cpp
     src/app/Paths.cpp
     src/core/CurlEpollDownloader.cpp
     src/core/DownloadScheduler.cpp
+    src/core/ArchiveExtractor.cpp
     src/core/DownloadTypes.cpp
     src/core/SparseFileWriter.cpp
+    src/integration/CredentialVault.cpp
 )
 
 target_include_directories(qtIDM_scheduler_tests PRIVATE src)
 target_link_libraries(qtIDM_scheduler_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl Threads::Threads)
 add_test(NAME qtIDM_scheduler_tests COMMAND qtIDM_scheduler_tests)
+
+add_executable(qtIDM_archive_extractor_tests
+    tests/ArchiveExtractorTest.cpp
+    src/core/ArchiveExtractor.cpp
+)
+target_include_directories(qtIDM_archive_extractor_tests PRIVATE src)
+target_link_libraries(qtIDM_archive_extractor_tests PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME qtIDM_archive_extractor_tests COMMAND qtIDM_archive_extractor_tests)
+
+add_executable(qtIDM_credential_vault_tests
+    tests/CredentialVaultTest.cpp
+    src/integration/CredentialVault.cpp
+)
+target_include_directories(qtIDM_credential_vault_tests PRIVATE src)
+target_link_libraries(qtIDM_credential_vault_tests PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME qtIDM_credential_vault_tests COMMAND qtIDM_credential_vault_tests)
+
+add_executable(qtIDM_metered_network_tests
+    tests/MeteredNetworkMonitorTest.cpp
+    src/integration/MeteredNetworkMonitor.cpp
+)
+target_include_directories(qtIDM_metered_network_tests PRIVATE src)
+target_link_libraries(qtIDM_metered_network_tests PRIVATE Qt6::Core Qt6::DBus Qt6::Test)
+add_test(NAME qtIDM_metered_network_tests COMMAND qtIDM_metered_network_tests)
+
+add_executable(qtIDM_social_media_extractor_tests
+    tests/SocialMediaExtractorTest.cpp
+    src/integration/SocialMediaExtractor.cpp
+)
+target_include_directories(qtIDM_social_media_extractor_tests PRIVATE src)
+target_link_libraries(qtIDM_social_media_extractor_tests PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME qtIDM_social_media_extractor_tests COMMAND qtIDM_social_media_extractor_tests)
 
 add_executable(qtIDM_downloader_integration_tests
     tests/DownloaderIntegrationTest.cpp
@@ -224,5 +309,23 @@ if(QTIDM_INSTALL_NATIVE_MESSAGING_HOSTS)
     install(FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.firefox.json DESTINATION ${CMAKE_INSTALL_LIBDIR}/mozilla/native-messaging-hosts)
     install(FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.chrome.json DESTINATION ${CMAKE_INSTALL_FULL_SYSCONFDIR}/opt/chrome/native-messaging-hosts)
 endif()
-install(DIRECTORY browser/chrome DESTINATION share/qtidm/browser)
+install(
+    DIRECTORY browser/chrome
+    DESTINATION share/qtidm/browser
+    PATTERN "external-extension.json.in" EXCLUDE
+)
 install(DIRECTORY browser/firefox DESTINATION share/qtidm/browser)
+if(QTIDM_HAVE_BROWSER_PACKAGES)
+    install(
+        FILES
+            "${QTIDM_CHROME_EXTENSION_PACKAGE}"
+            "${QTIDM_FIREFOX_EXTENSION_PACKAGE}"
+        DESTINATION share/qtidm/browser/packages
+    )
+endif()
+if(QTIDM_INSTALL_EXTERNAL_CHROME_EXTENSION)
+    install(
+        FILES "${CMAKE_BINARY_DIR}/generated/browser/chrome/${QTIDM_CHROME_EXTENSION_ID}.json"
+        DESTINATION /opt/google/chrome/extensions
+    )
+endif()

@@ -1,0 +1,4 @@
+{
+  "external_crx": "/usr/share/qtidm/browser/packages/qtidm-chrome.crx",
+  "external_version": "@QTIDM_BROWSER_EXTENSION_VERSION@"
+}

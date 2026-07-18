@@ -7,6 +7,12 @@ on:
       - 'v*.*.*'
   pull_request:
   workflow_dispatch:
+    inputs:
+      sign_extensions:
+        description: Build and bundle release-signed CRX/XPI packages
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '0 3 * * 1'
 
@@ -22,18 +28,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Chrome for Testing
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+
+      - name: Set up Firefox
+        id: setup-firefox
+        uses: browser-actions/setup-firefox@v1
+        with:
+          firefox-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ python3 xvfb dbus-x11 qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper devscripts appstream flatpak flatpak-builder libfuse2 ffmpeg
+          sudo apt-get install -y cmake ninja-build g++ python3 xvfb dbus-x11 qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper devscripts appstream flatpak flatpak-builder libfuse2 ffmpeg 7zip zip unzip openssl libsecret-tools yt-dlp
+          PUPPETEER_SKIP_DOWNLOAD=true npm install --global puppeteer web-ext
 
-      - name: Validate release extension IDs
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Build development browser packages
+        run: sh packaging/browser/build-extensions.sh --mode development --output build/browser-packages
+
+      - name: Validate browser release signing configuration
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign_extensions)
+        env:
+          QTIDM_CHROME_EXTENSION_KEY_B64: ${{ secrets.QTIDM_CHROME_EXTENSION_KEY_B64 }}
+          FIREFOX_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
+          FIREFOX_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
         run: |
           if [ -z "${QTIDM_CHROME_EXTENSION_ID:-}" ] || [ "${QTIDM_CHROME_EXTENSION_ID}" = "${DEV_CHROME_EXTENSION_ID}" ]; then
-            echo "Set repository variable QTIDM_CHROME_EXTENSION_ID to the published Chrome extension ID before tagging a release." >&2
+            echo "Set repository variable QTIDM_CHROME_EXTENSION_ID to the ID derived from the release signing key." >&2
             exit 1
           fi
+          if [ -z "${QTIDM_CHROME_EXTENSION_KEY_B64:-}" ] || [ -z "${FIREFOX_API_KEY:-}" ] || [ -z "${FIREFOX_API_SECRET:-}" ]; then
+            echo "Signed extension builds require the Chrome key and AMO API repository secrets." >&2
+            exit 1
+          fi
+          KEY_FILE="$RUNNER_TEMP/qtidm-chrome-extension.pem"
+          umask 077
+          printf '%s' "$QTIDM_CHROME_EXTENSION_KEY_B64" | base64 --decode > "$KEY_FILE"
+          DERIVED_ID="$(sh packaging/browser/chrome-extension-id.sh "$KEY_FILE")"
+          if [ "$DERIVED_ID" != "$QTIDM_CHROME_EXTENSION_ID" ]; then
+            echo "Chrome key produces extension ID $DERIVED_ID, not $QTIDM_CHROME_EXTENSION_ID." >&2
+            exit 1
+          fi
+          echo "QTIDM_CHROME_EXTENSION_KEY=$KEY_FILE" >> "$GITHUB_ENV"
 
       - name: Configure
         run: |
@@ -44,7 +87,14 @@ jobs:
         run: cmake --build build
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build -E 'extension_e2e' --output-on-failure
+
+      - name: Browser extension end-to-end
+        env:
+          QTIDM_BROWSER_E2E_STRICT: 1
+          QTIDM_E2E_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
+          QTIDM_E2E_FIREFOX: ${{ steps.setup-firefox.outputs.firefox-path }}
+        run: ctest --test-dir build -R 'qtIDM_(chrome|firefox)_extension_e2e_tests' --output-on-failure
 
       - name: Performance smoke
         if: github.event_name == 'schedule'
@@ -64,13 +114,22 @@ jobs:
           sh packaging/release/extract-changelog.sh "$VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Build signed browser packages
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.sign_extensions)
+        env:
+          QTIDM_CHROME_EXECUTABLE: ${{ steps.setup-chrome.outputs.chrome-path }}
+          WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
+        run: |
+          sh packaging/browser/build-extensions.sh --mode release --output browser/packages
+          cp browser/packages/qtidm-chrome.crx "dist/qtIDM-browser-chrome-${{ steps.version.outputs.version }}.crx"
+          cp browser/packages/qtidm-firefox.xpi "dist/qtIDM-browser-firefox-${{ steps.version.outputs.version }}.xpi"
+
       - name: Build Debian package
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: |
           chmod +x packaging/build-deb.sh
           sh packaging/build-deb.sh
-          mkdir -p dist
-          find . -maxdepth 2 -type f \( -name '*.deb' -o -name '*.changes' -o -name '*.buildinfo' \) -exec cp {} dist/ \;
 
       - name: Smoke Debian package
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
@@ -78,6 +137,11 @@ jobs:
           test -n "$(find dist -type f -name '*.deb' -print -quit)"
           sudo apt-get install -y ./dist/*.deb
           xvfb-run -a qtIDM --version
+          if [ -f browser/packages/qtidm-chrome.crx ]; then
+            test -f /usr/share/qtidm/browser/packages/qtidm-chrome.crx
+            test -f /usr/share/qtidm/browser/packages/qtidm-firefox.xpi
+            test -f "/opt/google/chrome/extensions/${QTIDM_CHROME_EXTENSION_ID}.json"
+          fi
 
       - name: Install linuxdeploy
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
@@ -107,6 +171,16 @@ jobs:
         run: |
           chmod +x "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage"
           xvfb-run -a "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage" --version
+          if [ -f browser/packages/qtidm-chrome.crx ]; then
+            EXTRACT_DIR="$(mktemp -d)"
+            APPIMAGE="$(realpath "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage")"
+            (
+              cd "$EXTRACT_DIR"
+              env -u APPIMAGE_EXTRACT_AND_RUN "$APPIMAGE" --appimage-extract usr/share/qtidm/browser/packages >/dev/null
+              test -f squashfs-root/usr/share/qtidm/browser/packages/qtidm-chrome.crx
+              test -f squashfs-root/usr/share/qtidm/browser/packages/qtidm-firefox.xpi
+            )
+          fi
 
       - name: Build Flatpak bundle
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
@@ -120,6 +194,10 @@ jobs:
           test -f "dist/qtIDM-${{ steps.version.outputs.version }}.flatpak"
           flatpak install --user -y "dist/qtIDM-${{ steps.version.outputs.version }}.flatpak"
           dbus-run-session -- xvfb-run -a flatpak run io.github.qtidm.qtidm --version
+          if [ -f browser/packages/qtidm-chrome.crx ]; then
+            flatpak run --command=sh io.github.qtidm.qtidm -c \
+              'test -f /app/share/qtidm/browser/packages/qtidm-chrome.crx && test -f /app/share/qtidm/browser/packages/qtidm-firefox.xpi'
+          fi
 
       - name: Upload workflow artifacts
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'

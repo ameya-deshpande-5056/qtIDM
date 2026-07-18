@@ -7,6 +7,37 @@
 class DownloadRepositoryTest final : public QObject {
     Q_OBJECT
 private slots:
+    void migratesLegacyDatabaseForRequestOptions()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const auto path = dir.path() + QStringLiteral("/legacy.sqlite3");
+        sqlite3* db = nullptr;
+        QCOMPARE(sqlite3_open(path.toUtf8().constData(), &db), SQLITE_OK);
+        const char* schema =
+            "CREATE TABLE downloads ("
+            "id TEXT PRIMARY KEY,url TEXT NOT NULL,target_path TEXT NOT NULL,category TEXT NOT NULL DEFAULT '',"
+            "total_bytes INTEGER NOT NULL DEFAULT -1,completed_bytes INTEGER NOT NULL DEFAULT 0,"
+            "status TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);";
+        QCOMPARE(sqlite3_exec(db, schema, nullptr, nullptr, nullptr), SQLITE_OK);
+        sqlite3_close(db);
+
+        qtidm::DownloadRepository repository;
+        QVERIFY(repository.open(path));
+        qtidm::DownloadRecord record;
+        record.id = QStringLiteral("legacy-migrated");
+        record.url = QUrl(QStringLiteral("https://example.com/file.bin"));
+        record.targetPath = dir.path() + QStringLiteral("/file.bin");
+        record.status = qtidm::DownloadStatus::Paused;
+        record.createdAt = QDateTime::currentDateTimeUtc();
+        record.updatedAt = record.createdAt;
+        record.request.url = record.url;
+        record.request.targetPath = record.targetPath;
+        record.request.maxRetries = 17;
+        QVERIFY(repository.upsertDownload(record));
+        QCOMPARE(repository.listDownloads().first().request.maxRetries, 17);
+    }
+
     void storesAndListsDownloads()
     {
         QTemporaryDir dir;
@@ -23,12 +54,20 @@ private slots:
         record.status = qtidm::DownloadStatus::Queued;
         record.createdAt = QDateTime::currentDateTimeUtc();
         record.updatedAt = record.createdAt;
+        record.request.url = record.url;
+        record.request.targetPath = record.targetPath;
+        record.request.category = record.category;
+        record.request.proxyUrl = QStringLiteral("socks5://127.0.0.1:1080");
+        record.request.headers.insert(QStringLiteral("Referer"), QStringLiteral("https://example.com/"));
 
         QVERIFY(repository.upsertDownload(record));
         const auto records = repository.listDownloads();
         QCOMPARE(records.size(), 1);
         QCOMPARE(records.first().id, QStringLiteral("abc"));
         QCOMPARE(records.first().category, QStringLiteral("Compressed"));
+        QCOMPARE(records.first().request.proxyUrl, record.request.proxyUrl);
+        QCOMPARE(records.first().request.headers.value(QStringLiteral("Referer")).toString(),
+            QStringLiteral("https://example.com/"));
     }
 
     void persistsSegmentsProgressStatusAndRemoval()

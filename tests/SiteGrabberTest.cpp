@@ -1,6 +1,7 @@
 #include "core/SiteGrabber.h"
 
 #include <QFile>
+#include <QFileDevice>
 #include <QTemporaryDir>
 #include <QUrl>
 #include <QtTest/QtTest>
@@ -47,6 +48,68 @@ private slots:
 
         QCOMPARE(requests.size(), 1);
         QVERIFY(!error.isEmpty());
+    }
+
+    void savesRenderedDomAndDiscoversDynamicLinks()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        QFile renderer(dir.path() + QStringLiteral("/fake-renderer.sh"));
+        QVERIFY(renderer.open(QIODevice::WriteOnly));
+        renderer.write("#!/bin/sh\n"
+                       "printf '%s' '<html><body><a href=\"dynamic.html\">dynamic</a>"
+                       "<img src=\"asset.bin\" srcset=\"small.png 1x, large.png 2x\"></body></html>'\n");
+        renderer.close();
+        QVERIFY(renderer.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+
+        QFile index(dir.path() + QStringLiteral("/index.html"));
+        QVERIFY(index.open(QIODevice::WriteOnly));
+        index.write("<html><body><script>/* links are inserted at runtime */</script></body></html>");
+        index.close();
+
+        qtidm::SiteGrabberOptions options;
+        options.depth = 1;
+        options.renderJavaScript = true;
+        options.rendererExecutable = renderer.fileName();
+        options.renderTimeoutMs = 2000;
+        const auto result = qtidm::SiteGrabber().grab(
+            QUrl::fromLocalFile(index.fileName()), dir.path() + QStringLiteral("/out"), options);
+
+        QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+        QVERIFY(result.warnings.isEmpty());
+        QCOMPARE(result.renderedDocuments.size(), 2);
+        QCOMPARE(result.renderedDocuments[0].url, QUrl::fromLocalFile(index.fileName()));
+        QVERIFY(result.renderedDocuments[0].html.contains("dynamic.html"));
+
+        QSet<QString> names;
+        for (const auto& request : result.requests) {
+            names.insert(QFileInfo(request.targetPath).fileName());
+        }
+        QCOMPARE(names, QSet<QString>({ QStringLiteral("asset.bin"), QStringLiteral("small.png"), QStringLiteral("large.png") }));
+    }
+
+    void renderingFailureFallsBackToStaticGrab()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        QFile index(dir.path() + QStringLiteral("/index.html"));
+        QVERIFY(index.open(QIODevice::WriteOnly));
+        index.write("<a href=\"static.bin\">static</a>");
+        index.close();
+
+        qtidm::SiteGrabberOptions options;
+        options.depth = 1;
+        options.renderJavaScript = true;
+        options.rendererExecutable = dir.path() + QStringLiteral("/missing-renderer");
+        const auto result = qtidm::SiteGrabber().grab(
+            QUrl::fromLocalFile(index.fileName()), dir.path() + QStringLiteral("/out"), options);
+
+        QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+        QCOMPARE(result.warnings.size(), 1);
+        QVERIFY(result.renderedDocuments.isEmpty());
+        QCOMPARE(result.requests.size(), 2);
     }
 };
 

@@ -34,8 +34,11 @@ private slots:
         request.username = QStringLiteral("user");
         request.password = QStringLiteral("pass");
         request.proxyUrl = QStringLiteral("http://proxy:8080");
-        request.expectedSha256 = QStringLiteral("abcdef");
+        request.checksumAlgorithm = QStringLiteral("sha512");
+        request.expectedChecksum = QStringLiteral("abcdef");
         request.completionCommand = QStringLiteral("/usr/bin/notify-send \"Finished file\"");
+        request.completionMoveDirectory = QStringLiteral("/tmp/finished");
+        request.archiveDestination = QStringLiteral("/tmp/extracted");
         request.scheduledAt = QDateTime::fromString(QStringLiteral("2026-07-17T01:02:03.004Z"), Qt::ISODateWithMs);
         request.windowStart = QTime(22, 0);
         request.windowEnd = QTime(6, 0);
@@ -45,12 +48,19 @@ private slots:
         request.segments = 32;
         request.perHostConnectionLimit = 9;
         request.dynamicSegmentation = false;
+        request.removeRecordOnCompletion = true;
+        request.extractArchive = true;
+        request.deleteArchiveAfterExtraction = true;
         request.maxRetries = 7;
         request.retryBaseDelayMs = 250;
+        request.connectTimeoutSeconds = 45;
+        request.lowSpeedTimeoutSeconds = 90;
+        request.maximumRedirects = 12;
         request.priority = 42;
         request.repeatIntervalSeconds = 3600;
         request.fileConflictPolicy = qtidm::FileConflictPolicy::Skip;
         request.speedLimitBytesPerSecond = 4096;
+        request.sessionDataLimitBytes = 1024 * 1024;
         request.expectedTotalBytes = 123456;
 
         const auto copy = qtidm::requestFromJson(qtidm::requestToJson(request));
@@ -64,8 +74,11 @@ private slots:
         QCOMPARE(copy.username, request.username);
         QCOMPARE(copy.password, request.password);
         QCOMPARE(copy.proxyUrl, request.proxyUrl);
-        QCOMPARE(copy.expectedSha256, request.expectedSha256);
+        QCOMPARE(copy.checksumAlgorithm, request.checksumAlgorithm);
+        QCOMPARE(copy.expectedChecksum, request.expectedChecksum);
         QCOMPARE(copy.completionCommand, request.completionCommand);
+        QCOMPARE(copy.completionMoveDirectory, request.completionMoveDirectory);
+        QCOMPARE(copy.archiveDestination, request.archiveDestination);
         QCOMPARE(copy.scheduledAt, request.scheduledAt);
         QCOMPARE(copy.windowStart, request.windowStart);
         QCOMPARE(copy.windowEnd, request.windowEnd);
@@ -75,13 +88,46 @@ private slots:
         QCOMPARE(copy.segments, 32);
         QCOMPARE(copy.perHostConnectionLimit, 9);
         QCOMPARE(copy.dynamicSegmentation, false);
+        QCOMPARE(copy.removeRecordOnCompletion, true);
+        QCOMPARE(copy.extractArchive, true);
+        QCOMPARE(copy.deleteArchiveAfterExtraction, true);
         QCOMPARE(copy.maxRetries, 7);
         QCOMPARE(copy.retryBaseDelayMs, 250);
+        QCOMPARE(copy.connectTimeoutSeconds, 45);
+        QCOMPARE(copy.lowSpeedTimeoutSeconds, 90);
+        QCOMPARE(copy.maximumRedirects, 12);
         QCOMPARE(copy.priority, 42);
         QCOMPARE(copy.repeatIntervalSeconds, 3600);
         QCOMPARE(static_cast<int>(copy.fileConflictPolicy), static_cast<int>(qtidm::FileConflictPolicy::Skip));
         QCOMPARE(copy.speedLimitBytesPerSecond, qint64(4096));
+        QCOMPARE(copy.sessionDataLimitBytes, qint64(1024 * 1024));
         QCOMPARE(copy.expectedTotalBytes, qint64(123456));
+    }
+
+    void vaultBackedPasswordIsNotSerialized()
+    {
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("https://secure.example.test/file"));
+        request.username = QStringLiteral("user");
+        request.password = QStringLiteral("must-not-persist");
+        request.credentialVaultKey = QStringLiteral("vault-key");
+
+        const auto json = qtidm::requestToJson(request);
+        QCOMPARE(json.value(QStringLiteral("password")).toString(), QString {});
+        const auto copy = qtidm::requestFromJson(json);
+        QCOMPARE(copy.credentialVaultKey, QStringLiteral("vault-key"));
+        QVERIFY(copy.password.isEmpty());
+    }
+
+    void legacySha256MigratesToGenericChecksum()
+    {
+        QJsonObject legacy {
+            { QStringLiteral("url"), QStringLiteral("https://example.com/file.bin") },
+            { QStringLiteral("expectedSha256"), QString(64, QLatin1Char('a')) }
+        };
+        const auto request = qtidm::requestFromJson(legacy);
+        QCOMPARE(request.checksumAlgorithm, QStringLiteral("sha256"));
+        QCOMPARE(request.expectedChecksum, QString(64, QLatin1Char('a')));
     }
 
     void recordJsonRoundTripsSegments()
@@ -100,6 +146,9 @@ private slots:
             { 0, 0, 99, 75, qtidm::DownloadStatus::Paused },
             { 1, 100, 199, 75, qtidm::DownloadStatus::Downloading }
         };
+        record.request.url = record.url;
+        record.request.targetPath = record.targetPath;
+        record.request.proxyUrl = QStringLiteral("http://proxy:8080");
 
         const auto copy = qtidm::recordFromJson(qtidm::recordToJson(record));
 
@@ -111,6 +160,7 @@ private slots:
         QCOMPARE(copy.segments.size(), 2);
         QCOMPARE(copy.segments[0].written, qint64(75));
         QCOMPARE(static_cast<int>(copy.segments[1].status), static_cast<int>(qtidm::DownloadStatus::Downloading));
+        QCOMPARE(copy.request.proxyUrl, record.request.proxyUrl);
     }
 };
 

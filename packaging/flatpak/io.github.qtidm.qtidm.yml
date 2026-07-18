@@ -6,6 +6,8 @@ command: qtIDM
 finish-args:
   - --share=network
   - --socket=session-bus
+  - --system-talk-name=org.freedesktop.NetworkManager
+  - --talk-name=org.freedesktop.secrets
   - --socket=wayland
   - --socket=x11
 modules:

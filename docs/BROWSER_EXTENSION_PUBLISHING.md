@@ -1,10 +1,10 @@
-# Browser Extension Publishing
+# Browser Extension Packaging and Private Distribution
 
 qtIDM uses native messaging. Browser extension IDs must match the native host allowlist.
 
 ## Firefox
 
-Firefox can use a stable ID before publishing.
+Firefox uses a stable ID before signing.
 
 Current ID:
 
@@ -30,6 +30,11 @@ The native host manifest must allow the same ID:
 ]
 ```
 
+Standard Firefox requires persistent extensions to be signed by Mozilla. qtIDM
+uses AMO's `unlisted` self-distribution channel: Mozilla signs the XPI, but the
+extension is not published in the public add-on catalogue. The returned signed
+XPI is bundled with qtIDM releases and can be installed from a file.
+
 ## Chrome
 
 Chrome native messaging requires the final Chrome extension ID:
@@ -40,41 +45,69 @@ Chrome native messaging requires the final Chrome extension ID:
 ]
 ```
 
-Chrome extension IDs are not reliable for unpacked local builds unless the manifest has a stable `"key"` value.
+The release ID is derived from a permanent private key. The key signs each CRX,
+so releases keep the same ID without using the Chrome Web Store. The private
+key must never be committed or included in release artifacts.
 
 ## Recommended Chrome Flow
 
-1. Package `browser/chrome` as a ZIP.
-2. Upload it once to the Chrome Developer Dashboard.
-3. Keep it private/unlisted if the extension is not ready.
-4. Copy the assigned extension ID.
-5. Copy the public key from the dashboard package page.
-6. Add the public key to `browser/chrome/manifest.json`:
-
-```json
-"key": "<public-key-from-dashboard>"
-```
-
-7. Replace the native host placeholder:
-
-```json
-"allowed_origins": [
-  "chrome-extension://<final-chrome-extension-id>/"
-]
-```
-
-8. Build qtIDM packages.
-9. Publish the Chrome extension when ready.
+1. Generate `qtidm-chrome.pem` once with `openssl genrsa`.
+2. Store it offline and add only its base64 encoding to the protected
+   `QTIDM_CHROME_EXTENSION_KEY_B64` GitHub Actions secret.
+3. Calculate its ID with
+   `packaging/browser/chrome-extension-id.sh qtidm-chrome.pem`.
+4. Store that ID in the `QTIDM_CHROME_EXTENSION_ID` repository variable.
+5. Build each release CRX with the same key.
+6. Pass the same ID to CMake so the native host allowlist matches the CRX.
 
 ## Release Rule
 
-Do not publish qtIDM packages while this placeholder remains:
+Tagged releases fail unless all of these values are configured:
 
 ```text
-REPLACE_WITH_EXTENSION_ID
+QTIDM_CHROME_EXTENSION_ID
+QTIDM_CHROME_EXTENSION_KEY_B64
+WEB_EXT_API_KEY
+WEB_EXT_API_SECRET
 ```
 
-Release builds should fail if the Chrome native host manifest still contains that value.
+The workflow independently derives the ID from the Chrome key and rejects a
+mismatch before building application packages.
+
+## Automated Builds
+
+Development build:
+
+```bash
+sh packaging/browser/build-extensions.sh \
+  --mode development \
+  --output build/browser-packages
+```
+
+This lints the Firefox source and creates `qtidm-chrome.zip` plus
+`qtidm-firefox-unsigned.xpi`. These artifacts are suitable for testing, not
+normal Firefox installation.
+
+Release build:
+
+```bash
+export QTIDM_CHROME_EXECUTABLE=/path/to/chrome
+export QTIDM_CHROME_EXTENSION_KEY=/path/to/qtidm-chrome.pem
+export QTIDM_CHROME_EXTENSION_ID=<key-derived-id>
+export WEB_EXT_API_KEY=<AMO-API-key>
+export WEB_EXT_API_SECRET=<AMO-API-secret>
+sh packaging/browser/build-extensions.sh --mode release
+```
+
+This creates `browser/packages/qtidm-chrome.crx` and
+`browser/packages/qtidm-firefox.xpi`. CMake includes both files in subsequent
+application package builds. GitHub Actions also publishes versioned copies as
+standalone release assets.
+
+The Debian package installs an external-extension descriptor for Google Chrome,
+pointing at the bundled CRX. AppImage and Flatpak contain both files but do not
+modify host-browser configuration. Firefox installation remains user-driven
+unless an administrator deploys an enterprise extension policy.
 
 ## Flatpak Boundary
 
@@ -82,7 +115,29 @@ Browser native messaging manifests must be installed on the host browser side. T
 
 Use the `.deb` package or a separate host-side installer for browser integration.
 
-## Future Improvement
+## Automated End-to-End Tests
+
+CTest registers real-browser tests for both extension variants:
+
+```bash
+python3 tests/browser_extension_e2e.py --browser chrome --strict
+python3 tests/browser_extension_e2e.py --browser firefox --strict
+```
+
+Each test starts a private localhost page, triggers a browser download, installs
+the extension into a temporary profile, and uses a temporary native host. It
+asserts that the extension intercepts the download and forwards its URL,
+cookie, referrer, and User-Agent through native messaging.
+
+The Chrome test requires Chrome for Testing or Chromium plus Puppeteer, using
+Puppeteer's supported `enableExtensions` automation API. Branded Chrome removed
+the command-line unpacked-extension path starting with Chrome 137. The Firefox
+test uses `web-ext` to load the unsigned development extension temporarily.
+
+CI provisions both supported browsers and runs these tests in strict mode. For
+ordinary local CTest runs, missing browser tooling reports a skipped test.
+
+## Manifest Generation
 
 The repo uses manifest templates:
 
@@ -104,5 +159,9 @@ This keeps development IDs and release IDs explicit.
 ## References
 
 - Chrome native messaging: https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging
-- Chrome manifest `key`: https://developer.chrome.com/docs/extensions/reference/manifest/key
+- Chrome alternative installation: https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions
+- Chrome Linux self-hosting: https://developer.chrome.com/docs/extensions/how-to/distribute/host-on-linux
+- Chrome extension end-to-end testing: https://developer.chrome.com/docs/extensions/how-to/test/end-to-end-testing
 - Firefox native messaging: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging
+- Firefox `web-ext`: https://extensionworkshop.com/documentation/develop/getting-started-with-web-ext/
+- Firefox signing and self-distribution: https://extensionworkshop.com/documentation/publish/signing-and-distribution-overview/

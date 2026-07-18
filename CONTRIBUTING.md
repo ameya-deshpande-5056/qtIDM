@@ -21,6 +21,6 @@ ctest --test-dir build --output-on-failure
 
 - Keep the project Linux-only.
 - Do not add Electron, QML, WebEngine, or heavy runtimes.
-- Do not add proprietary IDM assets, copied UI resources, trademarks, or reverse-engineered internals.
+- Submit only original work or material whose licence is compatible with the project.
 - Add tests for core behavior changes.
 - Keep generated build artifacts out of git.

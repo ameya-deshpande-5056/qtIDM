@@ -9,6 +9,7 @@ install_manifest.txt
 
 # Release artifacts
 dist/
+browser/packages/
 *.AppImage
 *.deb
 *.ddeb

@@ -84,6 +84,14 @@ class Handler(BaseHTTPRequestHandler):
             if not head_only:
                 self.wfile.write(payload(0, SIZE - 1))
             return
+        if self.path.startswith("/unknown.bin"):
+            self.send_response(200)
+            self.send_header("Connection", "close")
+            self.end_headers()
+            if not head_only:
+                self.wfile.write(payload(0, SIZE - 1))
+            self.close_connection = True
+            return
         if self.path.startswith("/disconnect.bin"):
             self.send_response(200)
             self.send_header("Content-Length", str(SIZE))

@@ -33,6 +33,19 @@
   - Respect crawl depth.
   - Create `DownloadRequest` entries.
   - Report fetch errors.
+  - Save JavaScript-rendered DOM.
+  - Discover dynamic `href`, `src`, and `srcset` resources.
+  - Fall back to static fetching when the renderer fails.
+
+- `qtIDM_chrome_extension_e2e_tests`
+  - Load the MV3 extension into Chrome for Testing or Chromium.
+  - Trigger and intercept a real browser download.
+  - Verify cookie, referrer, and User-Agent forwarding through native messaging.
+
+- `qtIDM_firefox_extension_e2e_tests`
+  - Load the MV2 extension temporarily with `web-ext`.
+  - Trigger and intercept a real browser download.
+  - Verify cookie, referrer, and User-Agent forwarding through native messaging.
 
 - `qtIDM_scheduler_tests`
   - Persist future queue.
@@ -41,12 +54,40 @@
   - Persist named-queue concurrency and enabled state.
   - Prevent paused queues from dispatching and resume them on enable.
   - Assign stable schedule IDs and edit, reorder, and remove pending entries.
+  - Hold new work while the active connection is metered.
+
+- `qtIDM_archive_extractor_tests`
+  - Recognize supported archive suffixes.
+  - Reject traversal, absolute-path, and symbolic-link entries.
+  - Extract a real archive when 7-Zip is available.
+
+- `qtIDM_credential_vault_tests`
+  - Derive stable, opaque credential keys.
+  - Pass secrets over standard input rather than command-line arguments.
+  - Store, retrieve, and clear credentials with a controlled Secret Service helper.
+
+- `qtIDM_metered_network_tests`
+  - Map NetworkManager metered-state values to policy state.
+
+- `qtIDM_social_media_extractor_tests`
+  - Recognize the supported social hosts and exclude YouTube.
+  - Parse direct formats and HTTP headers from yt-dlp metadata.
+  - Reject metadata explicitly marked as DRM-protected.
 
 - `qtIDM_packaging_metadata_tests`
   - Validate `.desktop` launch metadata.
   - Validate Chrome native messaging manifest JSON.
   - Validate Firefox native messaging manifest JSON.
   - Validate browser extension manifest JSON.
+
+- Browser packaging workflow
+  - Exercise development and release orchestration with local signing-service test doubles.
+  - Lint and build unsigned development packages on every CI run.
+  - Derive the Chrome extension ID from the protected release key.
+  - Reject a configured Chrome ID that does not match the key.
+  - Require an AMO-signed XPI for tagged releases.
+  - Verify signed CRX/XPI files are present in Debian, AppImage, and Flatpak artifacts.
+  - Verify the Debian package installs the external Google Chrome descriptor.
 
 - `qtIDM_zip_preview_tests`
   - Parse classic ZIP central directory.
@@ -70,6 +111,7 @@
 - `qtIDM_media_downloader_tests`
   - Recognize HLS and MPEG-DASH manifest URLs.
   - Download and mux separate DASH audio/video tracks with FFmpeg.
+  - Detect explicit Widevine, PlayReady, FairPlay, and SAMPLE-AES manifests.
 
 - `qtIDM_performance_smoke_tests`
   - Seed 10,000 persisted downloads.
@@ -95,7 +137,6 @@ ctest --test-dir build --output-on-failure
 - Tray menu opens app, adds URL, and quits.
 - System theme change updates light/dark stylesheet through portal D-Bus.
 - Single-instance D-Bus forwards URL to existing process.
-- Native messaging host receives URL and headers from browser extension.
 - Chrome extension context-menu link capture sends URL, cookie, referrer, and user-agent.
 - Firefox extension context-menu link capture sends URL, cookie, referrer, and user-agent.
 - HTTPS download completes.
@@ -103,13 +144,17 @@ ctest --test-dir build --output-on-failure
 - Speed limit caps transfer rate.
 - Proxy URL routes transfer.
 - Username/password authentication is applied.
-- Site grabber queues same-host links.
+- Site grabber saves a representative JavaScript-rendered application and queues its dynamic resources.
 - ZIP preview shows classic ZIP entries.
 - ZIP preview shows ZIP64 entries over 4 GiB.
 - Import restores exported history.
 - Scheduler dispatches due queued download.
 - Scheduler edits, reorders, and removes pending entries.
 - Scheduler persists per-queue concurrency and pause/resume state.
+- Metered-policy modes hold new transfers or pause and resume active transfers.
+- Vault credentials store and load through the desktop Secret Service without appearing in persisted request JSON.
+- Successful supported archives extract automatically and unsafe archive members are rejected.
+- Supported social-site URLs expose selectable non-DRM formats through yt-dlp.
 - `.deb` installs, launches, and removes cleanly.
 - AppImage runs on a clean supported distribution.
 - Flatpak bundle installs, launches, and has network/session-bus access.

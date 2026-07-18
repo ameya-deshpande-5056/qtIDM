@@ -218,7 +218,7 @@ private slots:
         QCOMPARE(file.readAll(), expectedPayload(fixtureSize));
     }
 
-    void verifiesExpectedSha256()
+    void verifiesExpectedChecksums()
     {
         QTemporaryDir dir;
         QVERIFY(dir.isValid());
@@ -234,6 +234,15 @@ private slots:
             QCryptographicHash::hash(expectedPayload(fixtureSize), QCryptographicHash::Sha256).toHex());
         const auto validId = downloader.enqueue(valid);
         QVERIFY(waitForStatus(statusSpy, validId, qtidm::DownloadStatus::Completed, 15000));
+
+        qtidm::DownloadRequest generic = valid;
+        generic.targetPath = dir.path() + QStringLiteral("/verified-md5.bin");
+        generic.expectedSha256.clear();
+        generic.checksumAlgorithm = QStringLiteral("md5");
+        generic.expectedChecksum = QString::fromLatin1(
+            QCryptographicHash::hash(expectedPayload(fixtureSize), QCryptographicHash::Md5).toHex());
+        const auto genericId = downloader.enqueue(generic);
+        QVERIFY(waitForStatus(statusSpy, genericId, qtidm::DownloadStatus::Completed, 15000));
 
         qtidm::DownloadRequest invalid = valid;
         invalid.targetPath = dir.path() + QStringLiteral("/corrupt.bin");
@@ -282,6 +291,37 @@ private slots:
         QVERIFY(QFileInfo::exists(renamedPath));
         QVERIFY(existing.open(QIODevice::ReadOnly));
         QCOMPARE(existing.readAll(), QByteArray("keep"));
+    }
+
+    void enforcesAndResetsSessionDataLimit()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/range.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/quota.bin");
+        request.sessionDataLimitBytes = fixtureSize / 2;
+        const auto id = downloader.enqueue(request);
+
+        QString message;
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Failed, 5000, &message));
+        QVERIFY(message.startsWith(QStringLiteral("session data limit exceeded:")));
+        QCOMPARE(downloader.sessionBytesReceived(), qint64(0));
+
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/unknown.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/unknown-quota.bin");
+        const auto unknownId = downloader.enqueue(request);
+        QVERIFY(waitForStatus(statusSpy, unknownId, qtidm::DownloadStatus::Failed, 5000, &message));
+        QCOMPARE(message, QStringLiteral("session data limit exceeded"));
+        QVERIFY(downloader.sessionBytesReceived() > request.sessionDataLimitBytes);
+        downloader.resetSessionBytesReceived();
+        QCOMPARE(downloader.sessionBytesReceived(), qint64(0));
+        downloader.stop();
     }
 
     void rejectsResumeWhenRemoteSizeChanged()

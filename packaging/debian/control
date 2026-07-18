@@ -8,5 +8,7 @@ Standards-Version: 4.6.2
 Package: qtidm
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, ffmpeg
+Recommends: 7zip | p7zip-full, libsecret-tools, yt-dlp
+Suggests: chromium
 Description: Linux-native Qt download manager
  qtIDM is a Linux-native Qt Widgets download manager.

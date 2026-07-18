@@ -45,8 +45,14 @@ struct DownloadRequest {
     QString username;
     QString password;
     QString proxyUrl;
+    QString checksumAlgorithm = QStringLiteral("sha256");
+    QString expectedChecksum;
+    // Kept for compatibility with queue files created before generic checksums.
     QString expectedSha256;
     QString completionCommand;
+    QString completionMoveDirectory;
+    QString archiveDestination;
+    QString credentialVaultKey;
     QDateTime scheduledAt;
     QTime windowStart;
     QTime windowEnd;
@@ -55,12 +61,19 @@ struct DownloadRequest {
     int segments = 8;
     int perHostConnectionLimit = 16;
     bool dynamicSegmentation = true;
+    bool removeRecordOnCompletion = false;
+    bool extractArchive = false;
+    bool deleteArchiveAfterExtraction = false;
     int maxRetries = 5;
     int retryBaseDelayMs = 500;
+    int connectTimeoutSeconds = 15;
+    int lowSpeedTimeoutSeconds = 60;
+    int maximumRedirects = 20;
     int priority = 0;
     int repeatIntervalSeconds = 0;
     FileConflictPolicy fileConflictPolicy = FileConflictPolicy::AutoRename;
     qint64 speedLimitBytesPerSecond = 0;
+    qint64 sessionDataLimitBytes = 0;
     qint64 expectedTotalBytes = -1;
     QVector<SegmentInfo> resumeSegments;
 };
@@ -76,6 +89,7 @@ struct DownloadRecord {
     QDateTime createdAt;
     QDateTime updatedAt;
     QVector<SegmentInfo> segments;
+    DownloadRequest request;
 };
 
 QString toStorageValue(DownloadStatus status);

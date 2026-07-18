@@ -1,10 +1,35 @@
 const hostName = "io.github.qtidm.native";
 const mediaKey = (tabId) => `qtidm-media-${tabId}`;
 const settingsKey = "qtidm-settings";
-const defaultSettings = { interceptDownloads: true, captureMedia: true };
+const defaultSettings = {
+  interceptDownloads: true,
+  captureMedia: true,
+  excludedHosts: "",
+  excludedExtensions: ""
+};
 
 async function settings() {
   return { ...defaultSettings, ...(await chrome.storage.local.get(settingsKey))[settingsKey] };
+}
+
+function splitRules(value) {
+  return String(value || "").split(/[\s,;]+/).map((item) => item.trim().toLowerCase()).filter(Boolean);
+}
+
+function isExcluded(url, value) {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const hostMatch = splitRules(value.excludedHosts).some((rule) => {
+      const suffix = rule.startsWith("*.") ? rule.slice(2) : rule;
+      return host === suffix || (rule.startsWith("*.") && host.endsWith(`.${suffix}`));
+    });
+    const extension = parsed.pathname.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] || "";
+    return hostMatch || (extension && splitRules(value.excludedExtensions)
+      .map((item) => item.replace(/^\./, "")).includes(extension));
+  } catch (_) {
+    return false;
+  }
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -65,8 +90,8 @@ function mediaType(url, contentType = "") {
   return "Media";
 }
 
-async function rememberMedia(details) {
-  if (details.tabId < 0 || !details.url) {
+async function rememberMedia(details, value) {
+  if (details.tabId < 0 || !details.url || isExcluded(details.url, value)) {
     return;
   }
   const key = mediaKey(details.tabId);
@@ -137,7 +162,7 @@ chrome.downloads.onCreated.addListener((item) => {
     return;
   }
   settings()
-    .then((value) => value.interceptDownloads ? chrome.downloads.cancel(item.id) : false)
+    .then((value) => value.interceptDownloads && !isExcluded(url, value) ? chrome.downloads.cancel(item.id) : false)
     .then((canceled) => canceled === false ? undefined : sendToHost(url, null, item.referrer || ""))
     .catch((error) => showError(`Could not redirect the browser download: ${error.message}`));
 });
@@ -145,7 +170,7 @@ chrome.downloads.onCreated.addListener((item) => {
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     settings().then((value) => {
-      if (value.captureMedia && (isManifestUrl(details.url) || isSubtitleUrl(details.url))) return rememberMedia(details);
+      if (value.captureMedia && (isManifestUrl(details.url) || isSubtitleUrl(details.url))) return rememberMedia(details, value);
       return undefined;
     }).catch((error) => showError(error.message));
   },
@@ -156,7 +181,7 @@ chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     settings().then((value) => {
       if (value.captureMedia && (isManifestResponse(details) || isDirectMediaResponse(details)
-          || isSubtitleResponse(details))) return rememberMedia(details);
+          || isSubtitleResponse(details))) return rememberMedia(details, value);
       return undefined;
     }).catch((error) => showError(error.message));
   },

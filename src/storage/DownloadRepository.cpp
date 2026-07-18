@@ -1,6 +1,7 @@
 #include "storage/DownloadRepository.h"
 
 #include <QDateTime>
+#include <QJsonDocument>
 
 namespace qtidm {
 
@@ -17,6 +18,25 @@ bool execSql(sqlite3* db, const char* sql, QString* error)
     }
     sqlite3_free(rawError);
     return false;
+}
+
+bool columnExists(sqlite3* db, const char* table, const char* column)
+{
+    const auto sql = QByteArray("PRAGMA table_info(") + table + ");";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql.constData(), -1, &stmt, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    bool found = false;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const auto* name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        if (name && QByteArray(name) == column) {
+            found = true;
+            break;
+        }
+    }
+    sqlite3_finalize(stmt);
+    return found;
 }
 }
 
@@ -39,7 +59,7 @@ bool DownloadRepository::open(const QString& databasePath)
 
 bool DownloadRepository::migrate()
 {
-    return execSql(db_, "PRAGMA journal_mode=WAL;", &lastError_)
+    const bool created = execSql(db_, "PRAGMA journal_mode=WAL;", &lastError_)
         && execSql(db_, "PRAGMA synchronous=NORMAL;", &lastError_)
         && execSql(db_,
             "CREATE TABLE IF NOT EXISTS downloads ("
@@ -51,7 +71,8 @@ bool DownloadRepository::migrate()
             "completed_bytes INTEGER NOT NULL DEFAULT 0,"
             "status TEXT NOT NULL,"
             "created_at TEXT NOT NULL,"
-            "updated_at TEXT NOT NULL"
+            "updated_at TEXT NOT NULL,"
+            "request_json TEXT NOT NULL DEFAULT '{}'"
             ");",
             &lastError_)
         && execSql(db_,
@@ -66,6 +87,14 @@ bool DownloadRepository::migrate()
             "FOREIGN KEY(download_id) REFERENCES downloads(id) ON DELETE CASCADE"
             ");",
             &lastError_);
+    if (!created) {
+        return false;
+    }
+    if (!columnExists(db_, "downloads", "request_json")
+        && !execSql(db_, "ALTER TABLE downloads ADD COLUMN request_json TEXT NOT NULL DEFAULT '{}';", &lastError_)) {
+        return false;
+    }
+    return true;
 }
 
 bool DownloadRepository::upsertDownload(const DownloadRecord& record)
@@ -74,11 +103,12 @@ bool DownloadRepository::upsertDownload(const DownloadRecord& record)
         return false;
     }
     constexpr auto sql =
-        "INSERT INTO downloads(id,url,target_path,category,total_bytes,completed_bytes,status,created_at,updated_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?) "
+        "INSERT INTO downloads(id,url,target_path,category,total_bytes,completed_bytes,status,created_at,updated_at,request_json) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(id) DO UPDATE SET "
         "url=excluded.url,target_path=excluded.target_path,category=excluded.category,total_bytes=excluded.total_bytes,"
-        "completed_bytes=excluded.completed_bytes,status=excluded.status,updated_at=excluded.updated_at;";
+        "completed_bytes=excluded.completed_bytes,status=excluded.status,updated_at=excluded.updated_at,"
+        "request_json=excluded.request_json;";
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
@@ -94,6 +124,8 @@ bool DownloadRepository::upsertDownload(const DownloadRecord& record)
     sqlite3_bind_text(stmt, 7, toStorageValue(record.status).toUtf8().constData(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 8, record.createdAt.toUTC().toString(Qt::ISODateWithMs).toUtf8().constData(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 9, record.updatedAt.toUTC().toString(Qt::ISODateWithMs).toUtf8().constData(), -1, SQLITE_TRANSIENT);
+    const auto requestJson = QJsonDocument(requestToJson(record.request)).toJson(QJsonDocument::Compact);
+    sqlite3_bind_text(stmt, 10, requestJson.constData(), requestJson.size(), SQLITE_TRANSIENT);
     const auto rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     if (rc != SQLITE_DONE) {
@@ -272,7 +304,7 @@ bool DownloadRepository::removeDownload(const QString& id)
 QList<DownloadRecord> DownloadRepository::listDownloads() const
 {
     QList<DownloadRecord> records;
-    constexpr auto sql = "SELECT id,url,target_path,category,total_bytes,completed_bytes,status,created_at,updated_at FROM downloads ORDER BY created_at DESC;";
+    constexpr auto sql = "SELECT id,url,target_path,category,total_bytes,completed_bytes,status,created_at,updated_at,request_json FROM downloads ORDER BY created_at DESC;";
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
@@ -289,6 +321,13 @@ QList<DownloadRecord> DownloadRepository::listDownloads() const
         record.status = downloadStatusFromStorage(QString::fromUtf8(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6))));
         record.createdAt = QDateTime::fromString(QString::fromUtf8(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7))), Qt::ISODateWithMs);
         record.updatedAt = QDateTime::fromString(QString::fromUtf8(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 8))), Qt::ISODateWithMs);
+        const auto requestJson = QByteArray(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 9)));
+        record.request = requestFromJson(QJsonDocument::fromJson(requestJson).object());
+        if (!record.request.url.isValid()) {
+            record.request.url = record.url;
+            record.request.targetPath = record.targetPath;
+            record.request.category = record.category;
+        }
         records.append(record);
     }
     sqlite3_finalize(stmt);

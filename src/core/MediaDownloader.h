@@ -2,6 +2,7 @@
 
 #include "core/DownloadTypes.h"
 
+#include <QByteArray>
 #include <QHash>
 #include <QObject>
 
@@ -17,6 +18,7 @@ public:
     ~MediaDownloader() override;
 
     static bool supports(const QUrl& url);
+    static bool declaresUnsupportedDrm(const QByteArray& manifest);
     QString enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId = {});
     bool contains(const QString& id) const;
     void pause(const QString& id);

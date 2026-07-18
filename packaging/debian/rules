@@ -1,13 +1,21 @@
 #!/usr/bin/make -f
 
 QTIDM_CHROME_EXTENSION_ID ?= aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+QTIDM_INSTALL_EXTERNAL_CHROME_EXTENSION ?= $(if $(wildcard browser/packages/qtidm-chrome.crx),ON,OFF)
 export QTIDM_CHROME_EXTENSION_ID
 
 %:
 	dh $@ --buildsystem=cmake
 
 override_dh_auto_configure:
-	dh_auto_configure -- -DCMAKE_INSTALL_PREFIX=/usr -DQTIDM_BUILD_TESTS=OFF -DQTIDM_CHROME_EXTENSION_ID=$(QTIDM_CHROME_EXTENSION_ID)
+	dh_auto_configure -- -DCMAKE_INSTALL_PREFIX=/usr -DQTIDM_BUILD_TESTS=OFF -DQTIDM_CHROME_EXTENSION_ID=$(QTIDM_CHROME_EXTENSION_ID) -DQTIDM_INSTALL_EXTERNAL_CHROME_EXTENSION=$(QTIDM_INSTALL_EXTERNAL_CHROME_EXTENSION)
 
 override_dh_auto_install:
 	dh_auto_install --destdir=debian/tmp
+
+override_dh_install:
+	dh_install
+	if [ -d debian/tmp/opt/google/chrome/extensions ]; then \
+		mkdir -p debian/qtidm/opt/google/chrome/extensions; \
+		mv debian/tmp/opt/google/chrome/extensions/*.json debian/qtidm/opt/google/chrome/extensions/; \
+	fi

@@ -1,9 +1,11 @@
 #include "core/DownloadScheduler.h"
 
 #include "app/Paths.h"
+#include "integration/CredentialVault.h"
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QProcess>
@@ -13,6 +15,65 @@
 
 namespace qtidm {
 
+namespace {
+QString availableCompletionPath(const QString& requested)
+{
+    if (!QFileInfo::exists(requested)) {
+        return requested;
+    }
+    const QFileInfo info(requested);
+    const auto base = info.completeBaseName();
+    const auto suffix = info.completeSuffix();
+    for (int copy = 1; copy < 100000; ++copy) {
+        const auto name = suffix.isEmpty()
+            ? QStringLiteral("%1 (%2)").arg(base).arg(copy)
+            : QStringLiteral("%1 (%2).%3").arg(base).arg(copy).arg(suffix);
+        const auto candidate = info.dir().filePath(name);
+        if (!QFileInfo::exists(candidate)) {
+            return candidate;
+        }
+    }
+    return {};
+}
+
+bool moveCompletedFile(const QString& source, const QString& target)
+{
+    if (QFile::rename(source, target)) {
+        return true;
+    }
+    if (!QFile::copy(source, target)) {
+        return false;
+    }
+    if (QFile::remove(source)) {
+        return true;
+    }
+    QFile::remove(target);
+    return false;
+}
+
+QString defaultArchiveDestination(const QString& archivePath)
+{
+    auto name = QFileInfo(archivePath).fileName();
+    const auto lower = name.toLower();
+    static const QStringList suffixes {
+        QStringLiteral(".tar.bz2"), QStringLiteral(".tar.gz"), QStringLiteral(".tar.xz"),
+        QStringLiteral(".tbz2"), QStringLiteral(".tgz"), QStringLiteral(".txz"),
+        QStringLiteral(".7z"), QStringLiteral(".zip"), QStringLiteral(".rar"),
+        QStringLiteral(".tar"), QStringLiteral(".gz"), QStringLiteral(".bz2"), QStringLiteral(".xz")
+    };
+    for (const auto& suffix : suffixes) {
+        if (lower.endsWith(suffix)) {
+            name.chop(suffix.size());
+            break;
+        }
+    }
+    if (name.isEmpty()) {
+        name = QStringLiteral("extracted");
+    }
+    return QFileInfo(archivePath).dir().filePath(name);
+}
+}
+
 DownloadScheduler::DownloadScheduler(CurlEpollDownloader& downloader, QObject* parent)
     : QObject(parent)
     , downloader_(downloader)
@@ -21,6 +82,34 @@ DownloadScheduler::DownloadScheduler(CurlEpollDownloader& downloader, QObject* p
     connect(&timer_, &QTimer::timeout, this, &DownloadScheduler::dispatchDue);
     connect(&downloader_, &CurlEpollDownloader::statusChanged,
             this, &DownloadScheduler::downloadStatusChanged);
+    connect(&downloader_, &CurlEpollDownloader::downloadAdded, this,
+            [this](const DownloadRecord& record) {
+                auto it = activeRequests_.find(record.id);
+                if (it != activeRequests_.end()) {
+                    it->targetPath = record.targetPath;
+                }
+            });
+    connect(&downloader_, &CurlEpollDownloader::segmentsChanged, this,
+        [this](const QString& id, const QVector<SegmentInfo>& segments) {
+            auto it = activeRequests_.find(id);
+            if (it != activeRequests_.end()) {
+                it->resumeSegments = segments;
+                it->segments = segments.isEmpty() ? it->segments : segments.size();
+            }
+        });
+    connect(&downloader_, &CurlEpollDownloader::progressChanged, this,
+        [this](const QString& id, qint64, qint64 total, double) {
+            auto it = activeRequests_.find(id);
+            if (it != activeRequests_.end() && total >= 0) {
+                it->expectedTotalBytes = total;
+            }
+        });
+    connect(&archiveExtractor_, &ArchiveExtractor::extractionFailed,
+        this, &DownloadScheduler::completionAutomationFailed);
+    connect(&archiveExtractor_, &ArchiveExtractor::extractionFinished,
+        this, [this](const QString& id, const QString&, const QString& destination) {
+            emit archiveExtractionFinished(id, destination);
+        });
     timer_.start();
 }
 
@@ -258,6 +347,57 @@ int DownloadScheduler::activeCount(const QString& queueName) const
     return activeByQueue_.value(queueName.trimmed().toLower(), 0);
 }
 
+void DownloadScheduler::setCredentialVault(CredentialVault* vault)
+{
+    credentialVault_ = vault;
+    credentialBlocked_.clear();
+    dispatchDue();
+}
+
+void DownloadScheduler::setMeteredNetworkPolicy(MeteredNetworkPolicy policy)
+{
+    meteredPolicy_ = policy;
+    setNetworkMetered(networkMetered_);
+    if (!networkMetered_ || meteredPolicy_ == MeteredNetworkPolicy::Allow) {
+        dispatchDue();
+    }
+}
+
+MeteredNetworkPolicy DownloadScheduler::meteredNetworkPolicy() const
+{
+    return meteredPolicy_;
+}
+
+void DownloadScheduler::setNetworkMetered(bool metered)
+{
+    networkMetered_ = metered;
+    if (networkMetered_ && meteredPolicy_ == MeteredNetworkPolicy::PauseActive) {
+        const auto activeIds = downloadQueues_.keys();
+        for (const auto& id : activeIds) {
+            if (!meteredPausedIds_.contains(id)) {
+                meteredPausedIds_.insert(id);
+                downloader_.pause(id);
+            }
+        }
+    } else if (!networkMetered_ || meteredPolicy_ != MeteredNetworkPolicy::PauseActive) {
+        const auto pausedIds = meteredPausedIds_.values();
+        meteredPausedIds_.clear();
+        for (const auto& id : pausedIds) {
+            auto request = activeRequests_.value(id);
+            if (request.url.isValid()) {
+                request.existingId = id;
+                downloader_.enqueue(std::move(request));
+            }
+        }
+        dispatchDue();
+    }
+}
+
+bool DownloadScheduler::isNetworkMetered() const
+{
+    return networkMetered_;
+}
+
 bool DownloadScheduler::isAllowedAt(const DownloadRequest& request, const QDateTime& dateTime)
 {
     const int weekdayBit = 1 << (dateTime.date().dayOfWeek() - 1);
@@ -282,6 +422,9 @@ QString DownloadScheduler::lastError() const
 
 void DownloadScheduler::dispatchDue()
 {
+    if (networkMetered_ && meteredPolicy_ != MeteredNetworkPolicy::Allow) {
+        return;
+    }
     const auto now = QDateTime::currentDateTime();
     bool changed = false;
     QList<int> dueIndexes;
@@ -310,6 +453,24 @@ void DownloadScheduler::dispatchDue()
             continue;
         }
         auto request = queue_[index];
+        if (!request.credentialVaultKey.isEmpty() && request.password.isEmpty()) {
+            QString credentialError;
+            const auto password = credentialVault_
+                ? credentialVault_->lookup(request.credentialVaultKey, &credentialError)
+                : QString {};
+            if (password.isEmpty()) {
+                if (!credentialBlocked_.contains(request.scheduleId)) {
+                    credentialBlocked_.insert(request.scheduleId);
+                    emit credentialLookupFailed(request.scheduleId,
+                        credentialError.isEmpty()
+                            ? QStringLiteral("The saved credential could not be loaded from the system vault.")
+                            : credentialError);
+                }
+                continue;
+            }
+            credentialBlocked_.remove(request.scheduleId);
+            request.password = password;
+        }
         const auto id = downloader_.enqueue(request);
         downloadQueues_.insert(id, queueKey);
         activeRequests_.insert(id, request);
@@ -336,6 +497,9 @@ void DownloadScheduler::dispatchDue()
 
 void DownloadScheduler::downloadStatusChanged(const QString& id, DownloadStatus status, const QString&)
 {
+    if (status == DownloadStatus::Paused && meteredPausedIds_.contains(id)) {
+        return;
+    }
     if (status != DownloadStatus::Completed && status != DownloadStatus::Failed
         && status != DownloadStatus::Canceled && status != DownloadStatus::Paused) {
         return;
@@ -346,14 +510,59 @@ void DownloadScheduler::downloadStatusChanged(const QString& id, DownloadStatus 
     }
     const auto queueKey = it.value();
     downloadQueues_.erase(it);
+    meteredPausedIds_.remove(id);
     activeByQueue_[queueKey] = qMax(0, activeByQueue_.value(queueKey) - 1);
     const auto request = activeRequests_.take(id);
+    QString completedPath = request.targetPath;
+    if (status == DownloadStatus::Completed && !request.completionMoveDirectory.isEmpty()) {
+        QDir destination(request.completionMoveDirectory);
+        if (!destination.exists() && !QDir().mkpath(destination.absolutePath())) {
+            emit completionAutomationFailed(id,
+                QStringLiteral("Could not create post-download directory %1").arg(destination.absolutePath()));
+        } else {
+            auto target = destination.filePath(QFileInfo(request.targetPath).fileName());
+            if (QFileInfo(target).absoluteFilePath() != QFileInfo(request.targetPath).absoluteFilePath()) {
+                if (QFileInfo::exists(target)) {
+                    if (request.fileConflictPolicy == FileConflictPolicy::Overwrite) {
+                        QFile::remove(target);
+                    } else if (request.fileConflictPolicy == FileConflictPolicy::Skip) {
+                        target.clear();
+                    } else {
+                        target = availableCompletionPath(target);
+                    }
+                }
+                if (!target.isEmpty()) {
+                    if (moveCompletedFile(request.targetPath, target)) {
+                        completedPath = target;
+                        emit completionFileMoved(id, target);
+                    } else {
+                        emit completionAutomationFailed(id,
+                            QStringLiteral("Could not move completed file to %1").arg(target));
+                    }
+                }
+            }
+        }
+    }
     if (status == DownloadStatus::Completed && !request.completionCommand.isEmpty()) {
         auto command = QProcess::splitCommand(request.completionCommand);
         if (!command.isEmpty()) {
             const auto program = command.takeFirst();
+            for (auto& argument : command) {
+                argument.replace(QStringLiteral("{file}"), completedPath);
+                argument.replace(QStringLiteral("{dir}"), QFileInfo(completedPath).absolutePath());
+                argument.replace(QStringLiteral("{url}"), request.url.toString());
+            }
             emit completionCommandRequested(program, command);
         }
+    }
+    if (status == DownloadStatus::Completed && request.extractArchive) {
+        const auto destination = request.archiveDestination.isEmpty()
+            ? defaultArchiveDestination(completedPath)
+            : request.archiveDestination;
+        archiveExtractor_.extract(id, completedPath, destination, request.deleteArchiveAfterExtraction);
+    }
+    if (status == DownloadStatus::Completed && request.removeRecordOnCompletion) {
+        emit historyRemovalRequested(id);
     }
     dispatchDue();
 }

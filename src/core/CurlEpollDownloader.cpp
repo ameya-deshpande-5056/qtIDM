@@ -18,6 +18,7 @@
 namespace qtidm {
 
 struct CurlEpollDownloader::DownloadBatch {
+    CurlEpollDownloader* owner = nullptr;
     QString id;
     DownloadRequest request;
     QString stagingPath;
@@ -29,6 +30,7 @@ struct CurlEpollDownloader::DownloadBatch {
     int activeSegments = 0;
     int connectionLimit = 1;
     bool failed = false;
+    bool quotaExceeded = false;
 };
 
 struct CurlEpollDownloader::SegmentTransfer {
@@ -162,10 +164,11 @@ void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDo
 {
     transfer->urlBytes = request.url.toString().toUtf8();
     curl_easy_setopt(easy, CURLOPT_URL, transfer->urlBytes.constData());
-    curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT_MS, 15000L);
+    curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, request.maximumRedirects > 0 ? 1L : 0L);
+    curl_easy_setopt(easy, CURLOPT_MAXREDIRS, static_cast<long>(request.maximumRedirects));
+    curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT, static_cast<long>(qBound(1, request.connectTimeoutSeconds, 3600)));
     curl_easy_setopt(easy, CURLOPT_LOW_SPEED_LIMIT, 1L);
-    curl_easy_setopt(easy, CURLOPT_LOW_SPEED_TIME, 60L);
+    curl_easy_setopt(easy, CURLOPT_LOW_SPEED_TIME, static_cast<long>(qBound(1, request.lowSpeedTimeoutSeconds, 3600)));
     curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(easy, CURLOPT_FTP_RESPONSE_TIMEOUT, 30L);
     curl_easy_setopt(easy, CURLOPT_USE_SSL, CURLUSESSL_TRY);
@@ -249,6 +252,16 @@ void CurlEpollDownloader::cancel(const QString& id)
     wake();
 }
 
+qint64 CurlEpollDownloader::sessionBytesReceived() const
+{
+    return sessionBytesReceived_.load();
+}
+
+void CurlEpollDownloader::resetSessionBytesReceived()
+{
+    sessionBytesReceived_.store(0);
+}
+
 int CurlEpollDownloader::socketCallback(CURL*, curl_socket_t socket, int what, void* userp, void*)
 {
     auto* self = static_cast<CurlEpollDownloader*>(userp);
@@ -270,6 +283,12 @@ size_t CurlEpollDownloader::writeCallback(char* ptr, size_t size, size_t nmemb, 
 {
     const auto bytes = static_cast<qint64>(size * nmemb);
     auto* transfer = static_cast<SegmentTransfer*>(userdata);
+    const auto sessionBytes = transfer->batch->owner->sessionBytesReceived_.fetch_add(bytes) + bytes;
+    if (transfer->batch->request.sessionDataLimitBytes > 0
+        && sessionBytes > transfer->batch->request.sessionDataLimitBytes) {
+        transfer->batch->quotaExceeded = true;
+        return 0;
+    }
     const auto offset = transfer->start + transfer->written;
     if (!transfer->batch->writer->writeAt(offset, ptr, bytes)) {
         return 0;
@@ -421,6 +440,7 @@ void CurlEpollDownloader::addTransfer(QueuedRequest queued)
         : (rangeSupported && total > 0 ? plannedSegments : 1);
 
     auto batch = std::make_shared<DownloadBatch>();
+    batch->owner = this;
     batch->id = queued.id;
     batch->request = queued.request;
     batch->stagingPath = stagingPathFor(queued.request.targetPath);
@@ -429,6 +449,16 @@ void CurlEpollDownloader::addTransfer(QueuedRequest queued)
     batch->lastTick = QDateTime::currentMSecsSinceEpoch();
     batch->activeSegments = segmentCount;
     batch->connectionLimit = qMin(requestedSegments, segmentCount);
+    if (queued.request.sessionDataLimitBytes > 0) {
+        const auto remainingQuota = queued.request.sessionDataLimitBytes - sessionBytesReceived_.load();
+        const auto requiredBytes = total > 0 ? qMax<qint64>(0, total - QFileInfo(batch->stagingPath).size()) : 1;
+        if (remainingQuota < requiredBytes) {
+            emit statusChanged(batch->id, DownloadStatus::Failed,
+                QStringLiteral("session data limit exceeded: %1 bytes remain, %2 bytes required")
+                    .arg(qMax<qint64>(0, remainingQuota)).arg(requiredBytes));
+            return;
+        }
+    }
     if (total > 0) {
         const QStorageInfo storage(QFileInfo(batch->stagingPath).absolutePath());
         const qint64 existingBytes = QFileInfo(batch->stagingPath).size();
@@ -463,6 +493,7 @@ void CurlEpollDownloader::addTransfer(QueuedRequest queued)
     record.status = DownloadStatus::Downloading;
     record.createdAt = QDateTime::currentDateTimeUtc();
     record.updatedAt = record.createdAt;
+    record.request = queued.request;
 
     const qint64 segmentSize = total > 0 ? ((total + segmentCount - 1) / segmentCount) : -1;
     for (int index = 0; index < segmentCount; ++index) {
@@ -549,30 +580,58 @@ void CurlEpollDownloader::refillQueuedSegments()
 
 bool CurlEpollDownloader::verifyCompletedDownload(const std::shared_ptr<DownloadBatch>& batch, QString* error) const
 {
-    if (batch->request.expectedSha256.isEmpty()) {
+    const auto expectedText = batch->request.expectedChecksum.isEmpty()
+        ? batch->request.expectedSha256
+        : batch->request.expectedChecksum;
+    if (expectedText.isEmpty()) {
         return true;
     }
-    const auto expected = batch->request.expectedSha256.trimmed().toLatin1().toLower();
-    if (expected.size() != 64 || !std::all_of(expected.cbegin(), expected.cend(), [](char value) {
+    const auto algorithmName = batch->request.expectedChecksum.isEmpty()
+        ? QStringLiteral("sha256")
+        : batch->request.checksumAlgorithm.trimmed().toLower();
+    QCryptographicHash::Algorithm algorithm;
+    int expectedLength = 0;
+    if (algorithmName == QStringLiteral("md5")) {
+        algorithm = QCryptographicHash::Md5;
+        expectedLength = 32;
+    } else if (algorithmName == QStringLiteral("sha1")) {
+        algorithm = QCryptographicHash::Sha1;
+        expectedLength = 40;
+    } else if (algorithmName == QStringLiteral("sha256")) {
+        algorithm = QCryptographicHash::Sha256;
+        expectedLength = 64;
+    } else if (algorithmName == QStringLiteral("sha512")) {
+        algorithm = QCryptographicHash::Sha512;
+        expectedLength = 128;
+    } else {
+        *error = QStringLiteral("unsupported checksum algorithm: %1").arg(algorithmName);
+        return false;
+    }
+    const auto algorithmLabel = algorithmName == QStringLiteral("sha1") ? QStringLiteral("SHA-1")
+        : algorithmName == QStringLiteral("sha256") ? QStringLiteral("SHA-256")
+        : algorithmName == QStringLiteral("sha512") ? QStringLiteral("SHA-512")
+        : QStringLiteral("MD5");
+    const auto expected = expectedText.trimmed().toLatin1().toLower();
+    if (expected.size() != expectedLength || !std::all_of(expected.cbegin(), expected.cend(), [](char value) {
             return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f');
         })) {
-        *error = QStringLiteral("invalid expected SHA-256 checksum");
+        *error = QStringLiteral("invalid expected %1 checksum").arg(algorithmLabel);
         return false;
     }
     QFile file(batch->stagingPath);
     if (!file.open(QIODevice::ReadOnly)) {
-        *error = QStringLiteral("could not verify SHA-256: %1").arg(file.errorString());
+        *error = QStringLiteral("could not verify %1: %2").arg(algorithmLabel, file.errorString());
         return false;
     }
-    QCryptographicHash hash(QCryptographicHash::Sha256);
+    QCryptographicHash hash(algorithm);
     if (!hash.addData(&file)) {
-        *error = QStringLiteral("could not read completed file for SHA-256 verification");
+        *error = QStringLiteral("could not read completed file for %1 verification").arg(algorithmLabel);
         return false;
     }
     const auto actual = hash.result().toHex();
     if (actual != expected) {
-        *error = QStringLiteral("SHA-256 mismatch: expected %1, got %2")
-                     .arg(QString::fromLatin1(expected), QString::fromLatin1(actual));
+        *error = QStringLiteral("%1 mismatch: expected %2, got %3")
+                     .arg(algorithmLabel, QString::fromLatin1(expected), QString::fromLatin1(actual));
         return false;
     }
     return true;
@@ -796,7 +855,9 @@ void CurlEpollDownloader::checkCompleted()
                 }
             }
             QString messageText;
-            if (transfer->requiresHttpPartialResponse && response != 206) {
+            if (batch->quotaExceeded) {
+                messageText = QStringLiteral("session data limit exceeded");
+            } else if (transfer->requiresHttpPartialResponse && response != 206) {
                 messageText = QStringLiteral("server did not honor requested byte range");
             } else if (response >= 400) {
                 messageText = QStringLiteral("HTTP %1: %2")

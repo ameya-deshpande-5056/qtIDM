@@ -29,6 +29,11 @@
   <section id="settings" class="panel">
     <label class="switch-row"><span><b>Intercept browser downloads</b><small>Cancel new browser downloads and send them to qtIDM.</small></span><input id="interceptDownloads" type="checkbox"><i></i></label>
     <label class="switch-row"><span><b>Capture page media</b><small>Detect HLS, DASH, direct video, and direct audio.</small></span><input id="captureMedia" type="checkbox"><i></i></label>
+    <label for="excludedHosts">Excluded hosts</label>
+    <textarea id="excludedHosts" rows="3" placeholder="example.com&#10;*.internal.example"></textarea>
+    <label for="excludedExtensions">Excluded file extensions</label>
+    <textarea id="excludedExtensions" rows="2" placeholder="pdf, jpg, png"></textarea>
+    <button id="saveSettings" class="primary">SAVE SETTINGS</button>
     <p class="hint">DRM-protected streams cannot be downloaded.</p>
   </section>
   <footer id="notice">Ready</footer>

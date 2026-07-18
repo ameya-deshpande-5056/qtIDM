@@ -27,6 +27,8 @@ public:
     QString enqueue(DownloadRequest request);
     void pause(const QString& id);
     void cancel(const QString& id);
+    qint64 sessionBytesReceived() const;
+    void resetSessionBytesReceived();
 
 signals:
     void downloadAdded(qtidm::DownloadRecord record);
@@ -68,6 +70,7 @@ private:
     bool publishCompletedDownload(const std::shared_ptr<DownloadBatch>& batch, QString* error) const;
 
     std::atomic_bool running_ = false;
+    std::atomic<qint64> sessionBytesReceived_ = 0;
     std::jthread thread_;
     QMutex pendingMutex_;
     QQueue<QueuedRequest> pending_;

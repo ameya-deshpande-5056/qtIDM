@@ -75,6 +75,15 @@ bool MediaDownloader::supports(const QUrl& url)
     return value.contains(QStringLiteral(".m3u8")) || value.contains(QStringLiteral(".mpd"));
 }
 
+bool MediaDownloader::declaresUnsupportedDrm(const QByteArray& manifest)
+{
+    const auto lower = manifest.toLower();
+    return lower.contains("urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed") // Widevine
+        || lower.contains("urn:uuid:9a04f079-9840-4286-ab92-e65be0885f95") // PlayReady
+        || lower.contains("com.apple.streamingkeydelivery") // FairPlay
+        || lower.contains("method=sample-aes");
+}
+
 QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId)
 {
     const auto id = existingId.isEmpty() ? makeId(url, targetPath) : existingId;
@@ -86,7 +95,22 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
     record.status = DownloadStatus::Connecting;
     record.createdAt = QDateTime::currentDateTimeUtc();
     record.updatedAt = record.createdAt;
+    record.request.url = url;
+    record.request.targetPath = targetPath;
+    record.request.category = record.category;
+    record.request.headers = headers;
     emit downloadAdded(record);
+
+    if (url.isLocalFile()) {
+        QFile manifest(url.toLocalFile());
+        if (manifest.open(QIODevice::ReadOnly)
+            && declaresUnsupportedDrm(manifest.read(2 * 1024 * 1024))) {
+            const auto message = QStringLiteral("This manifest declares DRM-protected media. qtIDM does not bypass DRM.");
+            emit statusChanged(id, DownloadStatus::Failed, message);
+            Logger::error(QStringLiteral("Media download %1").arg(id), message);
+            return id;
+        }
+    }
 
     const auto ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
     if (ffmpeg.isEmpty()) {
@@ -258,7 +282,13 @@ void MediaDownloader::finish(const QString& id, bool succeeded, const QString& e
             emit statusChanged(id, DownloadStatus::Completed, QStringLiteral("Adaptive media download complete"));
         }
     } else {
-        const auto message = !error.isEmpty() ? error
+        const bool drmDiagnostic = diagnostics.contains(QStringLiteral("widevine"), Qt::CaseInsensitive)
+            || diagnostics.contains(QStringLiteral("playready"), Qt::CaseInsensitive)
+            || diagnostics.contains(QStringLiteral("fairplay"), Qt::CaseInsensitive)
+            || diagnostics.contains(QStringLiteral("DRM"), Qt::CaseInsensitive);
+        const auto message = drmDiagnostic
+            ? QStringLiteral("The media appears to be DRM-protected. qtIDM does not bypass DRM.")
+            : !error.isEmpty() ? error
             : diagnostics.isEmpty() ? QStringLiteral("FFmpeg failed without diagnostic output.")
                                     : QStringLiteral("FFmpeg failed: %1").arg(diagnostics.right(2000));
         emit statusChanged(id, DownloadStatus::Failed, message);
