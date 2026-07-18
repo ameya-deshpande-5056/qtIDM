@@ -2,7 +2,7 @@ usr/bin/qtIDM
 usr/bin/qtIDM-native-host
 usr/share/applications/io.github.qtidm.qtidm.desktop
 usr/share/icons/hicolor/scalable/apps/io.github.qtidm.qtidm.svg
-usr/share/metainfo/io.github.qtidm.qtidm.metainfo.xml
+usr/share/metainfo/io.github.qtidm.qtidm.appdata.xml
 usr/share/mime/packages/io.github.qtidm.qtidm.xml
 usr/lib/*/mozilla/native-messaging-hosts/io.github.qtidm.native.firefox.json
 etc/opt/chrome/native-messaging-hosts/io.github.qtidm.native.chrome.json

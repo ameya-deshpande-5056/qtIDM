@@ -184,7 +184,7 @@ Local package prerequisites on Ubuntu:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper-compat devscripts appstream flatpak flatpak-builder libfuse2 ffmpeg 7zip libsecret-tools yt-dlp
+sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper-compat devscripts appstream desktop-file-utils flatpak flatpak-builder libfuse2 ffmpeg 7zip libsecret-tools yt-dlp
 ```
 
 Build and test the Debian package:
@@ -196,20 +196,30 @@ qtIDM --version
 ```
 
 Debian artifacts, including the optional debug-symbol `.ddeb`, are written to `dist/`.
-All packaging scripts now use temporary workspaces under `/tmp` and clean them up on exit, so they should not create large persistent `build-*` folders in your home directory.
+All packaging scripts use temporary workspaces and Flatpak state under `/tmp`
+and clean them up on exit, so they do not create persistent `build-*` or
+`.flatpak-builder` directories in the checkout.
 
 Build and test the AppImage:
 
 ```bash
 curl -L -o linuxdeploy.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
 curl -L -o linuxdeploy-plugin-qt.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+printf '%s  %s\n' \
+  e87ee0815d109282fdda73e34c2361d64d02b0ffaea3674b18f1fd1f6a687dcf linuxdeploy.AppImage \
+  be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f linuxdeploy-plugin-qt.AppImage \
+  | sha256sum --check --strict
 chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
 sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
 sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
 APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh
-chmod +x ./*.AppImage
-APPIMAGE_EXTRACT_AND_RUN=1 ./*.AppImage --version
+APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.1.1-x86_64.AppImage --version
 ```
+
+The script writes exactly one versioned AppImage to `dist/`. The checksums pin
+the reviewed `continuous` linuxdeploy artifacts; when upstream replaces either
+artifact, review the new binaries and update both this section and the workflow
+checksums together.
 
 Build and test the Flatpak bundle:
 
@@ -219,6 +229,11 @@ sh packaging/release/build-flatpak-bundle.sh
 flatpak install --user -y dist/qtIDM-0.1.1.flatpak
 flatpak run io.github.qtidm.qtidm --version
 ```
+
+The Flatpak targets the supported KDE 6.11 runtime, has write access only to the
+user's Downloads directory plus portal-selected files, and bundles FFmpeg
+through the runtime together with `secret-tool`, 7-Zip, and yt-dlp. The bundled
+7-Zip and yt-dlp helpers currently target the x86-64 release architecture.
 
 ### Browser extension packages
 
@@ -256,6 +271,21 @@ The release command creates a private-key-signed CRX and requests an unlisted,
 Mozilla-signed XPI. Subsequent `.deb`, AppImage, and Flatpak builds bundle both
 files from `browser/packages/`. Release packaging additionally requires a
 Chrome/Chromium executable and `web-ext` 8 or newer.
+
+### Versioning
+
+The application and browser integrations have independent version tracks:
+
+| Component | Current version | Authoritative files |
+| --- | --- | --- |
+| qtIDM application and release tag | `0.1.1` / `v0.1.1` | `CMakeLists.txt`, with release notes in `CHANGELOG.md` |
+| Chrome and Firefox extensions | `0.3.1` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
+
+The two browser manifest versions must always match each other, but they do not
+need to match the application version. Increment the browser version before
+every signed Firefox submission because AMO does not allow an already submitted
+version to be reused. Version changes do not alter the Chrome extension ID,
+Firefox add-on ID, Chrome signing key, or AMO API credentials.
 
 ## GitHub Actions
 
@@ -350,6 +380,8 @@ Current behavior:
 - media captures can be reviewed and submitted individually,
 - manual batches are forwarded to one application-side batch editor,
 - interception and media capture can be toggled independently,
+- Firefox extension `0.3.1` requires Firefox 140 or newer for Mozilla's built-in
+  data-collection consent declaration,
 - real Chrome and Firefox automation verifies download interception through a temporary native host.
 
 Extension signing, private-key handling, and installation boundaries are documented in:
@@ -401,23 +433,53 @@ Transfer failures are also shown in the download status and recorded with their 
 
 ## Release
 
-Before tagging:
+Prepare application and extension changes before starting the release commit.
+Code changes should already be committed; the release commit should contain
+only version and release-metadata updates.
 
 1. Update the project version in `CMakeLists.txt` and the release notes in
    `CHANGELOG.md`.
 2. Increment the versions in `browser/chrome/manifest.json` and
-   `browser/firefox/manifest.json`. They must match, and AMO will reject a
-   previously submitted Firefox version.
-3. Confirm the signing variable and secrets described above are configured.
-4. Tag with the project version:
+   `browser/firefox/manifest.json`. They must match each other, are independent
+   of the project version, and must not reuse a version previously submitted to
+   AMO.
+3. Update the current-version table in this README.
+4. Confirm the signing variable and secrets described above are configured.
+5. Build and test the release candidate before committing:
 
 ```bash
 VERSION="$(sh packaging/release/version-info.sh)"
-git tag "v$VERSION"
-git push origin main "v$VERSION"
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+Review and create the release commit with an explicit file list so the Chrome
+private key and unrelated working-tree files cannot be staged accidentally:
+
+```bash
+VERSION="$(sh packaging/release/version-info.sh)"
+git status --short
+git add CMakeLists.txt CHANGELOG.md README.md \
+  browser/chrome/manifest.json browser/firefox/manifest.json
+git diff --cached --check
+git diff --cached
+git commit -m "Prepare v${VERSION} release"
+```
+
+Create an annotated tag only after the release commit exists, then push the
+commit before the tag:
+
+```bash
+VERSION="$(sh packaging/release/version-info.sh)"
+git tag -a "v$VERSION" -m "qtIDM $VERSION"
+git push origin main
+git push origin "v$VERSION"
 ```
 
 The single workflow `.github/workflows/build-release.yml` builds, tests, packages, smoke-tests, uploads artifacts, and publishes the GitHub Release for version tags.
+Treat pushed release tags as immutable. If a published tag points at the wrong
+commit, prefer preparing a new patch release instead of force-moving the tag.
 
 ## Documentation
 

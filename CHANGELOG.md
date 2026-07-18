@@ -19,6 +19,10 @@
 - Added NetworkManager metered-network policies to allow, hold, or pause and resume downloads.
 - Added maintained social-site extraction through yt-dlp, excluding YouTube.
 - Added explicit DRM-manifest detection and safe refusal; DRM bypass remains intentionally unsupported.
+- Hardened Debian, AppImage, and Flatpak release packaging with clean source
+  staging, deterministic artifacts, verified packaging tools, complete AppStream
+  metadata, a supported Flatpak runtime, scoped sandbox permissions, and bundled
+  Flatpak helper tools.
 
 ## 0.1.0
 

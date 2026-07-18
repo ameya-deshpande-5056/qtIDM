@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.qtidm.qtidm</id>
+  <name>qtIDM</name>
+  <summary>Linux-native Qt download manager</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.qtidm">
+    <name>qtIDM Maintainers</name>
+  </developer>
+  <description>
+    <p>
+      qtIDM is a Linux-native download manager built with Qt. It provides
+      segmented transfers, persistent queues, scheduling, browser integration,
+      media handling, checksum verification, and guarded archive extraction.
+    </p>
+    <p>
+      Downloads can be organized into queues and categories, resumed across
+      sessions, and controlled with configurable connection, retry, proxy, and
+      conflict-handling policies.
+    </p>
+  </description>
+  <url type="homepage">https://github.com/ameya-deshpande-5056/qtIDM</url>
+  <url type="bugtracker">https://github.com/ameya-deshpande-5056/qtIDM/issues</url>
+  <launchable type="desktop-id">io.github.qtidm.qtidm.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.1" date="2026-07-18">
+      <description>
+        <p>
+          Adds complete request persistence, configurable transfer policies,
+          browser-extension packaging, guarded extraction, Secret Service
+          credentials, metered-network handling, and maintained social-site
+          extraction.
+        </p>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-07-01">
+      <description>
+        <p>Initial Linux-native qtIDM release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -1,12 +1,20 @@
 {
   "manifest_version": 2,
   "name": "qtIDM Integration",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "permissions": ["contextMenus", "nativeMessaging", "downloads", "cookies", "tabs", "storage", "webRequest", "<all_urls>"],
   "background": { "scripts": ["background.js"] },
   "browser_action": {
     "default_title": "Download detected media with qtIDM",
     "default_popup": "popup.html"
   },
-  "applications": { "gecko": { "id": "qtidm@io.github.qtidm" } }
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "qtidm@io.github.qtidm",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["browsingActivity", "websiteContent", "websiteActivity"]
+      }
+    }
+  }
 }

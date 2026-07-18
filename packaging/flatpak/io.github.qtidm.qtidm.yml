@@ -1,16 +1,71 @@
 app-id: io.github.qtidm.qtidm
 runtime: org.kde.Platform
-runtime-version: '6.7'
+runtime-version: '6.11'
 sdk: org.kde.Sdk
 command: qtIDM
 finish-args:
   - --share=network
-  - --socket=session-bus
-  - --system-talk-name=org.freedesktop.NetworkManager
+  - --share=ipc
+  - --device=dri
+  - --filesystem=xdg-download:create
+  - --own-name=io.github.qtidm
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.freedesktop.portal.Desktop
   - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --system-talk-name=org.freedesktop.NetworkManager
   - --socket=wayland
-  - --socket=x11
+  - --socket=fallback-x11
 modules:
+  - name: libsecret
+    buildsystem: meson
+    config-opts:
+      - -Dmanpage=false
+      - -Dvapi=false
+      - -Dgtk_doc=false
+      - -Dintrospection=false
+      - -Dbash_completion=disabled
+      - -Dtpm2=false
+      - -Dpam=false
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/bash-completion
+    sources:
+      - type: archive
+        url: https://download.gnome.org/sources/libsecret/0.21/libsecret-0.21.7.tar.xz
+        sha256: 6b452e4750590a2b5617adc40026f28d2f4903de15f1250e1d1c40bfd68ed55e
+
+  - name: sevenzip
+    buildsystem: simple
+    only-arches:
+      - x86_64
+    build-commands:
+      - install -Dm755 7zz /app/bin/7zz
+      - ln -s 7zz /app/bin/7z
+      - install -Dm644 License.txt /app/share/licenses/7zip/License.txt
+    sources:
+      - type: archive
+        url: https://www.7-zip.org/a/7z2602-linux-x64.tar.xz
+        sha256: 41aaba7b1235304ab5aa0624530c67ae829496cd29e875925271efdccc28c03e
+
+  - name: yt-dlp
+    buildsystem: simple
+    only-arches:
+      - x86_64
+    build-commands:
+      - install -Dm755 yt-dlp /app/bin/yt-dlp
+      - install -Dm644 LICENSE /app/share/licenses/yt-dlp/LICENSE
+    sources:
+      - type: file
+        url: https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp_linux
+        sha256: bf8aac79b72287a6d2043074415132558b43743a8f9461a22b0141e90f16ce66
+        dest-filename: yt-dlp
+      - type: file
+        url: https://raw.githubusercontent.com/yt-dlp/yt-dlp/2026.06.09/LICENSE
+        sha256: 7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c
+        dest-filename: LICENSE
+
   - name: qtIDM
     buildsystem: cmake-ninja
     config-opts:
@@ -19,3 +74,17 @@ modules:
     sources:
       - type: dir
         path: ../..
+        skip:
+          - .flatpak-builder
+          - .git
+          - build
+          - build-*
+          - cmake-build-*
+          - dist
+          - qtidm-chrome.pem
+          - '*.AppImage'
+          - '*.buildinfo'
+          - '*.changes'
+          - '*.deb'
+          - '*.ddeb'
+          - '*.flatpak'

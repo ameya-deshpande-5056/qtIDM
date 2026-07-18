@@ -47,7 +47,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build python3 xvfb dbus-x11 qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper devscripts appstream flatpak flatpak-builder libfuse2 ffmpeg 7zip zip unzip openssl libsecret-tools yt-dlp
+          sudo apt-get install -y build-essential cmake ninja-build python3 xvfb dbus-x11 qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper devscripts appstream desktop-file-utils flatpak flatpak-builder libfuse2 ffmpeg 7zip zip unzip openssl libsecret-tools yt-dlp
           PUPPETEER_SKIP_DOWNLOAD=true npm install --global puppeteer web-ext
 
       - name: Build development browser packages
@@ -88,6 +88,13 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build -E 'extension_e2e' --output-on-failure
+
+      - name: Validate packaging metadata
+        run: |
+          sh -n packaging/build-deb.sh packaging/build-appimage.sh packaging/build-flatpak.sh packaging/release/build-flatpak-bundle.sh packaging/appimage/AppRun
+          desktop-file-validate assets/io.github.qtidm.qtidm.desktop
+          appstreamcli validate --pedantic --no-net assets/io.github.qtidm.qtidm.appdata.xml
+          flatpak-builder --show-manifest packaging/flatpak/io.github.qtidm.qtidm.yml >/dev/null
 
       - name: Browser extension end-to-end
         env:
@@ -146,9 +153,14 @@ jobs:
 
       - name: Install linuxdeploy
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        env:
+          LINUXDEPLOY_SHA256: e87ee0815d109282fdda73e34c2361d64d02b0ffaea3674b18f1fd1f6a687dcf
+          LINUXDEPLOY_PLUGIN_QT_SHA256: be1b7e166bf9975cfb694ebe6759ba40502ffc6196440d3e64aa90c4dbd67e9f
         run: |
           curl -L -o linuxdeploy.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           curl -L -o linuxdeploy-plugin-qt.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          printf '%s  %s\n' "$LINUXDEPLOY_SHA256" linuxdeploy.AppImage \
+            "$LINUXDEPLOY_PLUGIN_QT_SHA256" linuxdeploy-plugin-qt.AppImage | sha256sum --check --strict
           chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
           sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
           sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
@@ -160,10 +172,7 @@ jobs:
         run: |
           chmod +x packaging/build-appimage.sh packaging/appimage/AppRun
           sh packaging/build-appimage.sh
-          mkdir -p dist
-          APPIMAGE="$(find . -maxdepth 2 -type f -name '*.AppImage' -print -quit)"
-          test -n "$APPIMAGE"
-          cp "$APPIMAGE" "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage"
+          test -f "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage"
 
       - name: Smoke AppImage
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'

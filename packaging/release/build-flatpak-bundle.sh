@@ -13,6 +13,10 @@ trap 'rm -rf "$BUILD_ROOT"' EXIT HUP INT TERM
 assert_not_home_workspace "$BUILD_ROOT"
 
 flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak-builder --user --install-deps-from=flathub --force-clean --repo="$REPO_DIR" "$BUILD_DIR" "$ROOT/packaging/flatpak/io.github.qtidm.qtidm.yml"
+flatpak-builder --user --install-deps-from=flathub --force-clean \
+    --state-dir="$BUILD_ROOT/state" \
+    --repo="$REPO_DIR" \
+    "$BUILD_DIR" \
+    "$ROOT/packaging/flatpak/io.github.qtidm.qtidm.yml"
 mkdir -p "$ROOT/dist"
 flatpak build-bundle "$REPO_DIR" "$ROOT/dist/qtIDM-$VERSION.flatpak" io.github.qtidm.qtidm
