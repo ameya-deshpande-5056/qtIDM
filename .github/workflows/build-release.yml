@@ -160,6 +160,10 @@ jobs:
           test -n "$(find dist -type f -name '*.deb' -print -quit)"
           sudo apt-get install -y ./dist/*.deb
           xvfb-run -a qtIDM --version
+          test -x /usr/bin/qtIDM-native-host
+          test -f /usr/lib/mozilla/native-messaging-hosts/io.github.qtidm.native.json
+          test -f /etc/opt/chrome/native-messaging-hosts/io.github.qtidm.native.json
+          test -f /etc/chromium/native-messaging-hosts/io.github.qtidm.native.json
           if [ -f browser/packages/qtidm-chrome.crx ]; then
             test -f /usr/share/qtidm/browser/packages/qtidm-chrome.crx
             test -f /usr/share/qtidm/browser/packages/qtidm-firefox.xpi

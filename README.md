@@ -409,6 +409,9 @@ The release `.deb` installs the signed files at:
 - The release `.deb` also installs an external-extension descriptor for Google
   Chrome. Restart Chrome after installing the package; users can still disable
   or uninstall the extension.
+- The `.deb` installs the native host as `/usr/bin/qtIDM-native-host` and
+  registers it for Firefox, Google Chrome, and Chromium. Reinstall or upgrade
+  the package and fully restart the browser after changing browser integration.
 - In Firefox, open Add-ons and Themes, select **Install Add-on From File**, and
   choose `qtidm-firefox.xpi`. Standard Firefox requires this Mozilla-signed
   release XPI; the unsigned development XPI is only for temporary testing.

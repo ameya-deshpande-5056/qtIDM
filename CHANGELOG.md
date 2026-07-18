@@ -4,6 +4,8 @@
 
 - Added collision-free browser-extension version generation for signed CI runs and reruns.
 - Added tagged-release version synchronization when a higher GitHub tag is ahead of `CMakeLists.txt`.
+- Fixed Linux native-messaging manifest installation so Chrome, Chromium, and Firefox can find the qtIDM host.
+- Browser interception now removes successfully redirected items from browser download history and resumes the browser download if qtIDM is unavailable.
 
 ## 0.1.1
 

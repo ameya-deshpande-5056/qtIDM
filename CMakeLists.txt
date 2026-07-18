@@ -200,6 +200,13 @@ add_test(NAME qtIDM_browser_packaging_tests
 )
 set_tests_properties(qtIDM_browser_packaging_tests PROPERTIES TIMEOUT 60)
 
+find_program(QTIDM_NODE_EXECUTABLE NAMES node nodejs)
+if(QTIDM_NODE_EXECUTABLE)
+    add_test(NAME qtIDM_browser_interception_tests
+        COMMAND ${QTIDM_NODE_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/browser_interception_test.cjs
+    )
+endif()
+
 add_executable(qtIDM_scheduler_tests
     tests/DownloadSchedulerTest.cpp
     src/app/Paths.cpp
@@ -306,8 +313,21 @@ install(FILES assets/io.github.qtidm.qtidm.svg DESTINATION share/icons/hicolor/s
 install(FILES assets/io.github.qtidm.qtidm.appdata.xml DESTINATION share/metainfo)
 install(FILES assets/io.github.qtidm.qtidm.xml DESTINATION share/mime/packages)
 if(QTIDM_INSTALL_NATIVE_MESSAGING_HOSTS)
-    install(FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.firefox.json DESTINATION ${CMAKE_INSTALL_LIBDIR}/mozilla/native-messaging-hosts)
-    install(FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.chrome.json DESTINATION ${CMAKE_INSTALL_FULL_SYSCONFDIR}/opt/chrome/native-messaging-hosts)
+    install(
+        FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.firefox.json
+        DESTINATION lib/mozilla/native-messaging-hosts
+        RENAME io.github.qtidm.native.json
+    )
+    install(
+        FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.chrome.json
+        DESTINATION ${CMAKE_INSTALL_FULL_SYSCONFDIR}/opt/chrome/native-messaging-hosts
+        RENAME io.github.qtidm.native.json
+    )
+    install(
+        FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.chrome.json
+        DESTINATION ${CMAKE_INSTALL_FULL_SYSCONFDIR}/chromium/native-messaging-hosts
+        RENAME io.github.qtidm.native.json
+    )
 endif()
 install(
     DIRECTORY browser/chrome

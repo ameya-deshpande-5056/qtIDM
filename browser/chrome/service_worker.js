@@ -156,14 +156,38 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
+async function redirectBrowserDownload(item, url) {
+  let paused = false;
+  try {
+    await chrome.downloads.pause(item.id);
+    paused = true;
+  } catch (_) {
+    // Very small downloads can finish before the pause request reaches Chrome.
+  }
+
+  try {
+    await sendToHost(url, null, item.referrer || "");
+  } catch (error) {
+    if (paused) {
+      await chrome.downloads.resume(item.id).catch(() => {});
+    }
+    throw error;
+  }
+
+  await chrome.downloads.cancel(item.id).catch(() => {});
+  await chrome.downloads.removeFile(item.id).catch(() => {});
+  await chrome.downloads.erase({ id: item.id });
+}
+
 chrome.downloads.onCreated.addListener((item) => {
   const url = item.finalUrl || item.url;
   if (!url || item.byExtensionId === chrome.runtime.id || !/^https?:/i.test(url)) {
     return;
   }
   settings()
-    .then((value) => value.interceptDownloads && !isExcluded(url, value) ? chrome.downloads.cancel(item.id) : false)
-    .then((canceled) => canceled === false ? undefined : sendToHost(url, null, item.referrer || ""))
+    .then((value) => value.interceptDownloads && !isExcluded(url, value)
+      ? redirectBrowserDownload(item, url)
+      : undefined)
     .catch((error) => showError(`Could not redirect the browser download: ${error.message}`));
 });
 

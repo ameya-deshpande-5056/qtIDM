@@ -35,6 +35,17 @@ private slots:
         }
     }
 
+    void browserNativeManifestsUseDiscoverableInstallNames()
+    {
+        QFile file(QStringLiteral(QTIDM_BINARY_DIR) + QStringLiteral("/cmake_install.cmake"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto data = QString::fromUtf8(file.readAll());
+        QVERIFY(data.contains(QStringLiteral("/lib/mozilla/native-messaging-hosts")));
+        QVERIFY(data.contains(QStringLiteral("/etc/opt/chrome/native-messaging-hosts")));
+        QVERIFY(data.contains(QStringLiteral("/etc/chromium/native-messaging-hosts")));
+        QCOMPARE(data.count(QStringLiteral("RENAME \"io.github.qtidm.native.json\"")), 3);
+    }
+
     void browserExtensionManifestsAreValidJson()
     {
         const QStringList paths {
