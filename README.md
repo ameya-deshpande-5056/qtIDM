@@ -117,6 +117,7 @@ qtIDM --version
 ```
 
 Debian artifacts, including the optional debug-symbol `.ddeb`, are written to `dist/`.
+All packaging scripts now use temporary workspaces under `/tmp` and clean them up on exit, so they should not create large persistent `build-*` folders in your home directory.
 
 Build and test the AppImage:
 
