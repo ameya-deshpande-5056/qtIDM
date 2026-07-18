@@ -31,6 +31,7 @@ struct CurlEpollDownloader::DownloadBatch {
     int connectionLimit = 1;
     bool failed = false;
     bool quotaExceeded = false;
+    bool failureReported = false;
 };
 
 struct CurlEpollDownloader::SegmentTransfer {
@@ -857,6 +858,9 @@ void CurlEpollDownloader::checkCompleted()
             QString messageText;
             if (batch->quotaExceeded) {
                 messageText = QStringLiteral("session data limit exceeded");
+            } else if (response == 401 || response == 403) {
+                messageText = QStringLiteral("HTTP %1: server denied the request; the browser session headers or signed URL may have expired. Reload playback and capture it again.")
+                                  .arg(response);
             } else if (transfer->requiresHttpPartialResponse && response != 206) {
                 messageText = QStringLiteral("server did not honor requested byte range");
             } else if (response >= 400) {
@@ -866,7 +870,10 @@ void CurlEpollDownloader::checkCompleted()
             } else {
                 messageText = QString::fromUtf8(curl_easy_strerror(message->data.result));
             }
-            emit statusChanged(batch->id, DownloadStatus::Failed, messageText);
+            if (!batch->failureReported) {
+                batch->failureReported = true;
+                emit statusChanged(batch->id, DownloadStatus::Failed, messageText);
+            }
         }
 
         emit segmentsChanged(batch->id, batch->segments);
@@ -882,9 +889,12 @@ void CurlEpollDownloader::checkCompleted()
                 batch->failed = true;
             }
             emit progressChanged(batch->id, received, batch->total, 0.0);
-            emit statusChanged(batch->id,
-                               batch->failed ? DownloadStatus::Failed : DownloadStatus::Completed,
-                               verificationError);
+            if (!batch->failed) {
+                emit statusChanged(batch->id, DownloadStatus::Completed, {});
+            } else if (!batch->failureReported) {
+                emit statusChanged(batch->id, DownloadStatus::Failed,
+                                   verificationError.isEmpty() ? QStringLiteral("Download failed") : verificationError);
+            }
             batches_.remove(batch->id);
         }
     }

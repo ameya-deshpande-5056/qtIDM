@@ -102,6 +102,13 @@ int main(int argc, char** argv)
         }
         headers.insert(it.key(), value);
     }
+    const auto mediaType = object.value(QStringLiteral("mediaType")).toString().trimmed().toUpper();
+    if (!mediaType.isEmpty() && mediaType != QStringLiteral("HLS") && mediaType != QStringLiteral("DASH")) {
+        return fail(QStringLiteral("invalid-media-type"), QStringLiteral("Browser sent an unsupported media type."));
+    }
+    if (!mediaType.isEmpty()) {
+        headers.insert(QStringLiteral("_qtidmMediaType"), mediaType);
+    }
     bool launchAttempted = false;
     QString lastError;
     for (int attempt = 0; attempt < 50; ++attempt) {

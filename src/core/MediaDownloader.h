@@ -17,7 +17,7 @@ public:
     explicit MediaDownloader(QObject* parent = nullptr);
     ~MediaDownloader() override;
 
-    static bool supports(const QUrl& url);
+    static bool supports(const QUrl& url, const QString& mediaTypeHint = {});
     static bool declaresUnsupportedDrm(const QByteArray& manifest);
     QString enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId = {});
     bool contains(const QString& id) const;

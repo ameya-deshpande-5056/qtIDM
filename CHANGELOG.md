@@ -6,6 +6,8 @@
 - Added tagged-release version synchronization when a higher GitHub tag is ahead of `CMakeLists.txt`.
 - Fixed Linux native-messaging manifest installation so Chrome, Chromium, and Firefox can find the qtIDM host.
 - Browser interception now removes successfully redirected items from browser download history and resumes the browser download if qtIDM is unavailable.
+- Captured HLS/DASH requests now retain their browser request context in session storage and route extensionless manifests through FFmpeg.
+- Removed empty theme-watcher and invalid fully-decoded URL warnings, and stopped duplicate empty failure reports after HTTP errors.
 
 ## 0.1.1
 

@@ -71,6 +71,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_range(SIZE, head_only, accept_range=True)
             return
+        if self.path.startswith("/forbidden.bin"):
+            self.send_response(403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if self.path.startswith("/range.bin"):
             self.send_range(SIZE, head_only, accept_range=True)
             return

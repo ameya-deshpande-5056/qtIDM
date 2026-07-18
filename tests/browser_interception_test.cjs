@@ -8,19 +8,27 @@ const vm = require("node:vm");
 const ROOT = path.resolve(__dirname, "..");
 
 function event() {
-  return { addListener() {} };
+  const listeners = [];
+  return {
+    listeners,
+    addListener(listener) {
+      listeners.push(listener);
+    }
+  };
 }
 
 function browserApi(rootName) {
   const calls = [];
+  const nativeMessages = [];
   let nativeError = null;
   const api = {
     runtime: {
       id: "qtidm-test-extension",
       onInstalled: event(),
       onMessage: event(),
-      async sendNativeMessage() {
+      async sendNativeMessage(_host, message) {
         calls.push("native");
+        nativeMessages.push(message);
         if (nativeError) throw nativeError;
         return { ok: true };
       }
@@ -53,6 +61,7 @@ function browserApi(rootName) {
     },
     webRequest: {
       onBeforeRequest: event(),
+      onBeforeSendHeaders: event(),
       onHeadersReceived: event()
     }
   };
@@ -63,6 +72,7 @@ function browserApi(rootName) {
   return {
     api,
     calls,
+    nativeMessages,
     failNative(error) {
       nativeError = error;
     }
@@ -83,6 +93,29 @@ async function testVariant(relativePath, rootName) {
     context,
     { filename: relativePath }
   );
+
+  mock.api.webRequest.onBeforeSendHeaders.listeners[0]({
+    requestId: "observed-request",
+    tabId: 1,
+    url: "https://example.test/archive.bin",
+    requestHeaders: [
+      { name: "Origin", value: "https://example.test" },
+      { name: "Referer", value: "https://example.test/page" },
+      { name: "Sec-Fetch-Site", value: "same-origin" }
+    ]
+  });
+  await context.sendToHost(
+    "https://example.test/archive.bin",
+    { url: "https://fallback.invalid/" },
+    "",
+    {},
+    "HLS"
+  );
+  assert.equal(mock.nativeMessages.at(-1).mediaType, "HLS");
+  assert.equal(mock.nativeMessages.at(-1).headers.Origin, "https://example.test");
+  assert.equal(mock.nativeMessages.at(-1).headers.Referer, "https://example.test/page");
+  assert.equal(mock.nativeMessages.at(-1).headers["Sec-Fetch-Site"], "same-origin");
+  mock.calls.length = 0;
 
   const item = {
     id: 7,

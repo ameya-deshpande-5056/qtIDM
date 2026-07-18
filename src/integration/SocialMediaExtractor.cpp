@@ -184,7 +184,7 @@ SocialMediaExtraction SocialMediaExtractor::extract(
             headers.insert(it.key(), it.value());
         }
         const auto protocol = format.value(QStringLiteral("protocol")).toString().toLower();
-        const auto mediaAddress = mediaUrl.toString(QUrl::FullyDecoded).toLower();
+        const auto mediaAddress = mediaUrl.path(QUrl::FullyDecoded).toLower();
         const bool adaptive = protocol.contains(QStringLiteral("m3u8"))
             || protocol.contains(QStringLiteral("dash"))
             || mediaAddress.contains(QStringLiteral(".m3u8"))

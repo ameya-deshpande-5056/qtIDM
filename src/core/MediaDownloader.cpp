@@ -69,9 +69,13 @@ MediaDownloader::~MediaDownloader()
     }
 }
 
-bool MediaDownloader::supports(const QUrl& url)
+bool MediaDownloader::supports(const QUrl& url, const QString& mediaTypeHint)
 {
-    const auto value = url.toString(QUrl::FullyDecoded).toLower();
+    const auto normalizedHint = mediaTypeHint.trimmed().toUpper();
+    if (normalizedHint == QStringLiteral("HLS") || normalizedHint == QStringLiteral("DASH")) {
+        return true;
+    }
+    const auto value = url.path(QUrl::FullyDecoded).toLower();
     return value.contains(QStringLiteral(".m3u8")) || value.contains(QStringLiteral(".mpd"));
 }
 

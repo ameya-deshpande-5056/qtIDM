@@ -1,6 +1,9 @@
 const hostName = "io.github.qtidm.native";
 const mediaKey = (tabId) => `qtidm-media-${tabId}`;
 const settingsKey = "qtidm-settings";
+const captureStorage = browser.storage.session || browser.storage.local;
+const requestHeadersById = new Map();
+const requestHeadersByUrl = new Map();
 const defaultSettings = {
   interceptDownloads: true,
   captureMedia: true,
@@ -30,6 +33,56 @@ function isExcluded(url, value) {
   } catch (_) {
     return false;
   }
+}
+
+function forwardedRequestHeaders(details) {
+  const headers = {};
+  const allowed = new Set([
+    "accept", "accept-language", "authorization", "cookie", "origin", "referer", "user-agent"
+  ]);
+  for (const header of details.requestHeaders || []) {
+    const name = String(header.name || "");
+    const lower = name.toLowerCase();
+    if ((allowed.has(lower) || lower.startsWith("sec-ch-ua") || lower.startsWith("sec-fetch-"))
+        && typeof header.value === "string" && header.value) {
+      headers[name] = header.value;
+    }
+  }
+  return headers;
+}
+
+function rememberRequestHeaders(details) {
+  const entry = {
+    headers: forwardedRequestHeaders(details),
+    detectedAt: Date.now()
+  };
+  requestHeadersById.set(details.requestId, entry);
+  while (requestHeadersById.size > 500) {
+    requestHeadersById.delete(requestHeadersById.keys().next().value);
+  }
+  requestHeadersByUrl.delete(details.url);
+  requestHeadersByUrl.set(details.url, entry);
+  while (requestHeadersByUrl.size > 200) {
+    requestHeadersByUrl.delete(requestHeadersByUrl.keys().next().value);
+  }
+  return entry.headers;
+}
+
+function recentRequestHeaders(url) {
+  const entry = requestHeadersByUrl.get(url);
+  if (!entry || Date.now() - entry.detectedAt > 10 * 60 * 1000) {
+    requestHeadersByUrl.delete(url);
+    return {};
+  }
+  return entry.headers;
+}
+
+function hasHeader(headers, name) {
+  return Object.keys(headers).some((key) => key.toLowerCase() === name.toLowerCase());
+}
+
+function setHeaderDefault(headers, name, value) {
+  if (value && !hasHeader(headers, name)) headers[name] = value;
 }
 
 browser.contextMenus.create({
@@ -93,21 +146,28 @@ async function rememberMedia(details, value) {
     return;
   }
   const key = mediaKey(details.tabId);
-  const stored = (await browser.storage.local.get(key))[key];
+  const stored = (await captureStorage.get(key))[key];
   const items = Array.isArray(stored) ? stored : (stored && stored.url ? [stored] : []);
   const contentType = (details.responseHeaders || [])
     .find((header) => header.name.toLowerCase() === "content-type")?.value?.toLowerCase() || "";
+  const duplicate = items.findIndex((entry) => entry.url === details.url);
+  const previous = duplicate >= 0 ? items[duplicate] : null;
+  const observedHeaders = details.requestHeaders
+    ? forwardedRequestHeaders(details)
+    : requestHeadersById.get(details.requestId)?.headers || {};
   const item = {
     url: details.url,
-    referrer: details.documentUrl || details.originUrl || "",
+    referrer: details.documentUrl || details.originUrl
+      || Object.entries(observedHeaders).find(([name]) => name.toLowerCase() === "referer")?.[1]
+      || previous?.referrer || "",
     detectedAt: Date.now(),
-    type: mediaType(details.url, contentType)
+    type: mediaType(details.url, contentType),
+    headers: Object.keys(observedHeaders).length ? observedHeaders : previous?.headers || {}
   };
-  const duplicate = items.findIndex((entry) => entry.url === item.url);
   if (duplicate >= 0) items.splice(duplicate, 1);
   items.unshift(item);
   items.splice(25);
-  await browser.storage.local.set({ [key]: items });
+  await captureStorage.set({ [key]: items });
   await browser.browserAction.setBadgeText({ tabId: details.tabId, text: String(items.length) });
   await browser.browserAction.setTitle({
     tabId: details.tabId,
@@ -115,7 +175,7 @@ async function rememberMedia(details, value) {
   });
 }
 
-async function sendToHost(url, tab, referrer = "") {
+async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "") {
   if (!/^https?:/i.test(url)) {
     throw new Error("Only HTTP and HTTPS downloads can be redirected to qtIDM.");
   }
@@ -126,13 +186,14 @@ async function sendToHost(url, tab, referrer = "") {
     cookies = [];
   }
   const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+  const headers = { ...recentRequestHeaders(url), ...capturedHeaders };
+  setHeaderDefault(headers, "Cookie", cookieHeader);
+  setHeaderDefault(headers, "Referer", referrer || (tab && tab.url ? tab.url : ""));
+  setHeaderDefault(headers, "User-Agent", navigator.userAgent);
   const response = await browser.runtime.sendNativeMessage(hostName, {
     url,
-    headers: {
-      Cookie: cookieHeader,
-      Referer: referrer || (tab && tab.url ? tab.url : ""),
-      "User-Agent": navigator.userAgent
-    }
+    mediaType: mediaTypeHint === "HLS" || mediaTypeHint === "DASH" ? mediaTypeHint : "",
+    headers
   });
   if (!response || !response.ok) {
     throw new Error(response && response.message ? response.message : "The qtIDM native host did not acknowledge the request.");
@@ -204,6 +265,20 @@ browser.webRequest.onBeforeRequest.addListener(
   { urls: ["<all_urls>"], types: ["xmlhttprequest", "media", "other"] }
 );
 
+browser.webRequest.onBeforeSendHeaders.addListener(
+  (details) => {
+    rememberRequestHeaders(details);
+    settings().then((value) => {
+      if (value.captureMedia && (isManifestUrl(details.url) || isSubtitleUrl(details.url))) {
+        return rememberMedia(details, value);
+      }
+      return undefined;
+    }).catch((error) => showError(error.message));
+  },
+  { urls: ["<all_urls>"], types: ["xmlhttprequest", "media", "other"] },
+  ["requestHeaders"]
+);
+
 browser.webRequest.onHeadersReceived.addListener(
   (details) => {
     settings().then((value) => {
@@ -219,7 +294,7 @@ browser.webRequest.onHeadersReceived.addListener(
 browser.runtime.onMessage.addListener(async (message) => {
   const key = mediaKey(message.tabId);
   if (message.type === "listMedia") {
-    const stored = (await browser.storage.local.get(key))[key];
+    const stored = (await captureStorage.get(key))[key];
     return { ok: true, items: Array.isArray(stored) ? stored : (stored?.url ? [stored] : []) };
   }
   if (message.type === "getSettings") {
@@ -251,18 +326,18 @@ browser.runtime.onMessage.addListener(async (message) => {
     }
   }
   if (message.type === "clearMedia") {
-    await browser.storage.local.remove(key);
+    await captureStorage.remove(key);
     await browser.browserAction.setBadgeText({ tabId: message.tabId, text: "" });
     return { ok: true };
   }
   if (message.type === "downloadMedia") {
-    const stored = (await browser.storage.local.get(key))[key];
+    const stored = (await captureStorage.get(key))[key];
     const items = Array.isArray(stored) ? stored : [];
     const item = items[message.index];
     if (!item) return { ok: false, message: "The selected media capture no longer exists." };
     const tab = await browser.tabs.get(message.tabId);
     try {
-      await sendToHost(item.url, tab, item.referrer);
+      await sendToHost(item.url, tab, item.referrer, item.headers, item.type);
       return { ok: true };
     } catch (error) {
       showError(error.message);
@@ -273,5 +348,5 @@ browser.runtime.onMessage.addListener(async (message) => {
 });
 
 browser.tabs.onRemoved.addListener((tabId) => {
-  browser.storage.local.remove(mediaKey(tabId)).catch(() => {});
+  captureStorage.remove(mediaKey(tabId)).catch(() => {});
 });

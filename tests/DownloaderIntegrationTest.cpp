@@ -218,6 +218,37 @@ private slots:
         QCOMPARE(file.readAll(), expectedPayload(fixtureSize));
     }
 
+    void reportsPermanentHttpFailureOnce()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/forbidden.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/forbidden.bin");
+        const auto id = downloader.enqueue(request);
+
+        QString message;
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Failed, 5000, &message));
+        QVERIFY(message.startsWith(QStringLiteral("HTTP 403:")));
+        QVERIFY(message.contains(QStringLiteral("capture it again")));
+        QTest::qWait(100);
+
+        int failedEvents = 0;
+        for (const auto& event : statusSpy) {
+            if (event.at(0).toString() == id
+                && event.at(1).value<qtidm::DownloadStatus>() == qtidm::DownloadStatus::Failed) {
+                failedEvents++;
+            }
+        }
+        QCOMPARE(failedEvents, 1);
+        downloader.stop();
+    }
+
     void verifiesExpectedChecksums()
     {
         QTemporaryDir dir;

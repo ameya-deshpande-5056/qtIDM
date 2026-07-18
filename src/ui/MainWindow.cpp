@@ -105,6 +105,18 @@ bool containsHeader(const QVariantMap& headers, QStringView name)
     return false;
 }
 
+QString takeHeader(QVariantMap* headers, QStringView name)
+{
+    for (auto it = headers->begin(); it != headers->end(); ++it) {
+        if (QStringView(it.key()).compare(name, Qt::CaseInsensitive) == 0) {
+            const auto value = it.value().toString();
+            headers->erase(it);
+            return value;
+        }
+    }
+    return {};
+}
+
 bool mergeHeaderLines(const QString& text, QVariantMap* headers, QString* error)
 {
     const auto lines = text.split(QLatin1Char('\n'));
@@ -258,7 +270,8 @@ void MainWindow::addUrl(QString url, QVariantMap headers)
         return;
     }
 
-    const bool adaptiveMedia = MediaDownloader::supports(parsed);
+    const auto mediaTypeHint = takeHeader(&headers, u"_qtidmMediaType").trimmed().toUpper();
+    const bool adaptiveMedia = MediaDownloader::supports(parsed, mediaTypeHint);
     QString name = parsed.fileName().isEmpty() ? QStringLiteral("download.bin") : parsed.fileName();
     if (adaptiveMedia) {
         name = QFileInfo(name).completeBaseName() + QStringLiteral(".mkv");

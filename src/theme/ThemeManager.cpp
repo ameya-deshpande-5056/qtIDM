@@ -155,8 +155,14 @@ bool ThemeManager::eventFilter(QObject* watched, QEvent* event)
 
 void ThemeManager::setupThemeWatchers()
 {
-    watcher_->removePaths(watcher_->files());
-    watcher_->removePaths(watcher_->directories());
+    const auto watchedFiles = watcher_->files();
+    if (!watchedFiles.isEmpty()) {
+        watcher_->removePaths(watchedFiles);
+    }
+    const auto watchedDirectories = watcher_->directories();
+    if (!watchedDirectories.isEmpty()) {
+        watcher_->removePaths(watchedDirectories);
+    }
 
     QStringList paths;
     const auto desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP").toUpper();

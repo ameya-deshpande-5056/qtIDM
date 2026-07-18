@@ -15,6 +15,10 @@ private slots:
         QVERIFY(qtidm::MediaDownloader::supports(QUrl(QStringLiteral("https://example.test/master.m3u8?token=1"))));
         QVERIFY(qtidm::MediaDownloader::supports(QUrl(QStringLiteral("https://example.test/video.mpd"))));
         QVERIFY(!qtidm::MediaDownloader::supports(QUrl(QStringLiteral("https://example.test/video.mp4"))));
+        QVERIFY(!qtidm::MediaDownloader::supports(
+            QUrl(QStringLiteral("https://uwu.m3u8vault-10.example.test/extensionless-manifest"))));
+        QVERIFY(qtidm::MediaDownloader::supports(
+            QUrl(QStringLiteral("https://cdn.example.test/extensionless-manifest")), QStringLiteral("HLS")));
     }
 
     void detectsUnsupportedDrmDeclarations()
