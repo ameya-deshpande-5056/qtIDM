@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
+#include <QSet>
 #include <QStandardPaths>
 #include <QTimer>
 #include <QUrl>
@@ -25,12 +26,23 @@ QString makeId(const QUrl& url, const QString& targetPath)
         + QString::fromLatin1(QCryptographicHash::hash(seed.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));
 }
 
-QString ffmpegHeaders(const QVariantMap& headers)
+QString headerValue(const QVariantMap& headers, QStringView name)
+{
+    for (auto it = headers.cbegin(); it != headers.cend(); ++it) {
+        if (QStringView(it.key()).compare(name, Qt::CaseInsensitive) == 0) {
+            return it.value().toString();
+        }
+    }
+    return {};
+}
+
+QString ffmpegHeaders(const QVariantMap& headers, const QSet<QString>& excluded)
 {
     QStringList lines;
     for (auto it = headers.cbegin(); it != headers.cend(); ++it) {
         const auto value = it.value().toString();
-        if (!value.isEmpty() && !it.key().contains(QLatin1Char('\r')) && !it.key().contains(QLatin1Char('\n'))
+        if (!excluded.contains(it.key().toLower()) && !value.isEmpty()
+            && !it.key().contains(QLatin1Char('\r')) && !it.key().contains(QLatin1Char('\n'))
             && !value.contains(QLatin1Char('\r')) && !value.contains(QLatin1Char('\n'))) {
             lines.append(it.key() + QStringLiteral(": ") + value);
         }
@@ -88,6 +100,25 @@ bool MediaDownloader::declaresUnsupportedDrm(const QByteArray& manifest)
         || lower.contains("method=sample-aes");
 }
 
+QStringList MediaDownloader::httpInputArguments(const QVariantMap& headers)
+{
+    QStringList arguments;
+    const auto userAgent = headerValue(headers, u"User-Agent");
+    if (!userAgent.isEmpty()) {
+        arguments << QStringLiteral("-user_agent") << userAgent;
+    }
+    const auto referer = headerValue(headers, u"Referer");
+    if (!referer.isEmpty()) {
+        arguments << QStringLiteral("-referer") << referer;
+    }
+    const auto headersText = ffmpegHeaders(
+        headers, { QStringLiteral("user-agent"), QStringLiteral("referer") });
+    if (!headersText.isEmpty()) {
+        arguments << QStringLiteral("-headers") << headersText;
+    }
+    return arguments;
+}
+
 QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId)
 {
     const auto id = existingId.isEmpty() ? makeId(url, targetPath) : existingId;
@@ -141,10 +172,7 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
         QStringLiteral("pipe:1"),
         QStringLiteral("-nostats")
     };
-    const auto headersText = ffmpegHeaders(headers);
-    if (!headersText.isEmpty()) {
-        arguments << QStringLiteral("-headers") << headersText;
-    }
+    arguments << httpInputArguments(headers);
     if (url.scheme() == QStringLiteral("http") || url.scheme() == QStringLiteral("https")) {
         arguments << QStringLiteral("-reconnect") << QStringLiteral("1")
                   << QStringLiteral("-reconnect_streamed") << QStringLiteral("1")

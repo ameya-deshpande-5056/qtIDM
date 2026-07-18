@@ -109,6 +109,14 @@ int main(int argc, char** argv)
     if (!mediaType.isEmpty()) {
         headers.insert(QStringLiteral("_qtidmMediaType"), mediaType);
     }
+    const auto suggestedFilename = object.value(QStringLiteral("suggestedFilename")).toString().trimmed();
+    if (suggestedFilename.size() > 4096 || suggestedFilename.contains(QChar::Null)
+        || suggestedFilename.contains(QLatin1Char('\n')) || suggestedFilename.contains(QLatin1Char('\r'))) {
+        return fail(QStringLiteral("invalid-filename"), QStringLiteral("Browser sent an unsafe suggested filename."));
+    }
+    if (!suggestedFilename.isEmpty() && urls.size() == 1) {
+        headers.insert(QStringLiteral("_qtidmSuggestedFilename"), suggestedFilename);
+    }
     bool launchAttempted = false;
     QString lastError;
     for (int attempt = 0; attempt < 50; ++attempt) {

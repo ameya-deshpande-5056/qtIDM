@@ -283,6 +283,8 @@ def validate_message(message: dict[str, object], base_url: str) -> None:
     expected_url = f"{base_url}/download.bin?from=e2e"
     if message.get("url") != expected_url:
         raise AssertionError(f"unexpected intercepted URL: {message.get('url')!r}")
+    if message.get("suggestedFilename") != "qtidm-e2e.bin":
+        raise AssertionError(f"browser filename was not forwarded: {message!r}")
     headers = message.get("headers")
     if not isinstance(headers, dict):
         raise AssertionError(f"missing native-message headers: {message!r}")

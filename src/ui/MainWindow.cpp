@@ -117,6 +117,17 @@ QString takeHeader(QVariantMap* headers, QStringView name)
     return {};
 }
 
+QString safeSuggestedFilename(QString value)
+{
+    value = value.trimmed();
+    value = value.section(QLatin1Char('/'), -1);
+    value.remove(QRegularExpression(QStringLiteral("[\\x{0}-\\x{1f}\\x{7f}]")));
+    if (value == QStringLiteral(".") || value == QStringLiteral("..")) {
+        return {};
+    }
+    return value;
+}
+
 bool mergeHeaderLines(const QString& text, QVariantMap* headers, QString* error)
 {
     const auto lines = text.split(QLatin1Char('\n'));
@@ -271,10 +282,15 @@ void MainWindow::addUrl(QString url, QVariantMap headers)
     }
 
     const auto mediaTypeHint = takeHeader(&headers, u"_qtidmMediaType").trimmed().toUpper();
+    const auto suggestedFilename = safeSuggestedFilename(takeHeader(&headers, u"_qtidmSuggestedFilename"));
     const bool adaptiveMedia = MediaDownloader::supports(parsed, mediaTypeHint);
-    QString name = parsed.fileName().isEmpty() ? QStringLiteral("download.bin") : parsed.fileName();
+    QString name = suggestedFilename;
+    if (name.isEmpty()) {
+        name = parsed.fileName().isEmpty() ? QStringLiteral("download.bin") : parsed.fileName();
+    }
     if (adaptiveMedia) {
-        name = QFileInfo(name).completeBaseName() + QStringLiteral(".mkv");
+        const auto baseName = QFileInfo(name).completeBaseName();
+        name = (baseName.isEmpty() ? QStringLiteral("stream") : baseName) + QStringLiteral(".mkv");
     }
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("Download Options"));

@@ -5,6 +5,7 @@
 #include <QByteArray>
 #include <QHash>
 #include <QObject>
+#include <QStringList>
 
 class QProcess;
 class QUrl;
@@ -19,6 +20,7 @@ public:
 
     static bool supports(const QUrl& url, const QString& mediaTypeHint = {});
     static bool declaresUnsupportedDrm(const QByteArray& manifest);
+    static QStringList httpInputArguments(const QVariantMap& headers);
     QString enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId = {});
     bool contains(const QString& id) const;
     void pause(const QString& id);

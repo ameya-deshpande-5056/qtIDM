@@ -40,7 +40,7 @@ async function refresh() {
     details.className = "url-wrap";
     const url = document.createElement("span");
     url.className = "url";
-    url.textContent = displayName(item.url);
+    url.textContent = item.suggestedFilename || displayName(item.url);
     url.title = item.url;
     const host = document.createElement("span");
     host.className = "host";

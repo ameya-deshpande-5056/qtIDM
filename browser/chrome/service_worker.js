@@ -4,6 +4,7 @@ const settingsKey = "qtidm-settings";
 const captureStorage = chrome.storage.session || chrome.storage.local;
 const requestHeadersById = new Map();
 const requestHeadersByUrl = new Map();
+const mediaWriteQueues = new Map();
 const defaultSettings = {
   interceptDownloads: true,
   captureMedia: true,
@@ -85,6 +86,35 @@ function setHeaderDefault(headers, name, value) {
   if (value && !hasHeader(headers, name)) headers[name] = value;
 }
 
+function leafFilename(value) {
+  const normalized = String(value || "").replace(/\0/g, "").trim();
+  if (!normalized) return "";
+  return normalized.split("/").pop() || "";
+}
+
+function responseFilename(details) {
+  const disposition = (details.responseHeaders || [])
+    .find((header) => String(header.name || "").toLowerCase() === "content-disposition")?.value || "";
+  const extended = disposition.match(/filename\*\s*=\s*(?:"([^"]+)"|([^;]+))/i);
+  if (extended) {
+    const encoded = (extended[1] || extended[2] || "").trim().split("'").slice(2).join("'")
+      || (extended[1] || extended[2] || "").trim();
+    try {
+      return leafFilename(decodeURIComponent(encoded));
+    } catch (_) {
+      return leafFilename(encoded);
+    }
+  }
+  const regular = disposition.match(/filename\s*=\s*(?:"((?:\\.|[^"])*)"|([^;]+))/i);
+  return leafFilename((regular?.[1] || regular?.[2] || "").replace(/\\"/g, "\""));
+}
+
+function mediaSuggestedFilename(item, tab) {
+  const captured = leafFilename(item?.suggestedFilename);
+  if (captured && !/\.(?:m3u8|mpd)$/i.test(captured)) return captured;
+  return leafFilename(String(tab?.title || "").replace(/\s+::\s+[^:]+$/, ""));
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "qtidm-link",
@@ -143,7 +173,7 @@ function mediaType(url, contentType = "") {
   return "Media";
 }
 
-async function rememberMedia(details, value) {
+async function storeMedia(details, value) {
   if (details.tabId < 0 || !details.url || isExcluded(details.url, value)) {
     return;
   }
@@ -164,7 +194,8 @@ async function rememberMedia(details, value) {
       || previous?.referrer || "",
     detectedAt: Date.now(),
     type: mediaType(details.url, contentType),
-    headers: Object.keys(observedHeaders).length ? observedHeaders : previous?.headers || {}
+    headers: Object.keys(observedHeaders).length ? observedHeaders : previous?.headers || {},
+    suggestedFilename: responseFilename(details) || previous?.suggestedFilename || ""
   };
   if (duplicate >= 0) items.splice(duplicate, 1);
   items.unshift(item);
@@ -177,7 +208,16 @@ async function rememberMedia(details, value) {
   });
 }
 
-async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "") {
+function rememberMedia(details, value) {
+  const previous = mediaWriteQueues.get(details.tabId) || Promise.resolve();
+  const operation = previous.catch(() => {}).then(() => storeMedia(details, value));
+  mediaWriteQueues.set(details.tabId, operation);
+  return operation.finally(() => {
+    if (mediaWriteQueues.get(details.tabId) === operation) mediaWriteQueues.delete(details.tabId);
+  });
+}
+
+async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "") {
   if (!/^https?:/i.test(url)) {
     throw new Error("Only HTTP and HTTPS downloads can be redirected to qtIDM.");
   }
@@ -190,6 +230,7 @@ async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTy
   const response = await chrome.runtime.sendNativeMessage(hostName, {
     url,
     mediaType: mediaTypeHint === "HLS" || mediaTypeHint === "DASH" ? mediaTypeHint : "",
+    suggestedFilename: leafFilename(suggestedFilename),
     headers
   });
   if (!response || !response.ok) {
@@ -227,7 +268,7 @@ async function redirectBrowserDownload(item, url) {
   }
 
   try {
-    await sendToHost(url, null, item.referrer || "");
+    await sendToHost(url, null, item.referrer || "", {}, "", item.filename || "");
   } catch (error) {
     if (paused) {
       await chrome.downloads.resume(item.id).catch(() => {});
@@ -344,7 +385,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       try {
         const tab = await chrome.tabs.get(message.tabId);
-        await sendToHost(item.url, tab, item.referrer, item.headers, item.type);
+        await sendToHost(item.url, tab, item.referrer, item.headers, item.type, mediaSuggestedFilename(item, tab));
         sendResponse({ ok: true });
       } catch (error) {
         showError(error.message);

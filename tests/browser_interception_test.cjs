@@ -94,6 +94,19 @@ async function testVariant(relativePath, rootName) {
     { filename: relativePath }
   );
 
+  assert.equal(
+    context.responseFilename({
+      responseHeaders: [
+        { name: "Content-Disposition", value: "attachment; filename*=UTF-8''Persona%205%20Episode%2001.mp4" }
+      ]
+    }),
+    "Persona 5 Episode 01.mp4"
+  );
+  assert.equal(
+    context.mediaSuggestedFilename({}, { title: "Persona 5 Episode 01 :: Kwik" }),
+    "Persona 5 Episode 01"
+  );
+
   mock.api.webRequest.onBeforeSendHeaders.listeners[0]({
     requestId: "observed-request",
     tabId: 1,
@@ -109,9 +122,11 @@ async function testVariant(relativePath, rootName) {
     { url: "https://fallback.invalid/" },
     "",
     {},
-    "HLS"
+    "HLS",
+    "Browser supplied name.mp4"
   );
   assert.equal(mock.nativeMessages.at(-1).mediaType, "HLS");
+  assert.equal(mock.nativeMessages.at(-1).suggestedFilename, "Browser supplied name.mp4");
   assert.equal(mock.nativeMessages.at(-1).headers.Origin, "https://example.test");
   assert.equal(mock.nativeMessages.at(-1).headers.Referer, "https://example.test/page");
   assert.equal(mock.nativeMessages.at(-1).headers["Sec-Fetch-Site"], "same-origin");
@@ -119,9 +134,14 @@ async function testVariant(relativePath, rootName) {
 
   const item = {
     id: 7,
-    referrer: "https://example.test/page"
+    referrer: "https://example.test/page",
+    filename: "/home/test/AnimePahe_Persona_5_the_Animation_01_BD_1080p_nks.mp4"
   };
   await context.redirectBrowserDownload(item, "https://example.test/archive.bin");
+  assert.equal(
+    mock.nativeMessages.at(-1).suggestedFilename,
+    "AnimePahe_Persona_5_the_Animation_01_BD_1080p_nks.mp4"
+  );
   assert.deepEqual(
     mock.calls,
     ["pause", "native", "cancel", "removeFile", "erase"],

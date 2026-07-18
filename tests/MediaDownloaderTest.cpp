@@ -31,6 +31,30 @@ private slots:
             "#EXT-X-KEY:METHOD=AES-128,URI=\"https://example.test/key\""));
     }
 
+    void buildsProtectedHttpInputContext()
+    {
+        const QVariantMap headers {
+            { QStringLiteral("User-Agent"), QStringLiteral("Mozilla/5.0 qtIDM-test") },
+            { QStringLiteral("referer"), QStringLiteral("https://embed.example.test/player") },
+            { QStringLiteral("Cookie"), QStringLiteral("session=browser-cookie") },
+            { QStringLiteral("Origin"), QStringLiteral("https://embed.example.test") }
+        };
+        const auto arguments = qtidm::MediaDownloader::httpInputArguments(headers);
+        const auto userAgent = arguments.indexOf(QStringLiteral("-user_agent"));
+        const auto referer = arguments.indexOf(QStringLiteral("-referer"));
+        const auto customHeaders = arguments.indexOf(QStringLiteral("-headers"));
+        QVERIFY(userAgent >= 0);
+        QVERIFY(referer >= 0);
+        QVERIFY(customHeaders >= 0);
+        QCOMPARE(arguments.at(userAgent + 1), QStringLiteral("Mozilla/5.0 qtIDM-test"));
+        QCOMPARE(arguments.at(referer + 1), QStringLiteral("https://embed.example.test/player"));
+        const auto headerText = arguments.at(customHeaders + 1);
+        QVERIFY(headerText.contains(QStringLiteral("Cookie: session=browser-cookie\r\n")));
+        QVERIFY(headerText.contains(QStringLiteral("Origin: https://embed.example.test\r\n")));
+        QVERIFY(!headerText.contains(QStringLiteral("User-Agent"), Qt::CaseInsensitive));
+        QVERIFY(!headerText.contains(QStringLiteral("Referer"), Qt::CaseInsensitive));
+    }
+
     void downloadsAndMuxesSeparateDashTracks()
     {
         const auto ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
