@@ -19,7 +19,10 @@ async function main() {
     "--no-first-run",
     "--no-default-browser-check"
   ];
-  if (typeof process.getuid === "function" && process.getuid() === 0) {
+  if (
+    (typeof process.getuid === "function" && process.getuid() === 0) ||
+    process.env.QTIDM_E2E_CHROME_NO_SANDBOX === "1"
+  ) {
     args.push("--no-sandbox");
   }
 

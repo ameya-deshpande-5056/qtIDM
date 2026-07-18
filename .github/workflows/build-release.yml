@@ -93,6 +93,7 @@ jobs:
         env:
           QTIDM_BROWSER_E2E_STRICT: 1
           QTIDM_E2E_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
+          QTIDM_E2E_CHROME_NO_SANDBOX: 1
           QTIDM_E2E_FIREFOX: ${{ steps.setup-firefox.outputs.firefox-path }}
         run: ctest --test-dir build -R 'qtIDM_(chrome|firefox)_extension_e2e_tests' --output-on-failure
 
