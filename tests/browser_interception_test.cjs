@@ -9,10 +9,13 @@ const ROOT = path.resolve(__dirname, "..");
 
 function event() {
   const listeners = [];
+  const filters = [];
   return {
     listeners,
-    addListener(listener) {
+    filters,
+    addListener(listener, filter) {
       listeners.push(listener);
+      filters.push(filter);
     }
   };
 }
@@ -107,6 +110,14 @@ async function testVariant(relativePath, rootName) {
     context,
     { filename: relativePath }
   );
+
+  for (const eventName of ["onBeforeSendHeaders", "onHeadersReceived"]) {
+    const types = mock.api.webRequest[eventName].filters[0]?.types || [];
+    assert.ok(
+      types.includes("main_frame") && types.includes("sub_frame"),
+      `${rootName} must observe headers for downloads initiated by frame navigation`
+    );
+  }
 
   assert.equal(
     context.responseFilename({

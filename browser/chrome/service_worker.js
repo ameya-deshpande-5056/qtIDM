@@ -538,7 +538,7 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
       return undefined;
     }).catch((error) => showError(error.message));
   },
-  { urls: ["<all_urls>"], types: ["xmlhttprequest", "media", "other"] },
+  { urls: ["<all_urls>"], types: ["main_frame", "sub_frame", "xmlhttprequest", "media", "other"] },
   ["requestHeaders", "extraHeaders"]
 );
 
@@ -551,7 +551,7 @@ chrome.webRequest.onHeadersReceived.addListener(
       return undefined;
     }).catch((error) => showError(error.message));
   },
-  { urls: ["<all_urls>"], types: ["xmlhttprequest", "media", "other"] },
+  { urls: ["<all_urls>"], types: ["main_frame", "sub_frame", "xmlhttprequest", "media", "other"] },
   ["responseHeaders"]
 );
 
