@@ -200,6 +200,23 @@ QString formatDuration(qint64 seconds)
         ? QStringLiteral("%1:%2:%3").arg(hours).arg(minutes, 2, 10, QLatin1Char('0')).arg(remaining, 2, 10, QLatin1Char('0'))
         : QStringLiteral("%1:%2").arg(minutes).arg(remaining, 2, 10, QLatin1Char('0'));
 }
+
+bool isActiveStatus(DownloadStatus status)
+{
+    return status == DownloadStatus::Connecting || status == DownloadStatus::Downloading;
+}
+
+bool isResumableStatus(DownloadStatus status)
+{
+    return status == DownloadStatus::Paused || status == DownloadStatus::Failed
+        || status == DownloadStatus::Canceled;
+}
+
+bool isStoppableStatus(DownloadStatus status)
+{
+    return status == DownloadStatus::Queued || isActiveStatus(status)
+        || status == DownloadStatus::Paused;
+}
 }
 
 MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& scheduler, DownloadRepository& repository, ThemeManager& themeManager, QWidget* parent)
@@ -221,7 +238,7 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
     connect(&networkMonitor_, &MeteredNetworkMonitor::meteredChanged,
         &scheduler_, &DownloadScheduler::setNetworkMetered);
     setWindowTitle(QStringLiteral("qtIDM"));
-    resize(960, 560);
+    resize(1080, 720);
     buildActions();
     buildLayout();
     buildTray();
@@ -254,6 +271,7 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
                 const int row = rowForId(id);
                 if (row >= 0) {
                     downloads_->item(row, 2)->setText(targetPath);
+                    refreshDownloadDetailsFor(id);
                 }
             });
     connect(&scheduler_, &DownloadScheduler::completionAutomationFailed, this,
@@ -274,6 +292,7 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
         const int row = rowForId(id);
         if (row >= 0) {
             downloads_->removeRow(row);
+            updateDownloadActionStates();
         }
     });
 }
@@ -870,6 +889,7 @@ void MainWindow::onDownloadAdded(const DownloadRecord& record)
     downloads_->setCellWidget(row, 8, grid);
     downloads_->setSortingEnabled(sortingEnabled);
     applyCategoryFilter();
+    updateDownloadActionStates();
     statusBar()->showMessage(QStringLiteral("Download started"), 2000);
 }
 
@@ -890,6 +910,7 @@ void MainWindow::onProgressChanged(const QString& id, qint64 received, qint64 to
         ? static_cast<qint64>((total - received) / bytesPerSecond) : -1;
     downloads_->item(row, 7)->setText(formatDuration(eta));
     downloads_->setSortingEnabled(sortingEnabled);
+    refreshDownloadProgressDetails(id, received, total, bytesPerSecond);
 }
 
 void MainWindow::onSegmentsChanged(const QString& id, QVector<SegmentInfo> segments)
@@ -903,11 +924,17 @@ void MainWindow::onSegmentsChanged(const QString& id, QVector<SegmentInfo> segme
         grid->setSegments(segments);
     }
     repository_.updateSegments(id, segments);
+    refreshDownloadDetailsFor(id);
 }
 
 void MainWindow::onStatusChanged(const QString& id, DownloadStatus status, const QString& message)
 {
     repository_.updateStatus(id, status);
+    if (message.isEmpty()) {
+        statusMessages_.remove(id);
+    } else {
+        statusMessages_.insert(id, message);
+    }
     const int row = rowForId(id);
     QString targetName;
     if (row >= 0) {
@@ -918,6 +945,8 @@ void MainWindow::onStatusChanged(const QString& id, DownloadStatus status, const
         downloads_->item(row, 0)->setData(Qt::UserRole + 1, statusText(status));
         downloads_->setSortingEnabled(sortingEnabled);
         applyCategoryFilter();
+        refreshDownloadDetailsFor(id);
+        updateDownloadActionStates();
     }
     if (!message.isEmpty()) {
         statusBar()->showMessage(message, 5000);
@@ -934,6 +963,228 @@ void MainWindow::onStatusChanged(const QString& id, DownloadStatus status, const
             message.isEmpty() ? name : QStringLiteral("%1\n%2").arg(name, message),
             status == DownloadStatus::Completed ? QSystemTrayIcon::Information : QSystemTrayIcon::Warning,
             5000);
+    }
+}
+
+void MainWindow::updateDownloadActionStates()
+{
+    if (!startAction_ || !pauseAction_ || !stopAction_ || !deleteAction_ || !editAction_) {
+        return;
+    }
+
+    const auto rows = selectedRows();
+    const auto records = repository_.listDownloads();
+    QHash<QString, DownloadStatus> statuses;
+    statuses.reserve(records.size());
+    for (const auto& record : records) {
+        statuses.insert(record.id, record.status);
+    }
+
+    bool canStart = false;
+    bool canPause = false;
+    bool canStop = false;
+    bool singleSelectionIsActive = false;
+    int validSelections = 0;
+    for (const int row : rows) {
+        const auto* item = downloads_->item(row, 0);
+        if (!item || !statuses.contains(item->text())) {
+            continue;
+        }
+        const auto status = statuses.value(item->text());
+        canStart = canStart || isResumableStatus(status);
+        canPause = canPause || isActiveStatus(status);
+        canStop = canStop || isStoppableStatus(status);
+        singleSelectionIsActive = isActiveStatus(status);
+        ++validSelections;
+    }
+
+    startAction_->setEnabled(canStart);
+    pauseAction_->setEnabled(canPause);
+    stopAction_->setEnabled(canStop);
+    deleteAction_->setEnabled(!rows.isEmpty());
+    editAction_->setEnabled(validSelections == 1 && !singleSelectionIsActive);
+
+    startAction_->setToolTip(canStart
+            ? QStringLiteral("Start or resume the selected stopped downloads")
+            : QStringLiteral("Select a paused, failed, or canceled download"));
+    pauseAction_->setToolTip(canPause
+            ? QStringLiteral("Pause the selected active downloads")
+            : QStringLiteral("Select a connecting or downloading entry"));
+    stopAction_->setToolTip(canStop
+            ? QStringLiteral("Stop the selected queued, active, or paused downloads")
+            : QStringLiteral("Select a queued, active, or paused download"));
+    deleteAction_->setToolTip(rows.isEmpty()
+            ? QStringLiteral("Select one or more downloads")
+            : QStringLiteral("Remove the selected downloads"));
+    editAction_->setToolTip(validSelections == 1 && singleSelectionIsActive
+            ? QStringLiteral("Pause the active download before editing transfer settings")
+            : validSelections == 1
+                ? QStringLiteral("Edit the selected download")
+                : QStringLiteral("Select one download to edit"));
+}
+
+void MainWindow::refreshDownloadDetailsFor(const QString& id)
+{
+    const auto rows = selectedRows();
+    if (rows.size() == 1 && downloads_->item(rows.first(), 0)->text() == id) {
+        refreshDownloadDetails();
+    }
+}
+
+void MainWindow::refreshDownloadProgressDetails(const QString& id, qint64 received,
+                                                qint64 total, double bytesPerSecond)
+{
+    const auto rows = selectedRows();
+    if (rows.size() != 1 || downloads_->item(rows.first(), 0)->text() != id) {
+        return;
+    }
+    const int percent = total > 0 ? static_cast<int>((received * 100) / total) : 0;
+    const auto eta = total > received && bytesPerSecond > 0
+        ? static_cast<qint64>((total - received) / bytesPerSecond) : -1;
+    const QHash<QString, QString> values {
+        { QStringLiteral("Progress"),
+          QStringLiteral("%1 of %2 (%3%)")
+              .arg(formatBytes(received), formatBytes(total)).arg(percent) },
+        { QStringLiteral("Transfer rate"),
+          formatBytes(static_cast<qint64>(bytesPerSecond)) + QStringLiteral("/s") },
+        { QStringLiteral("ETA"), formatDuration(eta) }
+    };
+    for (int index = 0; index < generalDetails_->topLevelItemCount(); ++index) {
+        auto* item = generalDetails_->topLevelItem(index);
+        if (values.contains(item->text(0))) {
+            item->setText(1, values.value(item->text(0)));
+        }
+    }
+}
+
+void MainWindow::refreshDownloadDetails()
+{
+    if (!generalDetails_ || !requestDetails_ || !segmentDetails_ || !detailSegmentGrid_) {
+        return;
+    }
+
+    generalDetails_->clear();
+    requestDetails_->clear();
+    segmentDetails_->setRowCount(0);
+    detailSegmentGrid_->setSegments({});
+
+    const auto addProperty = [](QTreeWidget* view, const QString& name, const QString& value) {
+        auto* item = new QTreeWidgetItem({ name, value.isEmpty() ? QStringLiteral("—") : value });
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+        view->addTopLevelItem(item);
+    };
+    const auto rows = selectedRows();
+    if (rows.size() != 1) {
+        addProperty(generalDetails_, QStringLiteral("Selection"),
+                    rows.isEmpty() ? QStringLiteral("Select a download to inspect it")
+                                   : QStringLiteral("Select one download to inspect its properties"));
+        return;
+    }
+
+    const int row = rows.first();
+    const auto id = downloads_->item(row, 0)->text();
+    const auto records = repository_.listDownloads();
+    const auto it = std::find_if(records.cbegin(), records.cend(), [&id](const DownloadRecord& record) {
+        return record.id == id;
+    });
+    if (it == records.cend()) {
+        addProperty(generalDetails_, QStringLiteral("Selection"),
+                    QStringLiteral("This download no longer exists in the database"));
+        return;
+    }
+
+    const auto& record = *it;
+    const int percent = record.totalBytes > 0
+        ? static_cast<int>((record.completedBytes * 100) / record.totalBytes) : 0;
+    addProperty(generalDetails_, QStringLiteral("Name"), QFileInfo(record.targetPath).fileName());
+    addProperty(generalDetails_, QStringLiteral("Status"), statusText(record.status));
+    addProperty(generalDetails_, QStringLiteral("Progress"),
+                QStringLiteral("%1 of %2 (%3%)")
+                    .arg(formatBytes(record.completedBytes), formatBytes(record.totalBytes))
+                    .arg(percent));
+    addProperty(generalDetails_, QStringLiteral("Transfer rate"), downloads_->item(row, 6)->text());
+    addProperty(generalDetails_, QStringLiteral("ETA"), downloads_->item(row, 7)->text());
+    addProperty(generalDetails_, QStringLiteral("Source URL"),
+                record.url.toString(QUrl::FullyEncoded));
+    addProperty(generalDetails_, QStringLiteral("Destination"), record.targetPath);
+    addProperty(generalDetails_, QStringLiteral("Category"), record.category);
+    addProperty(generalDetails_, QStringLiteral("Added"),
+                record.createdAt.toLocalTime().toString(Qt::ISODate));
+    addProperty(generalDetails_, QStringLiteral("Updated"),
+                record.updatedAt.toLocalTime().toString(Qt::ISODate));
+    addProperty(generalDetails_, QStringLiteral("Download ID"), record.id);
+    if (statusMessages_.contains(id)) {
+        addProperty(generalDetails_, record.status == DownloadStatus::Failed
+                ? QStringLiteral("Last error") : QStringLiteral("Last message"),
+            statusMessages_.value(id));
+    }
+
+    const auto& request = record.request;
+    addProperty(requestDetails_, QStringLiteral("HTTP method"),
+                request.httpMethod.isEmpty() ? QStringLiteral("GET") : request.httpMethod);
+    addProperty(requestDetails_, QStringLiteral("Queue"), request.queueName);
+    addProperty(requestDetails_, QStringLiteral("Connections"),
+                QStringLiteral("%1 segments, %2 per host")
+                    .arg(request.segments).arg(request.perHostConnectionLimit));
+    addProperty(requestDetails_, QStringLiteral("Dynamic segmentation"),
+                request.dynamicSegmentation ? QStringLiteral("Enabled") : QStringLiteral("Disabled"));
+    addProperty(requestDetails_, QStringLiteral("Retries"),
+                QStringLiteral("%1, base delay %2 ms")
+                    .arg(request.maxRetries).arg(request.retryBaseDelayMs));
+    addProperty(requestDetails_, QStringLiteral("Timeouts"),
+                QStringLiteral("%1 s connect, %2 s low speed")
+                    .arg(request.connectTimeoutSeconds).arg(request.lowSpeedTimeoutSeconds));
+    addProperty(requestDetails_, QStringLiteral("Redirect limit"),
+                QString::number(request.maximumRedirects));
+    addProperty(requestDetails_, QStringLiteral("Speed limit"),
+                request.speedLimitBytesPerSecond > 0
+                    ? formatBytes(request.speedLimitBytesPerSecond) + QStringLiteral("/s")
+                    : QStringLiteral("Unlimited"));
+    QString proxy = request.proxyUrl;
+    if (!proxy.isEmpty()) {
+        const QUrl proxyUrl(proxy);
+        if (proxyUrl.isValid() && !proxyUrl.password().isEmpty()) {
+            proxy = proxyUrl.toString(QUrl::RemovePassword);
+        }
+    }
+    addProperty(requestDetails_, QStringLiteral("Proxy"),
+                proxy.isEmpty() ? QStringLiteral("None") : proxy);
+    addProperty(requestDetails_, QStringLiteral("Username"),
+                request.username.isEmpty() ? QStringLiteral("None") : request.username);
+    addProperty(requestDetails_, QStringLiteral("Credential"),
+                !request.credentialVaultKey.isEmpty() ? QStringLiteral("Stored in credential vault")
+                : !request.password.isEmpty() ? QStringLiteral("Set for this download")
+                                              : QStringLiteral("None"));
+    const auto checksum = request.expectedChecksum.isEmpty()
+        ? request.expectedSha256 : request.expectedChecksum;
+    addProperty(requestDetails_, QStringLiteral("Expected checksum"),
+                checksum.isEmpty() ? QStringLiteral("None")
+                                   : QStringLiteral("%1: %2")
+                                         .arg(request.checksumAlgorithm.toUpper(), checksum));
+    addProperty(requestDetails_, QStringLiteral("POST body"),
+                request.requestBody.isEmpty()
+                    ? QStringLiteral("None")
+                    : QStringLiteral("%1 bytes").arg(request.requestBody.size()));
+    for (auto header = request.headers.cbegin(); header != request.headers.cend(); ++header) {
+        const auto lower = header.key().toLower();
+        const bool sensitive = lower == QStringLiteral("authorization")
+            || lower == QStringLiteral("cookie")
+            || lower == QStringLiteral("proxy-authorization");
+        addProperty(requestDetails_, QStringLiteral("Header: %1").arg(header.key()),
+                    sensitive ? QStringLiteral("<redacted>") : header.value().toString());
+    }
+
+    detailSegmentGrid_->setSegments(record.segments);
+    segmentDetails_->setRowCount(record.segments.size());
+    for (int index = 0; index < record.segments.size(); ++index) {
+        const auto& segment = record.segments.at(index);
+        segmentDetails_->setItem(index, 0, new QTableWidgetItem(QString::number(segment.index + 1)));
+        segmentDetails_->setItem(index, 1, new QTableWidgetItem(statusText(segment.status)));
+        segmentDetails_->setItem(index, 2, new QTableWidgetItem(
+            segment.end >= 0
+                ? QStringLiteral("%1–%2").arg(segment.start).arg(segment.end)
+                : QStringLiteral("%1–").arg(segment.start)));
+        segmentDetails_->setItem(index, 3, new QTableWidgetItem(formatBytes(segment.written)));
     }
 }
 
@@ -1499,6 +1750,7 @@ void MainWindow::resumeSelected()
         });
         if (it == records.cend()) continue;
         const auto& record = *it;
+        if (!isResumableStatus(record.status)) continue;
         if (mediaDownloader_.contains(record.id)) {
             mediaDownloader_.resume(record.id);
             continue;
@@ -1522,8 +1774,13 @@ void MainWindow::resumeSelected()
 
 void MainWindow::pauseSelected()
 {
+    const auto records = repository_.listDownloads();
     for (const int row : selectedRows()) {
         const auto id = downloads_->item(row, 0)->text();
+        const auto it = std::find_if(records.cbegin(), records.cend(), [&id](const DownloadRecord& record) {
+            return record.id == id;
+        });
+        if (it == records.cend() || !isActiveStatus(it->status)) continue;
         if (mediaDownloader_.contains(id)) {
             mediaDownloader_.pause(id);
         } else {
@@ -1534,8 +1791,13 @@ void MainWindow::pauseSelected()
 
 void MainWindow::cancelSelected()
 {
+    const auto records = repository_.listDownloads();
     for (const int row : selectedRows()) {
         const auto id = downloads_->item(row, 0)->text();
+        const auto it = std::find_if(records.cbegin(), records.cend(), [&id](const DownloadRecord& record) {
+            return record.id == id;
+        });
+        if (it == records.cend() || !isStoppableStatus(it->status)) continue;
         if (mediaDownloader_.contains(id)) {
             mediaDownloader_.cancel(id);
         } else {
@@ -1574,6 +1836,7 @@ void MainWindow::deleteSelected()
         }
         downloads_->removeRow(row);
     }
+    updateDownloadActionStates();
 }
 
 void MainWindow::openSelectedFile()
@@ -1658,6 +1921,7 @@ void MainWindow::clearFinished()
         repository_.removeDownload(downloads_->item(row, 0)->text());
         downloads_->removeRow(row);
     }
+    updateDownloadActionStates();
 }
 
 void MainWindow::propertiesSelected()
@@ -1673,16 +1937,20 @@ void MainWindow::propertiesSelected()
         return record.id == id;
     });
     if (it == records.cend()) {
-        QMessageBox::warning(this, QStringLiteral("Download Properties"), QStringLiteral("The selected download no longer exists in the database."));
+        QMessageBox::warning(this, QStringLiteral("Edit Download Properties"), QStringLiteral("The selected download no longer exists in the database."));
         return;
     }
     if (it->status == DownloadStatus::Downloading || it->status == DownloadStatus::Connecting) {
-        QMessageBox::information(this, QStringLiteral("Download Properties"), QStringLiteral("Pause the download before changing its source URL."));
+        detailsTabs_->setCurrentWidget(generalDetails_);
+        generalDetails_->setFocus();
+        statusBar()->showMessage(
+            QStringLiteral("Properties are shown below. Pause the download before editing transfer settings."),
+            6000);
         return;
     }
 
     QDialog dialog(this);
-    dialog.setWindowTitle(QStringLiteral("Download Properties"));
+    dialog.setWindowTitle(QStringLiteral("Edit Download Properties"));
     auto* form = new QFormLayout(&dialog);
     auto* urlEdit = new QLineEdit(it->url.toString());
     auto* categoryEdit = new QLineEdit(it->category);
@@ -1773,8 +2041,10 @@ void MainWindow::propertiesSelected()
 
     const QUrl replacement(urlEdit->text().trimmed());
     if (!replacement.isValid()
-        || (replacement.scheme() != QStringLiteral("http") && replacement.scheme() != QStringLiteral("https"))) {
-        QMessageBox::warning(this, QStringLiteral("Download Properties"), QStringLiteral("The replacement must be a valid HTTP or HTTPS URL."));
+        || (replacement.scheme() != QStringLiteral("http")
+            && replacement.scheme() != QStringLiteral("https")
+            && replacement.scheme() != QStringLiteral("ftp"))) {
+        QMessageBox::warning(this, QStringLiteral("Edit Download Properties"), QStringLiteral("The replacement must be a valid HTTP, HTTPS, or FTP URL."));
         return;
     }
     auto updated = *it;
@@ -1808,7 +2078,7 @@ void MainWindow::propertiesSelected()
     updated.request.archiveDestination = archiveDestination->text().trimmed();
     updated.request.deleteArchiveAfterExtraction = deleteArchive->isChecked();
     if (updated.request.extractArchive && !ArchiveExtractor::supports(updated.targetPath)) {
-        QMessageBox::warning(this, QStringLiteral("Download Properties"),
+        QMessageBox::warning(this, QStringLiteral("Edit Download Properties"),
             QStringLiteral("The destination filename is not a supported archive type."));
         return;
     }
@@ -1821,12 +2091,13 @@ void MainWindow::propertiesSelected()
     }
     updated.updatedAt = QDateTime::currentDateTimeUtc();
     if (!repository_.upsertDownload(updated)) {
-        QMessageBox::warning(this, QStringLiteral("Download Properties"), repository_.lastError());
+        QMessageBox::warning(this, QStringLiteral("Edit Download Properties"), repository_.lastError());
         return;
     }
     downloads_->item(row, 1)->setText(replacement.toString());
     downloads_->item(row, 0)->setData(Qt::UserRole, updated.category);
     applyCategoryFilter();
+    refreshDownloadDetails();
     statusBar()->showMessage(QStringLiteral("Download properties updated; use Start to resume"), 5000);
 }
 
@@ -1839,11 +2110,23 @@ void MainWindow::buildActions()
     addAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_N));
     connect(addAction, &QAction::triggered, this, [this] { addUrl(); });
 
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("media-playback-start")), QStringLiteral("Start"), this, &MainWindow::resumeSelected);
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("media-playback-pause")), QStringLiteral("Pause"), this, &MainWindow::pauseSelected);
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("media-playback-stop")), QStringLiteral("Stop"), this, &MainWindow::cancelSelected);
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("edit-delete")), QStringLiteral("Delete"), this, &MainWindow::deleteSelected);
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("document-properties")), QStringLiteral("Properties"), this, &MainWindow::propertiesSelected);
+    startAction_ = new QAction(QIcon::fromTheme(QStringLiteral("media-playback-start")),
+                               QStringLiteral("Start/Resume"), this);
+    pauseAction_ = new QAction(QIcon::fromTheme(QStringLiteral("media-playback-pause")),
+                               QStringLiteral("Pause"), this);
+    stopAction_ = new QAction(QIcon::fromTheme(QStringLiteral("media-playback-stop")),
+                              QStringLiteral("Stop"), this);
+    deleteAction_ = new QAction(QIcon::fromTheme(QStringLiteral("edit-delete")),
+                                QStringLiteral("Delete…"), this);
+    editAction_ = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
+                              QStringLiteral("Edit properties…"), this);
+    deleteAction_->setShortcut(QKeySequence::Delete);
+    connect(startAction_, &QAction::triggered, this, &MainWindow::resumeSelected);
+    connect(pauseAction_, &QAction::triggered, this, &MainWindow::pauseSelected);
+    connect(stopAction_, &QAction::triggered, this, &MainWindow::cancelSelected);
+    connect(deleteAction_, &QAction::triggered, this, &MainWindow::deleteSelected);
+    connect(editAction_, &QAction::triggered, this, &MainWindow::propertiesSelected);
+    toolbar->addActions({ startAction_, pauseAction_, stopAction_, deleteAction_, editAction_ });
     toolbar->addSeparator();
     toolbar->addAction(QIcon::fromTheme(QStringLiteral("view-calendar")), QStringLiteral("Queue"), this, &MainWindow::showQueue);
     toolbar->addAction(QIcon::fromTheme(QStringLiteral("document-open")), QStringLiteral("Import"), this, &MainWindow::importHistory);
@@ -1867,11 +2150,7 @@ void MainWindow::buildActions()
     fileMenu->addAction(QStringLiteral("&Quit"), QKeySequence::Quit, qApp, &QApplication::quit);
 
     auto* downloadMenu = menuBar()->addMenu(QStringLiteral("&Downloads"));
-    downloadMenu->addAction(QStringLiteral("Start/Resume"), this, &MainWindow::resumeSelected);
-    downloadMenu->addAction(QStringLiteral("Pause"), this, &MainWindow::pauseSelected);
-    downloadMenu->addAction(QStringLiteral("Cancel"), this, &MainWindow::cancelSelected);
-    downloadMenu->addAction(QStringLiteral("Delete…"), QKeySequence::Delete, this, &MainWindow::deleteSelected);
-    downloadMenu->addAction(QStringLiteral("Properties…"), this, &MainWindow::propertiesSelected);
+    downloadMenu->addActions({ startAction_, pauseAction_, stopAction_, deleteAction_, editAction_ });
     downloadMenu->addSeparator();
     downloadMenu->addAction(QStringLiteral("Clear finished…"), this, &MainWindow::clearFinished);
 }
@@ -1894,8 +2173,8 @@ void MainWindow::buildLayout()
     filterLayout->addWidget(statusFilter_);
     centralLayout->addLayout(filterLayout);
 
-    auto* splitter = new QSplitter(central);
-    categories_ = new QTreeWidget(splitter);
+    navigationSplitter_ = new QSplitter(Qt::Horizontal, central);
+    categories_ = new QTreeWidget;
     categories_->setHeaderHidden(true);
     categories_->addTopLevelItem(new QTreeWidgetItem(QStringList { QStringLiteral("All Downloads") }));
     categories_->addTopLevelItem(new QTreeWidgetItem(QStringList { QStringLiteral("General") }));
@@ -1911,7 +2190,8 @@ void MainWindow::buildLayout()
     connect(search_, &QLineEdit::textChanged, this, [this] { applyCategoryFilter(); });
     connect(statusFilter_, &QComboBox::currentTextChanged, this, [this] { applyCategoryFilter(); });
 
-    downloads_ = new QTableWidget(splitter);
+    downloadSplitter_ = new QSplitter(Qt::Vertical);
+    downloads_ = new QTableWidget;
     downloads_->setColumnCount(9);
     downloads_->setHorizontalHeaderLabels({ QStringLiteral("ID"), QStringLiteral("Source URL"), QStringLiteral("Save To"),
         QStringLiteral("Status"), QStringLiteral("Progress"), QStringLiteral("Size"),
@@ -1927,10 +2207,9 @@ void MainWindow::buildLayout()
             downloads_->clearSelection();
             downloads_->selectRow(item->row());
         }
+        updateDownloadActionStates();
         QMenu menu(this);
-        menu.addAction(QStringLiteral("Start/Resume"), this, &MainWindow::resumeSelected);
-        menu.addAction(QStringLiteral("Pause"), this, &MainWindow::pauseSelected);
-        menu.addAction(QStringLiteral("Cancel"), this, &MainWindow::cancelSelected);
+        menu.addActions({ startAction_, pauseAction_, stopAction_ });
         menu.addSeparator();
         menu.addAction(QStringLiteral("Open file"), this, &MainWindow::openSelectedFile);
         menu.addAction(QStringLiteral("Open containing folder"), this, &MainWindow::openSelectedFolder);
@@ -1938,20 +2217,90 @@ void MainWindow::buildLayout()
         menu.addAction(QStringLiteral("Copy path"), this, &MainWindow::copySelectedPath);
         menu.addAction(QStringLiteral("Calculate checksum…"), this, &MainWindow::calculateSelectedChecksum);
         menu.addSeparator();
-        menu.addAction(QStringLiteral("Properties…"), this, &MainWindow::propertiesSelected);
-        menu.addAction(QStringLiteral("Delete…"), this, &MainWindow::deleteSelected);
+        menu.addActions({ editAction_, deleteAction_ });
         menu.exec(downloads_->viewport()->mapToGlobal(point));
     });
     connect(downloads_, &QTableWidget::itemDoubleClicked, this, [this] { openSelectedFile(); });
+    connect(downloads_, &QTableWidget::itemSelectionChanged, this, [this] {
+        refreshDownloadDetails();
+        updateDownloadActionStates();
+    });
     downloads_->horizontalHeader()->setStretchLastSection(true);
     downloads_->horizontalHeader()->resizeSection(1, 260);
     downloads_->horizontalHeader()->resizeSection(2, 320);
     downloads_->horizontalHeader()->resizeSection(8, 180);
 
-    splitter->addWidget(categories_);
-    splitter->addWidget(downloads_);
-    splitter->setStretchFactor(1, 1);
-    centralLayout->addWidget(splitter, 1);
+    detailsTabs_ = new QTabWidget;
+    detailsTabs_->setDocumentMode(true);
+    detailsTabs_->setMinimumHeight(170);
+    const auto makeDetailsTree = [] {
+        auto* view = new QTreeWidget;
+        view->setColumnCount(2);
+        view->setHeaderLabels({ QStringLiteral("Property"), QStringLiteral("Value") });
+        view->setRootIsDecorated(false);
+        view->setAlternatingRowColors(true);
+        view->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        view->setSelectionMode(QAbstractItemView::SingleSelection);
+        view->header()->resizeSection(0, 175);
+        view->header()->setStretchLastSection(true);
+        return view;
+    };
+    generalDetails_ = makeDetailsTree();
+    requestDetails_ = makeDetailsTree();
+    detailsTabs_->addTab(generalDetails_, QStringLiteral("General"));
+    detailsTabs_->addTab(requestDetails_, QStringLiteral("Request"));
+
+    auto* segmentsPage = new QWidget;
+    auto* segmentsLayout = new QVBoxLayout(segmentsPage);
+    segmentsLayout->setContentsMargins(6, 6, 6, 6);
+    detailSegmentGrid_ = new SegmentGrid;
+    detailSegmentGrid_->setMinimumHeight(34);
+    detailSegmentGrid_->setMaximumHeight(42);
+    segmentDetails_ = new QTableWidget;
+    segmentDetails_->setColumnCount(4);
+    segmentDetails_->setHorizontalHeaderLabels({
+        QStringLiteral("#"), QStringLiteral("Status"),
+        QStringLiteral("Byte range"), QStringLiteral("Downloaded")
+    });
+    segmentDetails_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    segmentDetails_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    segmentDetails_->setAlternatingRowColors(true);
+    segmentDetails_->horizontalHeader()->setStretchLastSection(true);
+    segmentDetails_->horizontalHeader()->resizeSection(0, 55);
+    segmentDetails_->horizontalHeader()->resizeSection(1, 120);
+    segmentDetails_->horizontalHeader()->resizeSection(2, 220);
+    segmentsLayout->addWidget(detailSegmentGrid_);
+    segmentsLayout->addWidget(segmentDetails_, 1);
+    detailsTabs_->addTab(segmentsPage, QStringLiteral("Segments"));
+
+    downloadSplitter_->addWidget(downloads_);
+    downloadSplitter_->addWidget(detailsTabs_);
+    downloadSplitter_->setStretchFactor(0, 3);
+    downloadSplitter_->setStretchFactor(1, 2);
+    navigationSplitter_->addWidget(categories_);
+    navigationSplitter_->addWidget(downloadSplitter_);
+    navigationSplitter_->setStretchFactor(1, 1);
+    centralLayout->addWidget(navigationSplitter_, 1);
+
+    QSettings settings;
+    if (!navigationSplitter_->restoreState(
+            settings.value(QStringLiteral("ui/navigationSplitter")).toByteArray())) {
+        navigationSplitter_->setSizes({ 180, 900 });
+    }
+    if (!downloadSplitter_->restoreState(
+            settings.value(QStringLiteral("ui/downloadDetailsSplitter")).toByteArray())) {
+        downloadSplitter_->setSizes({ 420, 240 });
+    }
+    connect(navigationSplitter_, &QSplitter::splitterMoved, this, [this] {
+        QSettings().setValue(QStringLiteral("ui/navigationSplitter"),
+                             navigationSplitter_->saveState());
+    });
+    connect(downloadSplitter_, &QSplitter::splitterMoved, this, [this] {
+        QSettings().setValue(QStringLiteral("ui/downloadDetailsSplitter"),
+                             downloadSplitter_->saveState());
+    });
+    refreshDownloadDetails();
+    updateDownloadActionStates();
     setCentralWidget(central);
     statusBar()->showMessage(QStringLiteral("Ready"));
 }
@@ -2024,8 +2373,16 @@ void MainWindow::applyCategoryFilter()
                 searchMismatch = false;
             }
         }
-        downloads_->setRowHidden(row, categoryMismatch || statusMismatch || searchMismatch);
+        const bool hidden = categoryMismatch || statusMismatch || searchMismatch;
+        downloads_->setRowHidden(row, hidden);
+        if (hidden && downloads_->selectionModel()->isRowSelected(
+                row, downloads_->rootIndex())) {
+            downloads_->selectionModel()->select(
+                downloads_->model()->index(row, 0),
+                QItemSelectionModel::Deselect | QItemSelectionModel::Rows);
+        }
     }
+    updateDownloadActionStates();
 }
 
 void MainWindow::buildTray()

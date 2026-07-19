@@ -9,15 +9,21 @@
 #include "storage/DownloadRepository.h"
 #include "theme/ThemeManager.h"
 
+#include <QAction>
 #include <QMainWindow>
 #include <QMetaObject>
 #include <QComboBox>
+#include <QHash>
 #include <QLineEdit>
+#include <QSplitter>
 #include <QSystemTrayIcon>
 #include <QTableWidget>
+#include <QTabWidget>
 #include <QTreeWidget>
 
 namespace qtidm {
+
+class SegmentGrid;
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -69,6 +75,11 @@ private:
     void configureClipboardMonitor();
     void applyCategoryFilter();
     void applyRequestDefaults(DownloadRequest& request) const;
+    void updateDownloadActionStates();
+    void refreshDownloadDetails();
+    void refreshDownloadDetailsFor(const QString& id);
+    void refreshDownloadProgressDetails(const QString& id, qint64 received,
+                                        qint64 total, double bytesPerSecond);
     QList<int> selectedRows() const;
     bool hasDuplicateUrl(const QUrl& url) const;
     int rowForId(const QString& id) const;
@@ -84,9 +95,22 @@ private:
     ThemeManager& themeManager_;
     QTreeWidget* categories_ = nullptr;
     QTableWidget* downloads_ = nullptr;
+    QSplitter* navigationSplitter_ = nullptr;
+    QSplitter* downloadSplitter_ = nullptr;
+    QTabWidget* detailsTabs_ = nullptr;
+    QTreeWidget* generalDetails_ = nullptr;
+    QTreeWidget* requestDetails_ = nullptr;
+    QTableWidget* segmentDetails_ = nullptr;
+    SegmentGrid* detailSegmentGrid_ = nullptr;
     QLineEdit* search_ = nullptr;
     QComboBox* statusFilter_ = nullptr;
     QSystemTrayIcon* tray_ = nullptr;
+    QHash<QString, QString> statusMessages_;
+    QAction* startAction_ = nullptr;
+    QAction* pauseAction_ = nullptr;
+    QAction* stopAction_ = nullptr;
+    QAction* deleteAction_ = nullptr;
+    QAction* editAction_ = nullptr;
     QMetaObject::Connection clipboardConnection_;
     QString lastClipboardUrl_;
     bool browserRequestActive_ = false;
