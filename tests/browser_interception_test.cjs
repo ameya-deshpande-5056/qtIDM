@@ -132,6 +132,13 @@ async function testVariant(relativePath, rootName) {
   assert.equal(mock.nativeMessages.at(-1).headers["Sec-Fetch-Site"], "same-origin");
   mock.calls.length = 0;
 
+  mock.api.webRequest.onHeadersReceived.listeners[0]({
+    url: "https://example.test/archive.bin",
+    responseHeaders: [
+      { name: "Content-Disposition", value: 'attachment; filename="Server supplied name.mp4"' }
+    ]
+  });
+
   const item = {
     id: 7,
     referrer: "https://example.test/page",
@@ -147,6 +154,12 @@ async function testVariant(relativePath, rootName) {
     ["pause", "native", "cancel", "removeFile", "erase"],
     `${rootName} must erase a successfully redirected browser download`
   );
+
+  await context.redirectBrowserDownload(
+    { id: 8, referrer: "https://example.test/page", filename: "" },
+    "https://example.test/archive.bin"
+  );
+  assert.equal(mock.nativeMessages.at(-1).suggestedFilename, "Server supplied name.mp4");
 
   mock.calls.length = 0;
   mock.failNative(new Error("native host unavailable"));

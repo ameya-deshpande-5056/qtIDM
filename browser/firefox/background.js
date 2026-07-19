@@ -4,6 +4,7 @@ const settingsKey = "qtidm-settings";
 const captureStorage = browser.storage.session || browser.storage.local;
 const requestHeadersById = new Map();
 const requestHeadersByUrl = new Map();
+const responseFilenamesByUrl = new Map();
 const mediaWriteQueues = new Map();
 const defaultSettings = {
   interceptDownloads: true,
@@ -76,6 +77,25 @@ function recentRequestHeaders(url) {
     return {};
   }
   return entry.headers;
+}
+
+function rememberResponseFilename(details) {
+  const filename = responseFilename(details);
+  if (!filename) return;
+  responseFilenamesByUrl.delete(details.url);
+  responseFilenamesByUrl.set(details.url, { filename, detectedAt: Date.now() });
+  while (responseFilenamesByUrl.size > 200) {
+    responseFilenamesByUrl.delete(responseFilenamesByUrl.keys().next().value);
+  }
+}
+
+function recentResponseFilename(url) {
+  const entry = responseFilenamesByUrl.get(url);
+  if (!entry || Date.now() - entry.detectedAt > 10 * 60 * 1000) {
+    responseFilenamesByUrl.delete(url);
+    return "";
+  }
+  return entry.filename;
 }
 
 function hasHeader(headers, name) {
@@ -271,7 +291,9 @@ async function redirectBrowserDownload(item, url) {
   }
 
   try {
-    await sendToHost(url, null, item.referrer || "", {}, "", item.filename || "");
+    await sendToHost(
+      url, null, item.referrer || "", {}, "", item.filename || recentResponseFilename(url)
+    );
   } catch (error) {
     if (paused) {
       await browser.downloads.resume(item.id).catch(() => {});
@@ -322,6 +344,7 @@ browser.webRequest.onBeforeSendHeaders.addListener(
 
 browser.webRequest.onHeadersReceived.addListener(
   (details) => {
+    rememberResponseFilename(details);
     settings().then((value) => {
       if (value.captureMedia && (isManifestResponse(details) || isDirectMediaResponse(details)
           || isSubtitleResponse(details))) return rememberMedia(details, value);
