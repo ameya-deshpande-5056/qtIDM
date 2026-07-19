@@ -2,6 +2,7 @@
 
 #include <QDBusConnection>
 #include <QDBusInterface>
+#include <QJsonArray>
 #include <QJsonDocument>
 
 namespace {
