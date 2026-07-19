@@ -180,7 +180,7 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
                   << QStringLiteral("-reconnect_on_http_error") << QStringLiteral("408,429,5xx")
                   << QStringLiteral("-reconnect_delay_max") << QStringLiteral("30");
     }
-    arguments << QStringLiteral("-i") << url.toString()
+    arguments << QStringLiteral("-i") << url.toString(QUrl::FullyEncoded)
               << QStringLiteral("-map") << QStringLiteral("0:v?")
               << QStringLiteral("-map") << QStringLiteral("0:a?")
               << QStringLiteral("-map") << QStringLiteral("0:s?")

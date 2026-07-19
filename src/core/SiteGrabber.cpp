@@ -153,7 +153,7 @@ QByteArray SiteGrabber::fetch(const QUrl& url, QString* error) const
         }
         return {};
     }
-    const auto urlBytes = url.toString().toUtf8();
+    const auto urlBytes = url.toString(QUrl::FullyEncoded).toUtf8();
     curl_easy_setopt(easy, CURLOPT_URL, urlBytes.constData());
     curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT_MS, 15000L);

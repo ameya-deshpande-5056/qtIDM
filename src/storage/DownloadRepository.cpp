@@ -116,7 +116,8 @@ bool DownloadRepository::upsertDownload(const DownloadRecord& record)
         return false;
     }
     sqlite3_bind_text(stmt, 1, record.id.toUtf8().constData(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 2, record.url.toString().toUtf8().constData(), -1, SQLITE_TRANSIENT);
+    const auto encodedUrl = record.url.toString(QUrl::FullyEncoded).toUtf8();
+    sqlite3_bind_text(stmt, 2, encodedUrl.constData(), encodedUrl.size(), SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 3, record.targetPath.toUtf8().constData(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 4, record.category.toUtf8().constData(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(stmt, 5, record.totalBytes);

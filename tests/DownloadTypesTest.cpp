@@ -65,7 +65,14 @@ private slots:
         request.sessionDataLimitBytes = 1024 * 1024;
         request.expectedTotalBytes = 123456;
 
-        const auto copy = qtidm::requestFromJson(qtidm::requestToJson(request));
+        request.url = QUrl(QStringLiteral(
+            "https://example.com/file.bin?"
+            "response-content-disposition=attachment%3B%20filename%3DqtIDM.bin"));
+        const auto json = qtidm::requestToJson(request);
+        QCOMPARE(json.value(QStringLiteral("url")).toString(),
+                 request.url.toString(QUrl::FullyEncoded));
+        QVERIFY(!json.value(QStringLiteral("url")).toString().contains(QLatin1Char(' ')));
+        const auto copy = qtidm::requestFromJson(json);
 
         QCOMPARE(copy.scheduleId, request.scheduleId);
         QCOMPARE(copy.existingId, request.existingId);

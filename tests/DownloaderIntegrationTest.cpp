@@ -95,6 +95,34 @@ private slots:
         QVERIFY(!QFileInfo::exists(request.targetPath + QStringLiteral(".part")));
     }
 
+    void preservesEncodedQueryCharacters()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(
+            QStringLiteral("http://127.0.0.1:%1/range.bin").arg(port_)
+            + QStringLiteral(
+                "?response-content-disposition=attachment%3B%20filename%3DqtIDM.zip"));
+        request.targetPath = dir.path() + QStringLiteral("/encoded-query.bin");
+        request.segments = 2;
+        const auto id = downloader.enqueue(request);
+
+        QString message;
+        QVERIFY2(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 15000, &message),
+                 qPrintable(message));
+        downloader.stop();
+
+        QFile file(request.targetPath);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), expectedPayload(fixtureSize));
+    }
+
     void dynamicallyPlansMoreRangesThanConnections()
     {
         QTemporaryDir dir;

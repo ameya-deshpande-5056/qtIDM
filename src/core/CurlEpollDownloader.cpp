@@ -164,7 +164,7 @@ bool isRetryable(CURLcode result, long response)
 
 void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDownloader::SegmentTransfer* transfer)
 {
-    transfer->urlBytes = request.url.toString().toUtf8();
+    transfer->urlBytes = request.url.toString(QUrl::FullyEncoded).toUtf8();
     curl_easy_setopt(easy, CURLOPT_URL, transfer->urlBytes.constData());
     curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, request.maximumRedirects > 0 ? 1L : 0L);
     curl_easy_setopt(easy, CURLOPT_MAXREDIRS, static_cast<long>(request.maximumRedirects));

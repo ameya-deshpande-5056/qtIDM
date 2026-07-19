@@ -54,7 +54,7 @@ QJsonObject requestToJson(const DownloadRequest& request)
         headers.insert(it.key(), QJsonValue::fromVariant(it.value()));
     }
     return {
-        { QStringLiteral("url"), request.url.toString() },
+        { QStringLiteral("url"), request.url.toString(QUrl::FullyEncoded) },
         { QStringLiteral("scheduleId"), request.scheduleId },
         { QStringLiteral("existingId"), request.existingId },
         { QStringLiteral("targetPath"), request.targetPath },
@@ -175,7 +175,7 @@ QJsonObject recordToJson(const DownloadRecord& record)
     }
     return {
         { QStringLiteral("id"), record.id },
-        { QStringLiteral("url"), record.url.toString() },
+        { QStringLiteral("url"), record.url.toString(QUrl::FullyEncoded) },
         { QStringLiteral("targetPath"), record.targetPath },
         { QStringLiteral("category"), record.category },
         { QStringLiteral("totalBytes"), QString::number(record.totalBytes) },

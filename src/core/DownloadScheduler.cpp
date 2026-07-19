@@ -550,7 +550,7 @@ void DownloadScheduler::downloadStatusChanged(const QString& id, DownloadStatus 
             for (auto& argument : command) {
                 argument.replace(QStringLiteral("{file}"), completedPath);
                 argument.replace(QStringLiteral("{dir}"), QFileInfo(completedPath).absolutePath());
-                argument.replace(QStringLiteral("{url}"), request.url.toString());
+                argument.replace(QStringLiteral("{url}"), request.url.toString(QUrl::FullyEncoded));
             }
             emit completionCommandRequested(program, command);
         }
