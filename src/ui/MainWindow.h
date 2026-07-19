@@ -15,11 +15,16 @@
 #include <QComboBox>
 #include <QHash>
 #include <QLineEdit>
+#include <QElapsedTimer>
 #include <QSplitter>
+#include <QSet>
 #include <QSystemTrayIcon>
 #include <QTableWidget>
 #include <QTabWidget>
 #include <QTreeWidget>
+
+class QLabel;
+class QToolButton;
 
 namespace qtidm {
 
@@ -80,6 +85,8 @@ private:
     void refreshDownloadDetailsFor(const QString& id);
     void refreshDownloadProgressDetails(const QString& id, qint64 received,
                                         qint64 total, double bytesPerSecond);
+    void updateSessionStatus();
+    void setAlternateSpeedLimit(bool enabled, qint64 bytesPerSecond);
     QList<int> selectedRows() const;
     bool hasDuplicateUrl(const QUrl& url) const;
     int rowForId(const QString& id) const;
@@ -111,6 +118,21 @@ private:
     QAction* stopAction_ = nullptr;
     QAction* deleteAction_ = nullptr;
     QAction* editAction_ = nullptr;
+    QLabel* sessionRateLabel_ = nullptr;
+    QLabel* sessionSizeLabel_ = nullptr;
+    QToolButton* alternateLimitButton_ = nullptr;
+    struct TransferMetric {
+        qint64 lastReceived = 0;
+        qint64 lastSampleMs = 0;
+        qint64 lastDataMs = 0;
+        qint64 lastUiUpdateMs = 0;
+        double smoothedBytesPerSecond = 0.0;
+        bool hasSpeed = false;
+    };
+    QHash<QString, TransferMetric> transferMetrics_;
+    QSet<QString> activeTransfers_;
+    QElapsedTimer transferClock_;
+    qint64 sessionDownloadedBytes_ = 0;
     QMetaObject::Connection clipboardConnection_;
     QString lastClipboardUrl_;
     bool browserRequestActive_ = false;

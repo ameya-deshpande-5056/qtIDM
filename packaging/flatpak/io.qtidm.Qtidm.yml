@@ -1,4 +1,4 @@
-app-id: io.github.qtidm.qtidm
+app-id: io.qtidm.Qtidm
 runtime: org.kde.Platform
 runtime-version: '6.11'
 sdk: org.kde.Sdk
@@ -8,7 +8,7 @@ finish-args:
   - --share=ipc
   - --device=dri
   - --filesystem=xdg-download:create
-  - --own-name=io.github.qtidm
+  - --own-name=io.qtidm.Qtidm
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.freedesktop.portal.Desktop
   - --talk-name=org.freedesktop.secrets

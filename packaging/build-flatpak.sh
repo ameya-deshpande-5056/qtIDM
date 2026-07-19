@@ -13,4 +13,4 @@ flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flath
 flatpak-builder --user --install-deps-from=flathub --force-clean \
     --state-dir="$BUILD_ROOT/state" \
     "$BUILD_ROOT/build-flatpak" \
-    "$ROOT/packaging/flatpak/io.github.qtidm.qtidm.yml"
+    "$ROOT/packaging/flatpak/io.qtidm.Qtidm.yml"

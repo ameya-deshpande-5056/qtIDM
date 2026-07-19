@@ -1,4 +1,4 @@
-const hostName = "io.github.qtidm.native";
+const hostName = "io.qtidm.native";
 const mediaKey = (tabId) => `qtidm-media-${tabId}`;
 const settingsKey = "qtidm-settings";
 const captureStorage = chrome.storage.session || chrome.storage.local;

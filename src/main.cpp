@@ -8,6 +8,7 @@
 #include "ui/MainWindow.h"
 
 #include <QApplication>
+#include <QIcon>
 #include <QMessageBox>
 #include <QProcess>
 #include <QStringList>
@@ -19,6 +20,9 @@ int main(int argc, char** argv)
 {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("qtIDM"));
+    QApplication::setApplicationDisplayName(QStringLiteral("qtIDM"));
+    QApplication::setDesktopFileName(QStringLiteral("io.qtidm.Qtidm"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/qtidm/icons/application.svg")));
     QApplication::setOrganizationName(QStringLiteral("qtIDM"));
     QApplication::setApplicationVersion(QStringLiteral(QTIDM_VERSION));
     qtidm::Paths::ensureRuntimeDirs();

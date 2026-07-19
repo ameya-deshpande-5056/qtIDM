@@ -21,7 +21,7 @@ import time
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-NATIVE_HOST_NAME = "io.github.qtidm.native"
+NATIVE_HOST_NAME = "io.qtidm.native"
 CHROME_TEST_KEY = (
     "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0UiT8cUZyA+QhTLPZ4u4T3lWtYl63/"
     "ulmbm53hPT2Wgu5TXokxD1cooHgpJxN64ALr2eqs3nOirweKLu4eL+gN0AWqZHpGhCdJ9qafd"
@@ -128,7 +128,7 @@ def install_native_manifests(home: Path, host: Path, chrome_id: str) -> None:
         "description": "qtIDM extension end-to-end test host",
         "path": str(host),
         "type": "stdio",
-        "allowed_extensions": ["qtidm@io.github.qtidm"],
+        "allowed_extensions": ["qtidm@io.qtidm"],
     }
 
     chrome_directories = [

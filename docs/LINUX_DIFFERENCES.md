@@ -35,6 +35,6 @@ Implemented original Linux-native functionality:
 
 Known limitations:
 
-- Chrome release builds require a persistent signing key and matching `QTIDM_CHROME_EXTENSION_ID`; Firefox uses the unlisted AMO signing channel with ID `qtidm@io.github.qtidm`.
+- Chrome release builds require a persistent signing key and matching `QTIDM_CHROME_EXTENSION_ID`; Firefox uses the unlisted AMO signing channel with ID `qtidm@io.qtidm`.
 - Flatpak builds do not install host browser native messaging manifests; use a host package for browser integration.
 - This is an original IDM-like Linux application, not a proprietary IDM clone.

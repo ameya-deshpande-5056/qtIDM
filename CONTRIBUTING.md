@@ -24,3 +24,13 @@ ctest --test-dir build --output-on-failure
 - Submit only original work or material whose licence is compatible with the project.
 - Add tests for core behavior changes.
 - Keep generated build artifacts out of git.
+
+## Branding assets
+
+`assets/io.qtidm.Qtidm.svg` is the canonical qtIDM logo. After changing it, run:
+
+```bash
+packaging/generate-icons.sh
+```
+
+This refreshes the committed desktop and browser-extension PNG variants.

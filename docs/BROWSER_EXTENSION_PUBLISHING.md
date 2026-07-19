@@ -9,7 +9,7 @@ Firefox uses a stable ID before signing.
 Current ID:
 
 ```text
-qtidm@io.github.qtidm
+qtidm@io.qtidm
 ```
 
 The Firefox extension manifest should contain:
@@ -17,7 +17,7 @@ The Firefox extension manifest should contain:
 ```json
 "browser_specific_settings": {
   "gecko": {
-    "id": "qtidm@io.github.qtidm"
+    "id": "qtidm@io.qtidm"
   }
 }
 ```
@@ -26,7 +26,7 @@ The native host manifest must allow the same ID:
 
 ```json
 "allowed_extensions": [
-  "qtidm@io.github.qtidm"
+  "qtidm@io.qtidm"
 ]
 ```
 
@@ -165,8 +165,8 @@ ordinary local CTest runs, missing browser tooling reports a skipped test.
 The repo uses manifest templates:
 
 ```text
-browser/native/io.github.qtidm.native.chrome.json.in
-browser/native/io.github.qtidm.native.firefox.json.in
+browser/native/io.qtidm.native.chrome.json.in
+browser/native/io.qtidm.native.firefox.json.in
 ```
 
 Generate final manifests with CMake variables:
@@ -174,7 +174,7 @@ Generate final manifests with CMake variables:
 ```bash
 cmake -S . -B build \
   -DQTIDM_CHROME_EXTENSION_ID=<chrome-extension-id> \
-  -DQTIDM_FIREFOX_EXTENSION_ID=qtidm@io.github.qtidm
+  -DQTIDM_FIREFOX_EXTENSION_ID=qtidm@io.qtidm
 ```
 
 This keeps development IDs and release IDs explicit.

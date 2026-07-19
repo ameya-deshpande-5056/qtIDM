@@ -1,3 +1,7 @@
+<p align="left">
+  <img src="assets/io.qtidm.Qtidm.svg" width="128" height="128" alt="qtIDM logo">
+</p>
+
 # qtIDM
 
 qtIDM is a Linux-native Qt6 Widgets download manager written in C++20. It
@@ -233,7 +237,7 @@ Build and test the Flatpak bundle:
 sh packaging/release/version-info.sh
 sh packaging/release/build-flatpak-bundle.sh
 flatpak install --user -y dist/qtIDM-0.1.1.flatpak
-flatpak run io.github.qtidm.qtidm --version
+flatpak run io.qtidm.Qtidm --version
 ```
 
 The Flatpak targets the supported KDE 6.11 runtime, has write access only to the

@@ -101,9 +101,9 @@ jobs:
           sh packaging/browser/ci-extension-version.sh 1 1 >/dev/null
           VERSION="$(sh packaging/release/version-info.sh)"
           sh packaging/release/sync-tag-version.sh "v$VERSION" >/dev/null
-          desktop-file-validate assets/io.github.qtidm.qtidm.desktop
-          appstreamcli validate --pedantic --no-net assets/io.github.qtidm.qtidm.appdata.xml
-          flatpak-builder --show-manifest packaging/flatpak/io.github.qtidm.qtidm.yml >/dev/null
+          desktop-file-validate assets/io.qtidm.Qtidm.desktop
+          appstreamcli validate --pedantic --no-net assets/io.qtidm.Qtidm.appdata.xml
+          flatpak-builder --show-manifest packaging/flatpak/io.qtidm.Qtidm.yml >/dev/null
 
       - name: Browser extension end-to-end
         env:
@@ -165,9 +165,9 @@ jobs:
           sudo apt-get install -y ./dist/*.deb
           xvfb-run -a qtIDM --version
           test -x /usr/bin/qtIDM-native-host
-          test -f /usr/lib/mozilla/native-messaging-hosts/io.github.qtidm.native.json
-          test -f /etc/opt/chrome/native-messaging-hosts/io.github.qtidm.native.json
-          test -f /etc/chromium/native-messaging-hosts/io.github.qtidm.native.json
+          test -f /usr/lib/mozilla/native-messaging-hosts/io.qtidm.native.json
+          test -f /etc/opt/chrome/native-messaging-hosts/io.qtidm.native.json
+          test -f /etc/chromium/native-messaging-hosts/io.qtidm.native.json
           if [ -f browser/packages/qtidm-chrome.crx ]; then
             test -f /usr/share/qtidm/browser/packages/qtidm-chrome.crx
             test -f /usr/share/qtidm/browser/packages/qtidm-firefox.xpi
@@ -226,9 +226,9 @@ jobs:
         run: |
           test -f "dist/qtIDM-${{ steps.version.outputs.version }}.flatpak"
           flatpak install --user -y "dist/qtIDM-${{ steps.version.outputs.version }}.flatpak"
-          dbus-run-session -- xvfb-run -a flatpak run io.github.qtidm.qtidm --version
+          dbus-run-session -- xvfb-run -a flatpak run io.qtidm.Qtidm --version
           if [ -f browser/packages/qtidm-chrome.crx ]; then
-            flatpak run --command=sh io.github.qtidm.qtidm -c \
+            flatpak run --command=sh io.qtidm.Qtidm -c \
               'test -f /app/share/qtidm/browser/packages/qtidm-chrome.crx && test -f /app/share/qtidm/browser/packages/qtidm-firefox.xpi'
           fi
 

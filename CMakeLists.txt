@@ -24,7 +24,7 @@ find_package(Threads REQUIRED)
 include(GNUInstallDirs)
 
 set(QTIDM_CHROME_EXTENSION_ID "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" CACHE STRING "Chrome extension ID allowed to use native messaging")
-set(QTIDM_FIREFOX_EXTENSION_ID "qtidm@io.github.qtidm" CACHE STRING "Firefox extension ID allowed to use native messaging")
+set(QTIDM_FIREFOX_EXTENSION_ID "qtidm@io.qtidm" CACHE STRING "Firefox extension ID allowed to use native messaging")
 set(QTIDM_BROWSER_PACKAGE_DIR "${CMAKE_SOURCE_DIR}/browser/packages" CACHE PATH "Directory containing signed qtidm-chrome.crx and qtidm-firefox.xpi packages")
 option(QTIDM_ENABLE_NATIVE_TUNING "Build for the current CPU with -march=native" OFF)
 option(QTIDM_INSTALL_NATIVE_MESSAGING_HOSTS "Install browser native messaging host manifests" ON)
@@ -37,14 +37,14 @@ if(NOT QTIDM_CHROME_EXTENSION_ID_LENGTH EQUAL 32 OR NOT QTIDM_CHROME_EXTENSION_I
 endif()
 
 configure_file(
-    browser/native/io.github.qtidm.native.chrome.json.in
-    ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.chrome.json
+    browser/native/io.qtidm.native.chrome.json.in
+    ${CMAKE_BINARY_DIR}/generated/browser/native/io.qtidm.native.chrome.json
     @ONLY
 )
 
 configure_file(
-    browser/native/io.github.qtidm.native.firefox.json.in
-    ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.firefox.json
+    browser/native/io.qtidm.native.firefox.json.in
+    ${CMAKE_BINARY_DIR}/generated/browser/native/io.qtidm.native.firefox.json
     @ONLY
 )
 
@@ -106,6 +106,7 @@ set(QTIDM_SOURCES
 
 add_executable(qtIDM
     src/main.cpp
+    resources.qrc
     ${QTIDM_SOURCES}
 )
 
@@ -325,25 +326,31 @@ add_test(NAME qtIDM_zip_preview_tests COMMAND qtIDM_zip_preview_tests)
 endif()
 
 install(TARGETS qtIDM qtIDM-native-host RUNTIME DESTINATION bin)
-install(FILES assets/io.github.qtidm.qtidm.desktop DESTINATION share/applications)
-install(FILES assets/io.github.qtidm.qtidm.svg DESTINATION share/icons/hicolor/scalable/apps)
-install(FILES assets/io.github.qtidm.qtidm.appdata.xml DESTINATION share/metainfo)
-install(FILES assets/io.github.qtidm.qtidm.xml DESTINATION share/mime/packages)
+install(FILES assets/io.qtidm.Qtidm.desktop DESTINATION share/applications)
+install(FILES assets/io.qtidm.Qtidm.svg DESTINATION share/icons/hicolor/scalable/apps)
+foreach(QTIDM_ICON_SIZE 16 32 48 64 128 256 512)
+    install(
+        FILES assets/icons/hicolor/${QTIDM_ICON_SIZE}x${QTIDM_ICON_SIZE}/apps/io.qtidm.Qtidm.png
+        DESTINATION share/icons/hicolor/${QTIDM_ICON_SIZE}x${QTIDM_ICON_SIZE}/apps
+    )
+endforeach()
+install(FILES assets/io.qtidm.Qtidm.appdata.xml DESTINATION share/metainfo)
+install(FILES assets/io.qtidm.Qtidm.xml DESTINATION share/mime/packages)
 if(QTIDM_INSTALL_NATIVE_MESSAGING_HOSTS)
     install(
-        FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.firefox.json
+        FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.qtidm.native.firefox.json
         DESTINATION lib/mozilla/native-messaging-hosts
-        RENAME io.github.qtidm.native.json
+        RENAME io.qtidm.native.json
     )
     install(
-        FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.chrome.json
+        FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.qtidm.native.chrome.json
         DESTINATION ${CMAKE_INSTALL_FULL_SYSCONFDIR}/opt/chrome/native-messaging-hosts
-        RENAME io.github.qtidm.native.json
+        RENAME io.qtidm.native.json
     )
     install(
-        FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.github.qtidm.native.chrome.json
+        FILES ${CMAKE_BINARY_DIR}/generated/browser/native/io.qtidm.native.chrome.json
         DESTINATION ${CMAKE_INSTALL_FULL_SYSCONFDIR}/chromium/native-messaging-hosts
-        RENAME io.github.qtidm.native.json
+        RENAME io.qtidm.native.json
     )
 endif()
 install(

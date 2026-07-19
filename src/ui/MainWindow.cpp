@@ -44,10 +44,12 @@
 #include <QSettings>
 #include <QTextStream>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTimeEdit>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <cmath>
 
 #ifndef QTIDM_BUILD_TIMESTAMP
 #define QTIDM_BUILD_TIMESTAMP "unknown"
@@ -225,6 +227,11 @@ bool isStoppableStatus(DownloadStatus status)
     return status == DownloadStatus::Queued || isActiveStatus(status)
         || status == DownloadStatus::Paused;
 }
+
+QIcon staticActionIcon(const QString& name)
+{
+    return QIcon(QStringLiteral(":/qtidm/icons/actions/%1.svg").arg(name));
+}
 }
 
 MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& scheduler, DownloadRepository& repository, ThemeManager& themeManager, QWidget* parent)
@@ -239,6 +246,12 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
     , themeManager_(themeManager)
 {
     QSettings settings;
+    transferClock_.start();
+    const bool alternateLimitEnabled =
+        settings.value(QStringLiteral("downloads/alternateSpeedLimitEnabled"), false).toBool();
+    const qint64 alternateLimit = static_cast<qint64>(
+        qMax(1, settings.value(QStringLiteral("downloads/alternateSpeedLimitKib"), 1024).toInt())) * 1024;
+    downloader_.setAlternateSpeedLimit(alternateLimitEnabled ? alternateLimit : 0);
     scheduler_.setCredentialVault(&credentialVault_);
     scheduler_.setMeteredNetworkPolicy(static_cast<MeteredNetworkPolicy>(
         qBound(0, settings.value(QStringLiteral("downloads/meteredPolicy"), 0).toInt(), 2)));
@@ -249,6 +262,7 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
     resize(1080, 720);
     buildActions();
     buildLayout();
+    setAlternateSpeedLimit(alternateLimitEnabled, alternateLimit);
     buildTray();
     loadPersistedDownloads();
     downloads_->setSortingEnabled(true);
@@ -872,6 +886,14 @@ void MainWindow::raiseAndActivate()
 
 void MainWindow::onDownloadAdded(const DownloadRecord& record)
 {
+    transferMetrics_.insert(record.id, TransferMetric {
+        .lastReceived = record.completedBytes,
+        .lastSampleMs = qMax<qint64>(1, transferClock_.elapsed()),
+        .lastDataMs = qMax<qint64>(1, transferClock_.elapsed())
+    });
+    if (isActiveStatus(record.status)) {
+        activeTransfers_.insert(record.id);
+    }
     const bool sortingEnabled = downloads_->isSortingEnabled();
     downloads_->setSortingEnabled(false);
     repository_.upsertDownload(record);
@@ -903,22 +925,63 @@ void MainWindow::onDownloadAdded(const DownloadRecord& record)
 
 void MainWindow::onProgressChanged(const QString& id, qint64 received, qint64 total, double bytesPerSecond)
 {
+    Q_UNUSED(bytesPerSecond);
+    const qint64 now = transferClock_.elapsed();
+    auto& metric = transferMetrics_[id];
+    if (metric.lastSampleMs <= 0) {
+        metric.lastReceived = received;
+        metric.lastSampleMs = now;
+    } else {
+        const qint64 elapsedMs = now - metric.lastSampleMs;
+        const qint64 receivedDelta = qMax<qint64>(0, received - metric.lastReceived);
+        if (elapsedMs > 0) {
+            const double sample = receivedDelta * 1000.0 / elapsedMs;
+            constexpr double smoothingWindowMs = 5000.0;
+            const double alpha = 1.0 - std::exp(-static_cast<double>(elapsedMs) / smoothingWindowMs);
+            if (!metric.hasSpeed && receivedDelta > 0) {
+                metric.smoothedBytesPerSecond = sample;
+                metric.hasSpeed = true;
+            } else if (metric.hasSpeed) {
+                metric.smoothedBytesPerSecond += alpha * (sample - metric.smoothedBytesPerSecond);
+            }
+            if (receivedDelta > 0) {
+                metric.lastDataMs = now;
+            } else if (metric.hasSpeed && now - metric.lastDataMs >= 5000) {
+                metric.smoothedBytesPerSecond = 0.0;
+                metric.hasSpeed = false;
+            }
+            sessionDownloadedBytes_ += receivedDelta;
+        }
+        metric.lastReceived = received;
+        metric.lastSampleMs = now;
+    }
+    activeTransfers_.insert(id);
+
     repository_.updateProgress(id, received, total, total > 0 && received >= total ? DownloadStatus::Completed : DownloadStatus::Downloading);
     const int row = rowForId(id);
     if (row < 0) {
+        updateSessionStatus();
         return;
     }
+    const bool refreshVisibleMetrics = now - metric.lastUiUpdateMs >= 750
+        || (total > 0 && received >= total);
+    if (!refreshVisibleMetrics) {
+        return;
+    }
+    metric.lastUiUpdateMs = now;
+    const double displaySpeed = metric.hasSpeed ? metric.smoothedBytesPerSecond : 0.0;
     const bool sortingEnabled = downloads_->isSortingEnabled();
     downloads_->setSortingEnabled(false);
     const int percent = total > 0 ? static_cast<int>((received * 100) / total) : 0;
     downloads_->item(row, 4)->setText(QString::number(percent) + QLatin1Char('%'));
     downloads_->item(row, 5)->setText(formatBytes(total));
-    downloads_->item(row, 6)->setText(formatBytes(static_cast<qint64>(bytesPerSecond)) + QStringLiteral("/s"));
-    const auto eta = total > received && bytesPerSecond > 0
-        ? static_cast<qint64>((total - received) / bytesPerSecond) : -1;
+    downloads_->item(row, 6)->setText(formatBytes(static_cast<qint64>(displaySpeed)) + QStringLiteral("/s"));
+    const auto eta = total > received && displaySpeed > 0
+        ? static_cast<qint64>((total - received) / displaySpeed) : -1;
     downloads_->item(row, 7)->setText(formatDuration(eta));
     downloads_->setSortingEnabled(sortingEnabled);
-    refreshDownloadProgressDetails(id, received, total, bytesPerSecond);
+    refreshDownloadProgressDetails(id, received, total, displaySpeed);
+    updateSessionStatus();
 }
 
 void MainWindow::onSegmentsChanged(const QString& id, QVector<SegmentInfo> segments)
@@ -951,11 +1014,25 @@ void MainWindow::onStatusChanged(const QString& id, DownloadStatus status, const
         targetName = QFileInfo(downloads_->item(row, 2)->text()).fileName();
         downloads_->item(row, 3)->setText(statusText(status));
         downloads_->item(row, 0)->setData(Qt::UserRole + 1, statusText(status));
+        if (!isActiveStatus(status)) {
+            downloads_->item(row, 6)->setText(QStringLiteral("0 B/s"));
+            downloads_->item(row, 7)->setText(QStringLiteral("—"));
+        }
         downloads_->setSortingEnabled(sortingEnabled);
         applyCategoryFilter();
         refreshDownloadDetailsFor(id);
         updateDownloadActionStates();
     }
+    if (isActiveStatus(status)) {
+        activeTransfers_.insert(id);
+    } else {
+        activeTransfers_.remove(id);
+        if (auto metric = transferMetrics_.find(id); metric != transferMetrics_.end()) {
+            metric->smoothedBytesPerSecond = 0.0;
+            metric->hasSpeed = false;
+        }
+    }
+    updateSessionStatus();
     if (!message.isEmpty()) {
         statusBar()->showMessage(message, 5000);
     }
@@ -1053,7 +1130,7 @@ void MainWindow::refreshDownloadProgressDetails(const QString& id, qint64 receiv
         { QStringLiteral("Progress"),
           QStringLiteral("%1 of %2 (%3%)")
               .arg(formatBytes(received), formatBytes(total)).arg(percent) },
-        { QStringLiteral("Transfer rate"),
+        { QStringLiteral("Download speed"),
           formatBytes(static_cast<qint64>(bytesPerSecond)) + QStringLiteral("/s") },
         { QStringLiteral("ETA"), formatDuration(eta) }
     };
@@ -1110,7 +1187,7 @@ void MainWindow::refreshDownloadDetails()
                 QStringLiteral("%1 of %2 (%3%)")
                     .arg(formatBytes(record.completedBytes), formatBytes(record.totalBytes))
                     .arg(percent));
-    addProperty(generalDetails_, QStringLiteral("Transfer rate"), downloads_->item(row, 6)->text());
+    addProperty(generalDetails_, QStringLiteral("Download speed"), downloads_->item(row, 6)->text());
     addProperty(generalDetails_, QStringLiteral("ETA"), downloads_->item(row, 7)->text());
     addProperty(generalDetails_, QStringLiteral("Source URL"),
                 record.url.toString(QUrl::FullyEncoded));
@@ -1667,7 +1744,9 @@ void MainWindow::showOptions()
     sessionUsageLayout->addWidget(resetSessionUsage);
     connect(resetSessionUsage, &QPushButton::clicked, &dialog, [this, sessionUsage] {
         downloader_.resetSessionBytesReceived();
+        sessionDownloadedBytes_ = 0;
         sessionUsage->setText(formatBytes(0));
+        updateSessionStatus();
     });
     auto* meteredPolicy = new QComboBox;
     meteredPolicy->addItem(QStringLiteral("Allow downloads"), static_cast<int>(MeteredNetworkPolicy::Allow));
@@ -1745,6 +1824,12 @@ void MainWindow::showAbout()
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("About qtIDM"));
     auto* layout = new QVBoxLayout(&dialog);
+
+    auto* logo = new QLabel;
+    logo->setAlignment(Qt::AlignCenter);
+    logo->setPixmap(QApplication::windowIcon().pixmap(96, 96));
+    logo->setAccessibleName(QStringLiteral("qtIDM logo"));
+    layout->addWidget(logo);
 
     auto* title = new QLabel(QStringLiteral("<h2>qtIDM %1</h2>").arg(
         QCoreApplication::applicationVersion().toHtmlEscaped()));
@@ -2145,19 +2230,19 @@ void MainWindow::buildActions()
     auto* toolbar = addToolBar(QStringLiteral("Main"));
     toolbar->setMovable(false);
 
-    auto addAction = toolbar->addAction(QIcon::fromTheme(QStringLiteral("list-add")), QStringLiteral("Add"));
+    auto addAction = toolbar->addAction(staticActionIcon(QStringLiteral("add")), QStringLiteral("Add"));
     addAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_N));
     connect(addAction, &QAction::triggered, this, [this] { addUrl(); });
 
-    startAction_ = new QAction(QIcon::fromTheme(QStringLiteral("media-playback-start")),
+    startAction_ = new QAction(staticActionIcon(QStringLiteral("start")),
                                QStringLiteral("Start/Resume"), this);
-    pauseAction_ = new QAction(QIcon::fromTheme(QStringLiteral("media-playback-pause")),
+    pauseAction_ = new QAction(staticActionIcon(QStringLiteral("pause")),
                                QStringLiteral("Pause"), this);
-    stopAction_ = new QAction(QIcon::fromTheme(QStringLiteral("media-playback-stop")),
+    stopAction_ = new QAction(staticActionIcon(QStringLiteral("stop")),
                               QStringLiteral("Stop"), this);
-    deleteAction_ = new QAction(QIcon::fromTheme(QStringLiteral("edit-delete")),
+    deleteAction_ = new QAction(staticActionIcon(QStringLiteral("delete")),
                                 QStringLiteral("Delete…"), this);
-    editAction_ = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
+    editAction_ = new QAction(staticActionIcon(QStringLiteral("edit")),
                               QStringLiteral("Edit properties…"), this);
     deleteAction_->setShortcut(QKeySequence::Delete);
     connect(startAction_, &QAction::triggered, this, &MainWindow::resumeSelected);
@@ -2167,16 +2252,37 @@ void MainWindow::buildActions()
     connect(editAction_, &QAction::triggered, this, &MainWindow::propertiesSelected);
     toolbar->addActions({ startAction_, pauseAction_, stopAction_, deleteAction_, editAction_ });
     toolbar->addSeparator();
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("view-calendar")), QStringLiteral("Queue"), this, &MainWindow::showQueue);
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("document-open")), QStringLiteral("Import"), this, &MainWindow::importHistory);
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("document-save")), QStringLiteral("Export"), this, &MainWindow::exportHistory);
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("insert-link")), QStringLiteral("Links"), this, &MainWindow::importLinks);
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("folder-remote")), QStringLiteral("Grabber"), this, &MainWindow::grabSite);
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("video-x-generic")), QStringLiteral("Social"), this, &MainWindow::extractSocialMedia);
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("package-x-generic")), QStringLiteral("ZIP"), this, &MainWindow::previewZip);
+    toolbar->addAction(staticActionIcon(QStringLiteral("queue")),
+                       QStringLiteral("Queue"), this, &MainWindow::showQueue);
+    toolbar->addAction(staticActionIcon(QStringLiteral("import")),
+                       QStringLiteral("Import"), this, &MainWindow::importHistory);
+    toolbar->addAction(staticActionIcon(QStringLiteral("export")),
+                       QStringLiteral("Export"), this, &MainWindow::exportHistory);
+    toolbar->addAction(staticActionIcon(QStringLiteral("links")),
+                       QStringLiteral("Links"), this, &MainWindow::importLinks);
+    toolbar->addAction(staticActionIcon(QStringLiteral("grabber")),
+                       QStringLiteral("Grabber"), this, &MainWindow::grabSite);
+    toolbar->addAction(staticActionIcon(QStringLiteral("social")),
+                       QStringLiteral("Social"), this, &MainWindow::extractSocialMedia);
+    toolbar->addAction(staticActionIcon(QStringLiteral("zip")),
+                       QStringLiteral("ZIP"), this, &MainWindow::previewZip);
     toolbar->addSeparator();
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("preferences-system")), QStringLiteral("Options"), this, &MainWindow::showOptions);
-    toolbar->addAction(QIcon::fromTheme(QStringLiteral("help-about")), QStringLiteral("About"), this, &MainWindow::showAbout);
+    toolbar->addAction(staticActionIcon(QStringLiteral("options")),
+                       QStringLiteral("Options"), this, &MainWindow::showOptions);
+    toolbar->addAction(staticActionIcon(QStringLiteral("about")),
+                       QStringLiteral("About"), this, &MainWindow::showAbout);
+
+    for (auto* action : toolbar->actions()) {
+        auto* button = qobject_cast<QToolButton*>(toolbar->widgetForAction(action));
+        if (!button) {
+            continue;
+        }
+        const auto syncCursor = [button, action] {
+            button->setCursor(action->isEnabled() ? Qt::PointingHandCursor : Qt::ForbiddenCursor);
+        };
+        syncCursor();
+        connect(action, &QAction::changed, button, syncCursor);
+    }
 
     auto* fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
     fileMenu->addAction(QStringLiteral("&Add URL…"), QKeySequence(Qt::CTRL | Qt::Key_N), this, [this] { addUrl(); });
@@ -2238,7 +2344,7 @@ void MainWindow::buildLayout()
     downloads_->setColumnCount(9);
     downloads_->setHorizontalHeaderLabels({ QStringLiteral("ID"), QStringLiteral("Source URL"), QStringLiteral("Save To"),
         QStringLiteral("Status"), QStringLiteral("Progress"), QStringLiteral("Size"),
-        QStringLiteral("Transfer Rate"), QStringLiteral("ETA"), QStringLiteral("Segments") });
+        QStringLiteral("Download Speed"), QStringLiteral("ETA"), QStringLiteral("Segments") });
     downloads_->setColumnHidden(0, true);
     downloads_->setSelectionBehavior(QAbstractItemView::SelectRows);
     downloads_->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -2345,7 +2451,85 @@ void MainWindow::buildLayout()
     refreshDownloadDetails();
     updateDownloadActionStates();
     setCentralWidget(central);
+
+    sessionRateLabel_ = new QLabel;
+    sessionRateLabel_->setToolTip(QStringLiteral("Combined smoothed speed of active downloads"));
+    sessionSizeLabel_ = new QLabel;
+    sessionSizeLabel_->setToolTip(QStringLiteral("Data downloaded since qtIDM was started"));
+    alternateLimitButton_ = new QToolButton;
+    alternateLimitButton_->setCursor(Qt::PointingHandCursor);
+    alternateLimitButton_->setPopupMode(QToolButton::MenuButtonPopup);
+    alternateLimitButton_->setIcon(staticActionIcon(QStringLiteral("speed-limit")));
+    alternateLimitButton_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    auto* limitMenu = new QMenu(alternateLimitButton_);
+    for (const int kib : { 256, 512, 1024, 2048, 5120, 10240 }) {
+        const auto text = formatBytes(static_cast<qint64>(kib) * 1024) + QStringLiteral("/s");
+        limitMenu->addAction(text, this, [this, kib] {
+            setAlternateSpeedLimit(true, static_cast<qint64>(kib) * 1024);
+        });
+    }
+    limitMenu->addSeparator();
+    limitMenu->addAction(QStringLiteral("Custom…"), this, [this] {
+        QSettings settings;
+        bool ok = false;
+        const int current = qMax(1, settings.value(
+            QStringLiteral("downloads/alternateSpeedLimitKib"), 1024).toInt());
+        const int kib = QInputDialog::getInt(
+            this, QStringLiteral("Alternate Download Limit"),
+            QStringLiteral("Limit for each download (KiB/s):"),
+            current, 1, 1024 * 1024, 1, &ok);
+        if (ok) {
+            setAlternateSpeedLimit(true, static_cast<qint64>(kib) * 1024);
+        }
+    });
+    alternateLimitButton_->setMenu(limitMenu);
+    connect(alternateLimitButton_, &QToolButton::clicked, this, [this] {
+        const bool enable = downloader_.alternateSpeedLimit() == 0;
+        const qint64 configured = static_cast<qint64>(qMax(1, QSettings().value(
+            QStringLiteral("downloads/alternateSpeedLimitKib"), 1024).toInt())) * 1024;
+        setAlternateSpeedLimit(enable, configured);
+    });
+    statusBar()->addPermanentWidget(sessionRateLabel_);
+    statusBar()->addPermanentWidget(sessionSizeLabel_);
+    statusBar()->addPermanentWidget(alternateLimitButton_);
+    updateSessionStatus();
     statusBar()->showMessage(QStringLiteral("Ready"));
+}
+
+void MainWindow::updateSessionStatus()
+{
+    double combinedSpeed = 0.0;
+    for (const auto& id : std::as_const(activeTransfers_)) {
+        const auto metric = transferMetrics_.constFind(id);
+        if (metric != transferMetrics_.cend() && metric->hasSpeed) {
+            combinedSpeed += metric->smoothedBytesPerSecond;
+        }
+    }
+    if (sessionRateLabel_) {
+        sessionRateLabel_->setText(
+            QStringLiteral("Speed: %1/s").arg(formatBytes(static_cast<qint64>(combinedSpeed))));
+    }
+    if (sessionSizeLabel_) {
+        sessionSizeLabel_->setText(
+            QStringLiteral("Session: %1").arg(formatBytes(sessionDownloadedBytes_)));
+    }
+}
+
+void MainWindow::setAlternateSpeedLimit(bool enabled, qint64 bytesPerSecond)
+{
+    const qint64 limit = qMax<qint64>(1024, bytesPerSecond);
+    downloader_.setAlternateSpeedLimit(enabled ? limit : 0);
+    QSettings settings;
+    settings.setValue(QStringLiteral("downloads/alternateSpeedLimitEnabled"), enabled);
+    settings.setValue(QStringLiteral("downloads/alternateSpeedLimitKib"), limit / 1024);
+    if (alternateLimitButton_) {
+        alternateLimitButton_->setText(enabled
+            ? QStringLiteral("Limit: %1/s").arg(formatBytes(limit))
+            : QStringLiteral("Limit: Off"));
+        alternateLimitButton_->setToolTip(enabled
+            ? QStringLiteral("Alternate per-download limit is enabled; click to disable")
+            : QStringLiteral("Alternate per-download limit is disabled; click to enable"));
+    }
 }
 
 void MainWindow::configureClipboardMonitor()
@@ -2430,7 +2614,7 @@ void MainWindow::applyCategoryFilter()
 
 void MainWindow::buildTray()
 {
-    tray_ = new QSystemTrayIcon(QIcon::fromTheme(QStringLiteral("folder-download")), this);
+    tray_ = new QSystemTrayIcon(QApplication::windowIcon(), this);
     auto* menu = new QMenu(this);
     menu->addAction(QStringLiteral("Open qtIDM"), this, &MainWindow::raiseAndActivate);
     menu->addAction(QStringLiteral("Add URL"), this, [this] { addUrl(); });

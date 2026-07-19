@@ -49,6 +49,7 @@ struct CurlEpollDownloader::SegmentTransfer {
     bool requiresHttpPartialResponse = false;
     int attempt = 0;
     qint64 retryAfterMs = 0;
+    qint64 appliedSpeedLimit = -1;
 
     ~SegmentTransfer()
     {
@@ -187,9 +188,6 @@ void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDo
         transfer->proxyBytes = request.proxyUrl.toUtf8();
         curl_easy_setopt(easy, CURLOPT_PROXY, transfer->proxyBytes.constData());
     }
-    if (request.speedLimitBytesPerSecond > 0) {
-        curl_easy_setopt(easy, CURLOPT_MAX_RECV_SPEED_LARGE, static_cast<curl_off_t>(request.speedLimitBytesPerSecond));
-    }
     if (request.httpMethod == QStringLiteral("POST")) {
         transfer->requestBody = request.requestBody;
         curl_easy_setopt(easy, CURLOPT_POST, 1L);
@@ -258,6 +256,17 @@ void CurlEpollDownloader::cancel(const QString& id)
     QMutexLocker lock(&controlMutex_);
     controls_.insert(id, DownloadStatus::Canceled);
     wake();
+}
+
+void CurlEpollDownloader::setAlternateSpeedLimit(qint64 bytesPerSecond)
+{
+    alternateSpeedLimit_.store(qMax<qint64>(0, bytesPerSecond));
+    wake();
+}
+
+qint64 CurlEpollDownloader::alternateSpeedLimit() const
+{
+    return alternateSpeedLimit_.load();
 }
 
 qint64 CurlEpollDownloader::sessionBytesReceived() const
@@ -334,6 +343,7 @@ void CurlEpollDownloader::run()
     while (running_) {
         addPendingTransfers();
         addDueRetries();
+        applyRateLimits();
         applyControlRequests();
         epoll_event events[64] {};
         const int count = epoll_wait(epollFd_, events, 64, 1000);
@@ -372,6 +382,32 @@ void CurlEpollDownloader::run()
     close(wakeFd_);
     close(epollFd_);
     curl_global_cleanup();
+}
+
+void CurlEpollDownloader::applyRateLimits()
+{
+    QHash<QString, int> activeByDownload;
+    for (const auto& [easy, transfer] : transfers_) {
+        Q_UNUSED(easy);
+        activeByDownload[transfer->batch->id]++;
+    }
+
+    const qint64 alternateLimit = alternateSpeedLimit_.load();
+    for (const auto& [easy, transfer] : transfers_) {
+        qint64 downloadLimit = transfer->batch->request.speedLimitBytesPerSecond;
+        if (alternateLimit > 0) {
+            downloadLimit = downloadLimit > 0 ? qMin(downloadLimit, alternateLimit) : alternateLimit;
+        }
+        const int connections = qMax(1, activeByDownload.value(transfer->batch->id, 1));
+        const qint64 perConnectionLimit = downloadLimit > 0
+            ? qMax<qint64>(1, downloadLimit / connections)
+            : 0;
+        if (transfer->appliedSpeedLimit != perConnectionLimit) {
+            curl_easy_setopt(easy, CURLOPT_MAX_RECV_SPEED_LARGE,
+                             static_cast<curl_off_t>(perConnectionLimit));
+            transfer->appliedSpeedLimit = perConnectionLimit;
+        }
+    }
 }
 
 void CurlEpollDownloader::addDueRetries()
@@ -522,7 +558,9 @@ void CurlEpollDownloader::addTransfer(QueuedRequest queued)
         record.segments.append(segment);
     }
 
+    record.completedBytes = batchReceived(*batch);
     batches_.insert(batch->id, batch);
+    batch->lastReceived = record.completedBytes;
     emit downloadAdded(record);
     emit statusChanged(batch->id, DownloadStatus::Downloading, {});
 

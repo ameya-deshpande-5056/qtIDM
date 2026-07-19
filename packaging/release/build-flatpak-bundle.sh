@@ -17,6 +17,6 @@ flatpak-builder --user --install-deps-from=flathub --force-clean \
     --state-dir="$BUILD_ROOT/state" \
     --repo="$REPO_DIR" \
     "$BUILD_DIR" \
-    "$ROOT/packaging/flatpak/io.github.qtidm.qtidm.yml"
+    "$ROOT/packaging/flatpak/io.qtidm.Qtidm.yml"
 mkdir -p "$ROOT/dist"
-flatpak build-bundle "$REPO_DIR" "$ROOT/dist/qtIDM-$VERSION.flatpak" io.github.qtidm.qtidm
+flatpak build-bundle "$REPO_DIR" "$ROOT/dist/qtIDM-$VERSION.flatpak" io.qtidm.Qtidm

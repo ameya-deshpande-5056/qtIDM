@@ -1,0 +1,21 @@
+<RCC>
+  <qresource prefix="/qtidm">
+    <file alias="icons/application.svg">assets/io.qtidm.Qtidm.svg</file>
+    <file alias="icons/actions/add.svg">assets/icons/actions/add.svg</file>
+    <file alias="icons/actions/start.svg">assets/icons/actions/start.svg</file>
+    <file alias="icons/actions/pause.svg">assets/icons/actions/pause.svg</file>
+    <file alias="icons/actions/stop.svg">assets/icons/actions/stop.svg</file>
+    <file alias="icons/actions/delete.svg">assets/icons/actions/delete.svg</file>
+    <file alias="icons/actions/edit.svg">assets/icons/actions/edit.svg</file>
+    <file alias="icons/actions/queue.svg">assets/icons/actions/queue.svg</file>
+    <file alias="icons/actions/import.svg">assets/icons/actions/import.svg</file>
+    <file alias="icons/actions/export.svg">assets/icons/actions/export.svg</file>
+    <file alias="icons/actions/links.svg">assets/icons/actions/links.svg</file>
+    <file alias="icons/actions/grabber.svg">assets/icons/actions/grabber.svg</file>
+    <file alias="icons/actions/social.svg">assets/icons/actions/social.svg</file>
+    <file alias="icons/actions/zip.svg">assets/icons/actions/zip.svg</file>
+    <file alias="icons/actions/options.svg">assets/icons/actions/options.svg</file>
+    <file alias="icons/actions/about.svg">assets/icons/actions/about.svg</file>
+    <file alias="icons/actions/speed-limit.svg">assets/icons/actions/speed-limit.svg</file>
+  </qresource>
+</RCC>

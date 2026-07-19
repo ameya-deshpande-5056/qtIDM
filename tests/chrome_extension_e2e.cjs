@@ -38,7 +38,7 @@ async function main() {
     fs.mkdirSync(nativeDirectory, { recursive: true });
     fs.copyFileSync(
       nativeManifestPath,
-      path.join(nativeDirectory, "io.github.qtidm.native.json")
+      path.join(nativeDirectory, "io.qtidm.native.json")
     );
     let extensions = await browser.extensions();
     let extension = [...extensions.values()].find((item) => item.name === "qtIDM Integration");

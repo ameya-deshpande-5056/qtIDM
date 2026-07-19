@@ -27,6 +27,8 @@ public:
     QString enqueue(DownloadRequest request);
     void pause(const QString& id);
     void cancel(const QString& id);
+    void setAlternateSpeedLimit(qint64 bytesPerSecond);
+    qint64 alternateSpeedLimit() const;
     qint64 sessionBytesReceived() const;
     void resetSessionBytesReceived();
 
@@ -55,6 +57,7 @@ private:
     void wake();
     void addPendingTransfers();
     void addDueRetries();
+    void applyRateLimits();
     void addTransfer(QueuedRequest queued);
     void addSegmentTransfer(const std::shared_ptr<DownloadBatch>& batch, int segmentIndex, int attempt = 0);
     void startQueuedSegments(const std::shared_ptr<DownloadBatch>& batch);
@@ -71,6 +74,7 @@ private:
 
     std::atomic_bool running_ = false;
     std::atomic<qint64> sessionBytesReceived_ = 0;
+    std::atomic<qint64> alternateSpeedLimit_ = 0;
     std::jthread thread_;
     QMutex pendingMutex_;
     QQueue<QueuedRequest> pending_;

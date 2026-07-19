@@ -6,9 +6,9 @@
 #include <QJsonDocument>
 
 namespace {
-constexpr auto serviceName = "io.github.qtidm";
-constexpr auto objectPath = "/io/github/qtidm/Application";
-constexpr auto interfaceName = "io.github.qtidm.Application";
+constexpr auto serviceName = "io.qtidm.Qtidm";
+constexpr auto objectPath = "/io/qtidm/Qtidm/Application";
+constexpr auto interfaceName = "io.qtidm.Qtidm.Application";
 }
 
 namespace qtidm {

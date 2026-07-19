@@ -9,7 +9,7 @@ namespace qtidm {
 
 class SingleInstance final : public QObject {
     Q_OBJECT
-    Q_CLASSINFO("D-Bus Interface", "io.github.qtidm.Application")
+    Q_CLASSINFO("D-Bus Interface", "io.qtidm.Qtidm.Application")
 public:
     explicit SingleInstance(QObject* parent = nullptr);
     bool acquire();

@@ -99,7 +99,7 @@ QJsonObject handle(const QJsonObject& object)
     QString lastError;
     bool launched = false;
     for (int attempt = 0; attempt < 50; ++attempt) {
-        QDBusInterface iface(QStringLiteral("io.github.qtidm"), QStringLiteral("/io/github/qtidm/Application"), QStringLiteral("io.github.qtidm.Application"), QDBusConnection::sessionBus());
+        QDBusInterface iface(QStringLiteral("io.qtidm.Qtidm"), QStringLiteral("/io/qtidm/Qtidm/Application"), QStringLiteral("io.qtidm.Qtidm.Application"), QDBusConnection::sessionBus());
         if (iface.isValid()) {
             if (object.value(QStringLiteral("prepare")).toBool()) return { { QStringLiteral("ok"), true }, { QStringLiteral("prepared"), true }, { QStringLiteral("persistent"), true } };
             const auto reply = !downloads.isEmpty() ? iface.call(QStringLiteral("AddDownloadsJson"), downloadsJson) : (urls.size() == 1 ? iface.call(QStringLiteral("AddUrl"), urls.first(), QVariantMap {}) : iface.call(QStringLiteral("AddUrls"), urls, QVariantMap {}));

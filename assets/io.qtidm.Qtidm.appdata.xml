@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.qtidm.qtidm</id>
+  <id>io.qtidm.Qtidm</id>
   <name>qtIDM</name>
   <summary>Linux-native Qt download manager</summary>
+  <icon type="stock">io.qtidm.Qtidm</icon>
+  <categories>
+    <category>Network</category>
+    <category>FileTransfer</category>
+  </categories>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
-  <developer id="io.github.qtidm">
+  <developer id="io.qtidm">
     <name>qtIDM Maintainers</name>
   </developer>
   <description>
@@ -22,7 +27,7 @@
   </description>
   <url type="homepage">https://github.com/ameya-deshpande-5056/qtIDM</url>
   <url type="bugtracker">https://github.com/ameya-deshpande-5056/qtIDM/issues</url>
-  <launchable type="desktop-id">io.github.qtidm.qtidm.desktop</launchable>
+  <launchable type="desktop-id">io.qtidm.Qtidm.desktop</launchable>
   <content_rating type="oars-1.1"/>
   <releases>
     <release version="0.1.1" date="2026-07-18">

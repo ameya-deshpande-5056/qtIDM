@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0
+
+- Added a permanent session dashboard to the bottom status bar with combined download speed, data downloaded during the current session, and an alternate per-download speed-limit control.
+- Added persistent alternate-limit presets and custom limits that apply immediately to active downloads and automatically to new or resumed transfers.
+- Fixed segmented downloads multiplying their configured speed limit by the number of active connections; limits now cap the aggregate rate of each download.
+- Replaced volatile instantaneous speed and ETA values with a smoothed recent download rate, stable ETA calculation, resume-safe sampling, and explicit stalled or unavailable states.
+- Added exact session-byte accounting across regular and media progress updates without recounting pre-existing partial data after resume.
+- Replaced host-dependent theme icons with a complete embedded SVG action-icon set, preventing missing toolbar icons on minimal distributions and keeping Debian, Flatpak, and AppImage builds visually consistent.
+- Added distinct semantic colors for action icons while reserving the application brand color exclusively for qtIDM identity assets.
+- Added dynamic pointing-hand and forbidden cursors for enabled and disabled toolbar icon buttons.
+- Restored the simplified download-arrow logo, changed the brand from royal blue to a dark wine palette, and propagated it to the application window, dialogs, About dialog, system tray, README, desktop metadata, and browser extensions.
+- Added reproducible 16–512 px application icons and browser-toolbar variants generated from the canonical SVG.
+- Added a permanently dark Chrome and Firefox extension theme using qtIDM's wine branding and warm copper accents.
+- Changed the application ID to `io.qtidm.Qtidm` across Flatpak, AppStream, desktop files, icons, D-Bus, runtime association, packaging, and CI.
+- Expanded packaging and integration tests to cover application identity, static icon completeness, extension branding, generated icon sizes, native-host metadata, and aggregate segmented-transfer throttling.
+
 ## 0.1.8
 
 - Fixed Flatpak builds with stricter Qt headers by including the complete JSON array type used by single-instance browser handoffs.

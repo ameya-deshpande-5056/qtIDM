@@ -95,6 +95,34 @@ private slots:
         QVERIFY(!QFileInfo::exists(request.targetPath + QStringLiteral(".part")));
     }
 
+    void alternateLimitCapsTheWholeSegmentedDownload()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        constexpr qint64 limit = 128 * 1024;
+        downloader.setAlternateSpeedLimit(limit);
+        QCOMPARE(downloader.alternateSpeedLimit(), limit);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/range.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/alternate-limited.bin");
+        request.segments = 4;
+        QElapsedTimer elapsed;
+        elapsed.start();
+        const auto id = downloader.enqueue(request);
+
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 15000));
+        QVERIFY2(elapsed.elapsed() >= 1200,
+                 qPrintable(QStringLiteral("segmented transfer bypassed its per-download cap (%1 ms)")
+                                .arg(elapsed.elapsed())));
+        downloader.stop();
+        QCOMPARE(QFileInfo(request.targetPath).size(), fixtureSize);
+    }
+
     void preservesEncodedQueryCharacters()
     {
         QTemporaryDir dir;
