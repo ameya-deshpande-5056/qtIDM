@@ -65,8 +65,9 @@ int main(int argc, char** argv)
                      });
 
     QObject::connect(&singleInstance, &qtidm::SingleInstance::activateRequested, &window, &qtidm::MainWindow::raiseAndActivate);
-    QObject::connect(&singleInstance, &qtidm::SingleInstance::urlReceived, &window, [&window](const QString& url, const QVariantMap& headers) { window.addUrl(url, headers); });
-    QObject::connect(&singleInstance, &qtidm::SingleInstance::urlsReceived, &window, [&window](const QStringList& urls, const QVariantMap& headers) { window.addUrls(urls, headers); });
+    singleInstance.setUrlHandler([&window](QString url, QVariantMap headers) { return window.addUrl(std::move(url), std::move(headers)); });
+    singleInstance.setUrlsHandler([&window](QStringList urls, QVariantMap headers) { return window.addUrls(std::move(urls), std::move(headers)); });
+    singleInstance.setDownloadsHandler([&window](QVariantList downloads) { return window.addBrowserDownloads(std::move(downloads)); });
 
     downloader.start();
     window.show();

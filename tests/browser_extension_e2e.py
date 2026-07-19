@@ -89,19 +89,26 @@ import struct
 import sys
 
 raw_length = sys.stdin.buffer.read(4)
-if len(raw_length) != 4:
+while len(raw_length) == 4:
+    length = struct.unpack("<I", raw_length)[0]
+    payload = sys.stdin.buffer.read(length)
+    if len(payload) != length:
+        raise SystemExit(3)
+    message = json.loads(payload.decode("utf-8"))
+    # Test-only metadata proves prepare and redirect used the same native port.
+    message["_e2eHostPid"] = os.getpid()
+    with open(os.environ["QTIDM_E2E_NATIVE_LOG"], "a", encoding="utf-8") as output:
+        output.write(json.dumps(message, separators=(",", ":")) + "\\n")
+    response = {"ok": True, "accepted": not message.get("prepare"), "prepared": message.get("prepare") is True, "message": "accepted by E2E host"}
+    if "id" in message:
+        response["id"] = message["id"]
+    encoded = json.dumps(response).encode("utf-8")
+    sys.stdout.buffer.write(struct.pack("<I", len(encoded)))
+    sys.stdout.buffer.write(encoded)
+    sys.stdout.buffer.flush()
+    raw_length = sys.stdin.buffer.read(4)
+if raw_length:
     raise SystemExit(2)
-length = struct.unpack("<I", raw_length)[0]
-payload = sys.stdin.buffer.read(length)
-if len(payload) != length:
-    raise SystemExit(3)
-message = json.loads(payload.decode("utf-8"))
-with open(os.environ["QTIDM_E2E_NATIVE_LOG"], "a", encoding="utf-8") as output:
-    output.write(json.dumps(message, separators=(",", ":")) + "\\n")
-response = json.dumps({"ok": True, "message": "accepted by E2E host"}).encode("utf-8")
-sys.stdout.buffer.write(struct.pack("<I", len(response)))
-sys.stdout.buffer.write(response)
-sys.stdout.buffer.flush()
 """,
         encoding="utf-8",
     )
@@ -280,6 +287,10 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
 
 
 def validate_message(message: dict[str, object], base_url: str) -> None:
+    downloads = message.get("downloads")
+    if not isinstance(downloads, list) or len(downloads) != 1 or not isinstance(downloads[0], dict):
+        raise AssertionError(f"missing structured browser download: {message!r}")
+    message = downloads[0]
     expected_url = f"{base_url}/download.bin?from=e2e"
     if message.get("url") != expected_url:
         raise AssertionError(f"unexpected intercepted URL: {message.get('url')!r}")
@@ -294,6 +305,17 @@ def validate_message(message: dict[str, object], base_url: str) -> None:
         raise AssertionError(f"browser referrer was not forwarded: {headers!r}")
     if not str(headers.get("User-Agent", "")).strip():
         raise AssertionError(f"browser User-Agent was not forwarded: {headers!r}")
+
+
+def validate_persistent_session(messages: list[dict[str, object]]) -> None:
+    if len(messages) < 2:
+        raise AssertionError(f"native host did not receive a persistent prepare/download session: {messages!r}")
+    if not messages[0].get("prepare") or not messages[0].get("id"):
+        raise AssertionError(f"first native message was not an identified prepare request: {messages!r}")
+    if messages[1].get("prepare") or not messages[1].get("id"):
+        raise AssertionError(f"second native message was not an identified download request: {messages!r}")
+    if messages[0].get("_e2eHostPid") != messages[1].get("_e2eHostPid"):
+        raise AssertionError(f"browser reopened the native host instead of reusing its port: {messages!r}")
 
 
 def run(browser: str, strict: bool) -> int:
@@ -351,8 +373,10 @@ def run(browser: str, strict: bool) -> int:
                 deadline = time.monotonic() + 40
                 while time.monotonic() < deadline:
                     messages = load_messages(log_path)
-                    if messages:
-                        validate_message(messages[0], base_url)
+                    download_messages = [message for message in messages if not message.get("prepare")]
+                    if download_messages:
+                        validate_message(download_messages[0], base_url)
+                        validate_persistent_session(messages)
                         print(f"PASS: {browser} intercepted a download through native messaging")
                         return 0
                     if process.poll() is not None:

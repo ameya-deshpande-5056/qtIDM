@@ -30,7 +30,7 @@ function browserApi(rootName) {
         calls.push("native");
         nativeMessages.push(message);
         if (nativeError) throw nativeError;
-        return { ok: true };
+        return { ok: true, prepared: message.prepare === true, accepted: message.prepare !== true };
       }
     },
     storage: {
@@ -85,6 +85,8 @@ async function testVariant(relativePath, rootName) {
     [rootName]: mock.api,
     URL,
     navigator: { userAgent: "qtIDM interception test" },
+    btoa(value) { return Buffer.from(value, "binary").toString("base64"); },
+    unescape,
     console: { error() {} }
   };
   vm.createContext(context);
@@ -125,11 +127,12 @@ async function testVariant(relativePath, rootName) {
     "HLS",
     "Browser supplied name.mp4"
   );
-  assert.equal(mock.nativeMessages.at(-1).mediaType, "HLS");
-  assert.equal(mock.nativeMessages.at(-1).suggestedFilename, "Browser supplied name.mp4");
-  assert.equal(mock.nativeMessages.at(-1).headers.Origin, "https://example.test");
-  assert.equal(mock.nativeMessages.at(-1).headers.Referer, "https://example.test/page");
-  assert.equal(mock.nativeMessages.at(-1).headers["Sec-Fetch-Site"], "same-origin");
+  const sent = mock.nativeMessages.at(-1).downloads[0];
+  assert.equal(sent.headers._qtidmMediaType, "HLS");
+  assert.equal(sent.suggestedFilename, "Browser supplied name.mp4");
+  assert.equal(sent.headers.Origin, "https://example.test");
+  assert.equal(sent.headers.Referer, "https://example.test/page");
+  assert.equal(sent.headers["Sec-Fetch-Site"], "same-origin");
   mock.calls.length = 0;
 
   mock.api.webRequest.onHeadersReceived.listeners[0]({
@@ -146,20 +149,20 @@ async function testVariant(relativePath, rootName) {
   };
   await context.redirectBrowserDownload(item, "https://example.test/archive.bin");
   assert.equal(
-    mock.nativeMessages.at(-1).suggestedFilename,
+    mock.nativeMessages.at(-1).downloads[0].suggestedFilename,
     "AnimePahe_Persona_5_the_Animation_01_BD_1080p_nks.mp4"
   );
   assert.deepEqual(
     mock.calls,
-    ["pause", "native", "cancel", "removeFile", "erase"],
-    `${rootName} must erase a successfully redirected browser download`
+    ["pause", "native", "cancel", "removeFile", "erase", "native"],
+    `${rootName} must remove the browser file before opening qtIDM's download dialog`
   );
 
   await context.redirectBrowserDownload(
     { id: 8, referrer: "https://example.test/page", filename: "" },
     "https://example.test/archive.bin"
   );
-  assert.equal(mock.nativeMessages.at(-1).suggestedFilename, "Server supplied name.mp4");
+  assert.equal(mock.nativeMessages.at(-1).downloads[0].suggestedFilename, "Server supplied name.mp4");
 
   mock.calls.length = 0;
   mock.failNative(new Error("native host unavailable"));

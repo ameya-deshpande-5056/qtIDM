@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDateTime>
+#include <QByteArray>
 #include <QJsonObject>
 #include <QString>
 #include <QTime>
@@ -53,6 +54,10 @@ struct DownloadRequest {
     QString completionMoveDirectory;
     QString archiveDestination;
     QString credentialVaultKey;
+    // Browser-originated POST downloads need their method and body preserved.
+    // Empty requestBody always denotes the normal GET transfer.
+    QString httpMethod;
+    QByteArray requestBody;
     QDateTime scheduledAt;
     QTime windowStart;
     QTime windowEnd;

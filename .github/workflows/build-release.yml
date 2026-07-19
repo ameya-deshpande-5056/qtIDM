@@ -46,7 +46,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # Resolve the current active LTS at workflow runtime so the browser
+          # packaging and E2E tooling do not remain on a deprecated line.
+          node-version: lts/*
 
       - name: Install dependencies
         run: |
@@ -109,7 +111,8 @@ jobs:
           QTIDM_E2E_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
           QTIDM_E2E_CHROME_NO_SANDBOX: 1
           QTIDM_E2E_FIREFOX: ${{ steps.setup-firefox.outputs.firefox-path }}
-        run: ctest --test-dir build -R 'qtIDM_(chrome|firefox)_extension_e2e_tests' --output-on-failure
+        run: |
+          ctest --test-dir build -R '^qtIDM_(chrome|firefox)_extension_e2e_tests$' --output-on-failure --no-tests=error
 
       - name: Performance smoke
         if: github.event_name == 'schedule'

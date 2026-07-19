@@ -70,6 +70,8 @@ QJsonObject requestToJson(const DownloadRequest& request)
         { QStringLiteral("completionMoveDirectory"), request.completionMoveDirectory },
         { QStringLiteral("archiveDestination"), request.archiveDestination },
         { QStringLiteral("credentialVaultKey"), request.credentialVaultKey },
+        { QStringLiteral("httpMethod"), request.httpMethod },
+        { QStringLiteral("requestBody"), QString::fromLatin1(request.requestBody.toBase64()) },
         { QStringLiteral("scheduledAt"), request.scheduledAt.toUTC().toString(Qt::ISODateWithMs) },
         { QStringLiteral("windowStart"), request.windowStart.toString(QStringLiteral("HH:mm:ss")) },
         { QStringLiteral("windowEnd"), request.windowEnd.toString(QStringLiteral("HH:mm:ss")) },
@@ -122,6 +124,11 @@ DownloadRequest requestFromJson(const QJsonObject& object)
     request.completionMoveDirectory = object.value(QStringLiteral("completionMoveDirectory")).toString().trimmed();
     request.archiveDestination = object.value(QStringLiteral("archiveDestination")).toString().trimmed();
     request.credentialVaultKey = object.value(QStringLiteral("credentialVaultKey")).toString().trimmed();
+    request.httpMethod = object.value(QStringLiteral("httpMethod")).toString().trimmed().toUpper();
+    if (request.httpMethod != QStringLiteral("POST")) {
+        request.httpMethod.clear();
+    }
+    request.requestBody = QByteArray::fromBase64(object.value(QStringLiteral("requestBody")).toString().toLatin1());
     request.scheduledAt = QDateTime::fromString(object.value(QStringLiteral("scheduledAt")).toString(), Qt::ISODateWithMs);
     request.windowStart = QTime::fromString(object.value(QStringLiteral("windowStart")).toString(), QStringLiteral("HH:mm:ss"));
     request.windowEnd = QTime::fromString(object.value(QStringLiteral("windowEnd")).toString(), QStringLiteral("HH:mm:ss"));

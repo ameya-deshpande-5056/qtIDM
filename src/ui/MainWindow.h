@@ -25,9 +25,13 @@ public:
     MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& scheduler, DownloadRepository& repository, ThemeManager& themeManager, QWidget* parent = nullptr);
 
 public slots:
-    void addUrl(QString url = {}, QVariantMap headers = {});
-    void addUrls(QStringList urls, QVariantMap headers = {});
+    bool addUrl(QString url = {}, QVariantMap headers = {});
+    bool addUrls(QStringList urls, QVariantMap headers = {});
+    bool addBrowserDownloads(QVariantList downloads);
     void raiseAndActivate();
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
 
 private slots:
     void onDownloadAdded(const DownloadRecord& record);
@@ -85,6 +89,7 @@ private:
     QSystemTrayIcon* tray_ = nullptr;
     QMetaObject::Connection clipboardConnection_;
     QString lastClipboardUrl_;
+    bool quitting_ = false;
 };
 
 }

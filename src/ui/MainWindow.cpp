@@ -10,6 +10,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QClipboard>
 #include <QComboBox>
 #include <QCryptographicHash>
@@ -93,6 +94,23 @@ QString categoryForName(const QString& value)
     if (videos.contains(suffix)) return QStringLiteral("Video");
     if (images.contains(suffix)) return QStringLiteral("Images");
     return QStringLiteral("General");
+}
+
+QString downloadFolderForCategory(const QString& category)
+{
+    const auto normalized = category.trimmed();
+    if (normalized.compare(QStringLiteral("Video"), Qt::CaseInsensitive) == 0) return QStringLiteral("Videos");
+    if (normalized.compare(QStringLiteral("Images"), Qt::CaseInsensitive) == 0) return QStringLiteral("Images");
+    if (normalized.compare(QStringLiteral("General"), Qt::CaseInsensitive) == 0) return QStringLiteral("Others");
+    const auto safe = normalized.simplified().remove(QRegularExpression(QStringLiteral("[^A-Za-z0-9 _-]")));
+    return safe.isEmpty() || safe == QStringLiteral(".") || safe == QStringLiteral("..")
+        ? QStringLiteral("Others") : safe;
+}
+
+QString defaultDownloadPath(const QString& name, const QString& category)
+{
+    const QDir downloads(QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
+    return downloads.filePath(downloadFolderForCategory(category) + QLatin1Char('/') + name);
 }
 
 bool containsHeader(const QVariantMap& headers, QStringView name)
@@ -259,30 +277,33 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
     });
 }
 
-void MainWindow::addUrl(QString url, QVariantMap headers)
+bool MainWindow::addUrl(QString url, QVariantMap headers)
 {
     if (url.isEmpty()) {
         bool ok = false;
         url = QInputDialog::getText(this, QStringLiteral("Add URL"), QStringLiteral("Address:"), QLineEdit::Normal, {}, &ok);
         if (!ok || url.isEmpty()) {
-            return;
+            return false;
         }
     }
     const QUrl parsed = QUrl::fromUserInput(url);
     if (!parsed.isValid() || (parsed.scheme() != QStringLiteral("http")
         && parsed.scheme() != QStringLiteral("https") && parsed.scheme() != QStringLiteral("ftp"))) {
         QMessageBox::warning(this, QStringLiteral("Invalid URL"), QStringLiteral("Enter a valid HTTP, HTTPS, or FTP URL."));
-        return;
+        return false;
     }
     if (hasDuplicateUrl(parsed)
         && QMessageBox::question(this, QStringLiteral("Duplicate URL"),
                QStringLiteral("This URL is already in the download list. Add it again?"))
             != QMessageBox::Yes) {
-        return;
+        return false;
     }
 
     const auto mediaTypeHint = takeHeader(&headers, u"_qtidmMediaType").trimmed().toUpper();
     const auto suggestedFilename = safeSuggestedFilename(takeHeader(&headers, u"_qtidmSuggestedFilename"));
+    const auto httpMethod = takeHeader(&headers, u"_qtidmHttpMethod").trimmed().toUpper();
+    const auto requestBody = QByteArray::fromBase64(takeHeader(&headers, u"_qtidmRequestBody").toLatin1());
+    const bool browserPost = httpMethod == QStringLiteral("POST");
     const bool adaptiveMedia = MediaDownloader::supports(parsed, mediaTypeHint);
     QString name = suggestedFilename;
     if (name.isEmpty()) {
@@ -301,8 +322,8 @@ void MainWindow::addUrl(QString url, QVariantMap headers)
     auto* form = new QFormLayout(formContents);
     scroll->setWidget(formContents);
     dialogLayout->addWidget(scroll);
-    auto* targetEdit = new QLineEdit(QStandardPaths::writableLocation(QStandardPaths::DownloadLocation) + QLatin1Char('/') + name);
     auto* categoryEdit = new QLineEdit(adaptiveMedia ? QStringLiteral("Video") : categoryForName(name));
+    auto* targetEdit = new QLineEdit(defaultDownloadPath(name, categoryEdit->text()));
     auto* queueEdit = new QLineEdit(QStringLiteral("Main"));
     auto* segments = new QSpinBox;
     segments->setRange(1, 32);
@@ -310,6 +331,12 @@ void MainWindow::addUrl(QString url, QVariantMap headers)
     segments->setValue(settings.value(QStringLiteral("downloads/defaultSegments"), 8).toInt());
     auto* dynamicSegments = new QCheckBox(QStringLiteral("Queue additional ranges and refill completed connections"));
     dynamicSegments->setChecked(true);
+    if (browserPost) {
+        segments->setValue(1);
+        segments->setEnabled(false);
+        dynamicSegments->setChecked(false);
+        dynamicSegments->setEnabled(false);
+    }
     auto* hostConnections = new QSpinBox;
     hostConnections->setRange(1, 128);
     hostConnections->setValue(settings.value(QStringLiteral("downloads/defaultHostConnections"), 16).toInt());
@@ -472,18 +499,23 @@ void MainWindow::addUrl(QString url, QVariantMap headers)
     form->addWidget(buttons);
     dialog.resize(760, 780);
     if (dialog.exec() != QDialog::Accepted || targetEdit->text().isEmpty()) {
-        return;
+        return false;
+    }
+    if (!QDir().mkpath(QFileInfo(targetEdit->text()).absolutePath())) {
+        QMessageBox::warning(this, QStringLiteral("Download Options"),
+            QStringLiteral("Could not create the destination folder."));
+        return false;
     }
 
     QVariantMap editedHeaders = std::move(headers);
     QString headerError;
     if (!mergeHeaderLines(headerEdit->toPlainText(), &editedHeaders, &headerError)) {
         QMessageBox::warning(this, QStringLiteral("Invalid Headers"), headerError);
-        return;
+        return false;
     }
     if (adaptiveMedia) {
         mediaDownloader_.enqueue(parsed, targetEdit->text(), editedHeaders);
-        return;
+        return true;
     }
 
     DownloadRequest request;
@@ -494,6 +526,8 @@ void MainWindow::addUrl(QString url, QVariantMap headers)
     request.priority = priority->value();
     request.repeatIntervalSeconds = repeatMinutes->value() * 60;
     request.headers = std::move(editedHeaders);
+    request.httpMethod = browserPost ? QStringLiteral("POST") : QString {};
+    request.requestBody = browserPost ? requestBody : QByteArray {};
     request.segments = segments->value();
     request.dynamicSegmentation = dynamicSegments->isChecked();
     request.perHostConnectionLimit = hostConnections->value();
@@ -512,7 +546,7 @@ void MainWindow::addUrl(QString url, QVariantMap headers)
     if (request.extractArchive && !ArchiveExtractor::supports(request.targetPath)) {
         QMessageBox::warning(this, QStringLiteral("Download Options"),
             QStringLiteral("Automatic extraction supports ZIP, 7z, RAR, TAR, GZip, BZip2, and XZ archives."));
-        return;
+        return false;
     }
     if (storeCredential->isChecked() && !request.password.isEmpty()) {
         request.credentialVaultKey = credentialVault_.keyFor(request.url, request.username);
@@ -520,7 +554,7 @@ void MainWindow::addUrl(QString url, QVariantMap headers)
         if (!credentialVault_.store(request.credentialVaultKey, request.url,
                 request.username, request.password, &vaultError)) {
             QMessageBox::warning(this, QStringLiteral("Credential Vault"), vaultError);
-            return;
+            return false;
         }
         request.password.clear();
     }
@@ -540,15 +574,34 @@ void MainWindow::addUrl(QString url, QVariantMap headers)
         }
         if (request.allowedWeekdays == 0) {
             QMessageBox::warning(this, QStringLiteral("Download Options"), QStringLiteral("Select at least one allowed weekday."));
-            return;
+            return false;
         }
     }
     scheduler_.schedule(std::move(request));
+    return true;
 }
 
-void MainWindow::addUrls(QStringList urls, QVariantMap headers)
+bool MainWindow::addBrowserDownloads(QVariantList downloads)
 {
-    urls.removeDuplicates();
+    if (downloads.isEmpty() || downloads.size() > 100) {
+        return false;
+    }
+    QStringList urls;
+    urls.reserve(downloads.size());
+    for (const auto& value : std::as_const(downloads)) {
+        urls.append(value.toMap().value(QStringLiteral("url")).toString());
+    }
+    // Keep protocol-specific metadata out of the editable header field.  The
+    // batch dialog consumes it per row after the user accepts shared options.
+    return addUrls(std::move(urls), { { QStringLiteral("_qtidmBrowserDownloads"), downloads } });
+}
+
+bool MainWindow::addUrls(QStringList urls, QVariantMap headers)
+{
+    const auto browserDownloads = headers.take(QStringLiteral("_qtidmBrowserDownloads")).toList();
+    if (browserDownloads.isEmpty()) {
+        urls.removeDuplicates();
+    }
     QList<QUrl> validUrls;
     for (const auto& value : std::as_const(urls)) {
         const auto url = QUrl::fromUserInput(value.trimmed());
@@ -559,7 +612,7 @@ void MainWindow::addUrls(QStringList urls, QVariantMap headers)
     }
     if (validUrls.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("Batch Download"), QStringLiteral("The batch does not contain any valid HTTP, HTTPS, or FTP URLs."));
-        return;
+        return false;
     }
     const auto duplicateCount = std::count_if(validUrls.cbegin(), validUrls.cend(), [this](const QUrl& value) {
         return hasDuplicateUrl(value);
@@ -568,7 +621,7 @@ void MainWindow::addUrls(QStringList urls, QVariantMap headers)
         && QMessageBox::question(this, QStringLiteral("Duplicate URLs"),
                QStringLiteral("%1 URL(s) already exist in the download list. Add them again?").arg(duplicateCount))
             != QMessageBox::Yes) {
-        return;
+        return false;
     }
 
     QDialog dialog(this);
@@ -654,7 +707,7 @@ void MainWindow::addUrls(QStringList urls, QVariantMap headers)
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     form->addWidget(buttons);
     if (dialog.exec() != QDialog::Accepted || directoryEdit->text().trimmed().isEmpty()) {
-        return;
+        return false;
     }
     if (restrictWindow->isChecked()
         && std::any_of(validUrls.cbegin(), validUrls.cend(), [](const QUrl& url) {
@@ -662,7 +715,7 @@ void MainWindow::addUrls(QStringList urls, QVariantMap headers)
         })) {
         QMessageBox::warning(this, QStringLiteral("Batch Download"),
                              QStringLiteral("Schedule windows are not yet available for adaptive HLS/DASH jobs. Remove those URLs or disable the window."));
-        return;
+        return false;
     }
     if (std::any_of(validUrls.cbegin(), validUrls.cend(), [](const QUrl& url) {
             return MediaDownloader::supports(url);
@@ -672,7 +725,7 @@ void MainWindow::addUrls(QStringList urls, QVariantMap headers)
             || removeOnCompletion->isChecked())) {
         QMessageBox::warning(this, QStringLiteral("Batch Download"),
             QStringLiteral("Post-download automation is not available for adaptive HLS/DASH jobs. Remove those URLs or clear the automation options."));
-        return;
+        return false;
     }
     int allowedWeekdays = 0;
     if (restrictWindow->isChecked()) {
@@ -683,15 +736,31 @@ void MainWindow::addUrls(QStringList urls, QVariantMap headers)
         }
         if (allowedWeekdays == 0) {
             QMessageBox::warning(this, QStringLiteral("Batch Download"), QStringLiteral("Select at least one allowed weekday."));
-            return;
+            return false;
         }
     }
 
     QSet<QString> names;
     int unnamed = 1;
-    for (const auto& url : std::as_const(validUrls)) {
-        const bool adaptiveMedia = MediaDownloader::supports(url);
-        QString name = url.fileName();
+    for (qsizetype index = 0; index < validUrls.size(); ++index) {
+        const auto& url = validUrls.at(index);
+        QVariantMap requestHeaders = headers;
+        QVariantMap browserDownload;
+        if (index < browserDownloads.size()) {
+            browserDownload = browserDownloads.at(index).toMap();
+            requestHeaders = browserDownload.value(QStringLiteral("headers")).toMap();
+            const auto method = browserDownload.value(QStringLiteral("method")).toString().trimmed().toUpper();
+            if (method == QStringLiteral("POST")) {
+                requestHeaders.insert(QStringLiteral("_qtidmHttpMethod"), method);
+                requestHeaders.insert(QStringLiteral("_qtidmRequestBody"), browserDownload.value(QStringLiteral("body")).toString());
+            }
+            const auto suggested = safeSuggestedFilename(browserDownload.value(QStringLiteral("suggestedFilename")).toString());
+            if (!suggested.isEmpty()) requestHeaders.insert(QStringLiteral("_qtidmSuggestedFilename"), suggested);
+        }
+        const auto mediaTypeHint = takeHeader(&requestHeaders, u"_qtidmMediaType").trimmed().toUpper();
+        const bool adaptiveMedia = MediaDownloader::supports(url, mediaTypeHint);
+        QString name = safeSuggestedFilename(takeHeader(&requestHeaders, u"_qtidmSuggestedFilename"));
+        if (name.isEmpty()) name = url.fileName();
         if (name.isEmpty()) {
             name = QStringLiteral("download-%1.bin").arg(unnamed++);
         }
@@ -710,7 +779,7 @@ void MainWindow::addUrls(QStringList urls, QVariantMap headers)
         names.insert(name.toLower());
         const auto targetPath = QDir(directoryEdit->text().trimmed()).filePath(name);
         if (adaptiveMedia) {
-            mediaDownloader_.enqueue(url, targetPath, headers);
+            mediaDownloader_.enqueue(url, targetPath, requestHeaders);
             continue;
         }
         DownloadRequest request;
@@ -720,9 +789,19 @@ void MainWindow::addUrls(QStringList urls, QVariantMap headers)
             ? categoryForName(name)
             : categoryEdit->text().trimmed();
         request.queueName = queueEdit->text().trimmed();
-        request.headers = headers;
-        request.segments = segments->value();
-        request.dynamicSegmentation = dynamicSegments->isChecked();
+        const auto httpMethod = takeHeader(&requestHeaders, u"_qtidmHttpMethod").trimmed().toUpper();
+        const auto requestBody = QByteArray::fromBase64(takeHeader(&requestHeaders, u"_qtidmRequestBody").toLatin1());
+        request.headers = std::move(requestHeaders);
+        request.httpMethod = httpMethod == QStringLiteral("POST") ? httpMethod : QString {};
+        request.requestBody = request.httpMethod == QStringLiteral("POST") ? requestBody : QByteArray {};
+        if (request.httpMethod == QStringLiteral("POST")) {
+            request.segments = 1;
+            request.dynamicSegmentation = false;
+        }
+        else {
+            request.segments = segments->value();
+            request.dynamicSegmentation = dynamicSegments->isChecked();
+        }
         request.perHostConnectionLimit = hostConnections->value();
         request.fileConflictPolicy = static_cast<FileConflictPolicy>(conflictPolicy->currentData().toInt());
         request.completionCommand = completionCommand->text().trimmed();
@@ -739,6 +818,7 @@ void MainWindow::addUrls(QStringList urls, QVariantMap headers)
         scheduler_.schedule(std::move(request));
     }
     statusBar()->showMessage(QStringLiteral("%1 batch downloads added").arg(validUrls.size()), 5000);
+    return true;
 }
 
 void MainWindow::raiseAndActivate()
@@ -1940,9 +2020,53 @@ void MainWindow::buildTray()
     menu->addAction(QStringLiteral("Open qtIDM"), this, &MainWindow::raiseAndActivate);
     menu->addAction(QStringLiteral("Add URL"), this, [this] { addUrl(); });
     menu->addSeparator();
-    menu->addAction(QStringLiteral("Quit"), qApp, &QApplication::quit);
+    menu->addAction(QStringLiteral("Quit"), this, [this] {
+        quitting_ = true;
+        qApp->quit();
+    });
     tray_->setContextMenu(menu);
     tray_->show();
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (quitting_ || !tray_ || !tray_->isVisible()) {
+        event->accept();
+        return;
+    }
+
+    const auto records = repository_.listDownloads();
+    const auto active = std::count_if(records.cbegin(), records.cend(), [](const DownloadRecord& record) {
+        return record.status == DownloadStatus::Queued || record.status == DownloadStatus::Connecting
+            || record.status == DownloadStatus::Downloading;
+    });
+    if (active > 0) {
+        QMessageBox prompt(QMessageBox::Question, QStringLiteral("Downloads are active"),
+                            QStringLiteral("%1 download%2 %3 still active.")
+                                .arg(active).arg(active == 1 ? QString {} : QStringLiteral("s"))
+                                .arg(active == 1 ? QStringLiteral("is") : QStringLiteral("are")),
+                            QMessageBox::NoButton, this);
+        prompt.setInformativeText(QStringLiteral("Keep qtIDM running in the system tray, or quit and stop the active downloads."));
+        auto* keepRunning = prompt.addButton(QStringLiteral("Keep Running"), QMessageBox::AcceptRole);
+        auto* quit = prompt.addButton(QStringLiteral("Quit qtIDM"), QMessageBox::DestructiveRole);
+        prompt.addButton(QMessageBox::Cancel);
+        prompt.exec();
+        if (prompt.clickedButton() == quit) {
+            quitting_ = true;
+            event->accept();
+            return;
+        }
+        if (prompt.clickedButton() != keepRunning) {
+            event->ignore();
+            return;
+        }
+    }
+
+    hide();
+    tray_->showMessage(QStringLiteral("qtIDM is still running"),
+                       QStringLiteral("Use the system tray icon to reopen qtIDM or quit it."),
+                       QSystemTrayIcon::Information, 4000);
+    event->ignore();
 }
 
 void MainWindow::loadPersistedDownloads()

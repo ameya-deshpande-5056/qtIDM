@@ -44,6 +44,7 @@ struct CurlEpollDownloader::SegmentTransfer {
     QByteArray rangeBytes;
     QByteArray userPwdBytes;
     QByteArray proxyBytes;
+    QByteArray requestBody;
     curl_slist* headers = nullptr;
     bool requiresHttpPartialResponse = false;
     int attempt = 0;
@@ -188,6 +189,12 @@ void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDo
     }
     if (request.speedLimitBytesPerSecond > 0) {
         curl_easy_setopt(easy, CURLOPT_MAX_RECV_SPEED_LARGE, static_cast<curl_off_t>(request.speedLimitBytesPerSecond));
+    }
+    if (request.httpMethod == QStringLiteral("POST")) {
+        transfer->requestBody = request.requestBody;
+        curl_easy_setopt(easy, CURLOPT_POST, 1L);
+        curl_easy_setopt(easy, CURLOPT_POSTFIELDS, transfer->requestBody.constData());
+        curl_easy_setopt(easy, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(transfer->requestBody.size()));
     }
     for (auto it = request.headers.cbegin(); it != request.headers.cend(); ++it) {
         const auto line = it.key().toUtf8() + ": " + it.value().toString().toUtf8();
@@ -419,7 +426,10 @@ void CurlEpollDownloader::addTransfer(QueuedRequest queued)
         }
     }
     bool rangeSupported = false;
-    auto total = probeSize(queued.request, &rangeSupported);
+    // Repeating a POST for probing or for independent byte ranges is unsafe:
+    // it can create a second server-side action or return a different export.
+    auto total = queued.request.httpMethod == QStringLiteral("POST")
+        ? qint64(-1) : probeSize(queued.request, &rangeSupported);
     if (queued.request.expectedTotalBytes > 0 && total > 0 && queued.request.expectedTotalBytes != total) {
         emit statusChanged(queued.id, DownloadStatus::Failed, QStringLiteral("remote size changed; resume refused"));
         return;
@@ -427,7 +437,8 @@ void CurlEpollDownloader::addTransfer(QueuedRequest queued)
     if (total <= 0 && queued.request.expectedTotalBytes > 0) {
         total = queued.request.expectedTotalBytes;
     }
-    const int requestedSegments = std::clamp(queued.request.segments, 1, 32);
+    const int requestedSegments = queued.request.httpMethod == QStringLiteral("POST")
+        ? 1 : std::clamp(queued.request.segments, 1, 32);
     const bool canResumeSegments = rangeSupported && total > 0 && !queued.request.resumeSegments.isEmpty();
     constexpr qint64 minimumDynamicPartSize = 64 * 1024;
     const int dynamicParts = total > 0

@@ -6,12 +6,41 @@ const requestHeadersById = new Map();
 const requestHeadersByUrl = new Map();
 const responseFilenamesByUrl = new Map();
 const mediaWriteQueues = new Map();
+const modifierByTab = new Map();
+let nativePort = null;
+let nativeSequence = 0;
+const nativePending = new Map();
 const defaultSettings = {
   interceptDownloads: true,
   captureMedia: true,
   excludedHosts: "",
-  excludedExtensions: ""
+  excludedExtensions: "",
+  includedExtensions: "",
+  minDownloadBytes: 0,
+  pauseInterception: false,
+  bypassWhenModifier: true
 };
+
+function nativeRequest(message) {
+  if (typeof browser.runtime.connectNative !== "function") return browser.runtime.sendNativeMessage(hostName, message);
+  if (!nativePort) {
+    nativePort = browser.runtime.connectNative(hostName);
+    nativePort.onMessage.addListener((reply) => {
+      const pending = nativePending.get(reply?.id);
+      if (pending) { nativePending.delete(reply.id); pending.resolve(reply); }
+    });
+    nativePort.onDisconnect.addListener(() => {
+      const error = new Error(browser.runtime.lastError?.message || "qtIDM native host disconnected.");
+      for (const { reject } of nativePending.values()) reject(error);
+      nativePending.clear(); nativePort = null;
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const id = ++nativeSequence;
+    nativePending.set(id, { resolve, reject });
+    try { nativePort.postMessage({ ...message, id }); } catch (error) { nativePending.delete(id); reject(error); }
+  });
+}
 
 async function settings() {
   return { ...defaultSettings, ...(await browser.storage.local.get(settingsKey))[settingsKey] };
@@ -37,6 +66,22 @@ function isExcluded(url, value) {
   }
 }
 
+function extensionFor(url, filename = "") {
+  const source = String(filename || new URL(url).pathname || "").toLowerCase();
+  return source.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] || "";
+}
+
+function shouldIntercept(item, value) {
+  const url = item.finalUrl || item.url;
+  if (!value.interceptDownloads || value.pauseInterception || isExcluded(url, value)
+      || (value.bypassWhenModifier && modifierByTab.get(item.tabId))) return false;
+  const extension = extensionFor(url, item.filename || "");
+  const included = splitRules(value.includedExtensions).map((item) => item.replace(/^\./, ""));
+  if (included.length && (!extension || !included.includes(extension))) return false;
+  const total = Number(item.totalBytes ?? item.fileSize ?? -1);
+  return !(Number(value.minDownloadBytes) > 0 && total >= 0 && total < Number(value.minDownloadBytes));
+}
+
 function forwardedRequestHeaders(details) {
   const headers = {};
   const allowed = new Set([
@@ -54,10 +99,9 @@ function forwardedRequestHeaders(details) {
 }
 
 function rememberRequestHeaders(details) {
-  const entry = {
-    headers: forwardedRequestHeaders(details),
-    detectedAt: Date.now()
-  };
+  const entry = requestHeadersByUrl.get(details.url) || { detectedAt: Date.now() };
+  entry.headers = forwardedRequestHeaders(details);
+  entry.detectedAt = Date.now();
   requestHeadersById.set(details.requestId, entry);
   while (requestHeadersById.size > 500) {
     requestHeadersById.delete(requestHeadersById.keys().next().value);
@@ -70,6 +114,48 @@ function rememberRequestHeaders(details) {
   return entry.headers;
 }
 
+function textToBase64(value) {
+  return btoa(unescape(encodeURIComponent(String(value || ""))));
+}
+
+function bytesToBase64(bytes) {
+  const view = new Uint8Array(bytes);
+  let binary = "";
+  for (let offset = 0; offset < view.length; offset += 0x8000) binary += String.fromCharCode(...view.subarray(offset, offset + 0x8000));
+  return btoa(binary);
+}
+
+function formRequestBody(details) {
+  if (details.method !== "POST" || !details.requestBody?.formData) return "";
+  const values = [];
+  for (const [name, items] of Object.entries(details.requestBody.formData)) {
+    for (const value of items || []) values.push(`${encodeURIComponent(name)}=${encodeURIComponent(value)}`);
+  }
+  return values.join("&");
+}
+
+function rawRequestBody(details) {
+  if (details.method !== "POST") return "";
+  const raw = details.requestBody?.raw;
+  if (!Array.isArray(raw)) return "";
+  const chunks = raw.filter((part) => part.bytes).map((part) => new Uint8Array(part.bytes));
+  const size = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  if (!size) return "";
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+  return bytesToBase64(bytes);
+}
+
+function rememberRequestDetails(details) {
+  const entry = requestHeadersByUrl.get(details.url) || {};
+  entry.method = details.method === "POST" ? "POST" : "";
+  entry.body = formRequestBody(details);
+  entry.bodyBase64 = rawRequestBody(details);
+  entry.detectedAt = Date.now();
+  requestHeadersByUrl.set(details.url, entry);
+}
+
 function recentRequestHeaders(url) {
   const entry = requestHeadersByUrl.get(url);
   if (!entry || Date.now() - entry.detectedAt > 10 * 60 * 1000) {
@@ -77,6 +163,12 @@ function recentRequestHeaders(url) {
     return {};
   }
   return entry.headers;
+}
+
+function recentRequestInfo(url) {
+  const entry = requestHeadersByUrl.get(url);
+  if (!entry || Date.now() - entry.detectedAt > 10 * 60 * 1000) return { headers: {}, method: "", body: "", bodyBase64: "" };
+  return { headers: entry.headers || {}, method: entry.method || "", body: entry.body || "", bodyBase64: entry.bodyBase64 || "" };
 }
 
 function rememberResponseFilename(details) {
@@ -140,6 +232,8 @@ browser.contextMenus.create({
   title: "Download with qtIDM",
   contexts: ["link", "image", "video", "audio"]
 });
+browser.contextMenus.create({ id: "qtidm-all-links", title: "Download all links and images with qtIDM", contexts: ["page"] });
+browser.contextMenus.create({ id: "qtidm-selected-links", title: "Download selected links with qtIDM", contexts: ["selection"] });
 
 function showError(message) {
   console.error(`qtIDM: ${message}`);
@@ -235,9 +329,9 @@ function rememberMedia(details, value) {
   });
 }
 
-async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "") {
-  if (!/^https?:/i.test(url)) {
-    throw new Error("Only HTTP and HTTPS downloads can be redirected to qtIDM.");
+async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "") {
+  if (!/^(?:https?|ftp):/i.test(url)) {
+    throw new Error("Only HTTP, HTTPS, and FTP downloads can be redirected to qtIDM.");
   }
   let cookies = [];
   try {
@@ -246,35 +340,47 @@ async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTy
     cookies = [];
   }
   const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-  const headers = { ...recentRequestHeaders(url), ...capturedHeaders };
+  const request = recentRequestInfo(url);
+  const headers = { ...request.headers, ...capturedHeaders };
   setHeaderDefault(headers, "Cookie", cookieHeader);
   setHeaderDefault(headers, "Referer", referrer || (tab && tab.url ? tab.url : ""));
   setHeaderDefault(headers, "User-Agent", navigator.userAgent);
-  const response = await browser.runtime.sendNativeMessage(hostName, {
-    url,
-    mediaType: mediaTypeHint === "HLS" || mediaTypeHint === "DASH" ? mediaTypeHint : "",
-    suggestedFilename: leafFilename(suggestedFilename),
-    headers
-  });
-  if (!response || !response.ok) {
+  if (mediaTypeHint === "HLS" || mediaTypeHint === "DASH") headers._qtidmMediaType = mediaTypeHint;
+  return { url, headers, method: method === "POST" || request.method === "POST" ? "POST" : "", body: body ? textToBase64(body) : (request.bodyBase64 || textToBase64(request.body)), suggestedFilename: leafFilename(suggestedFilename) };
+}
+
+async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "") {
+  const response = await nativeRequest({ downloads: [await makeDownloadEntry(url, tab, referrer, capturedHeaders, mediaTypeHint, suggestedFilename, method, body)] });
+  if (!response || !response.ok || response.accepted !== true) {
     throw new Error(response && response.message ? response.message : "The qtIDM native host did not acknowledge the request.");
   }
 }
 
-async function sendBatchToHost(urls, tab) {
-  const response = await browser.runtime.sendNativeMessage(hostName, {
-    urls,
-    headers: {
-      Referer: tab?.url || "",
-      "User-Agent": navigator.userAgent
-    }
-  });
+async function prepareBrowserDownload(url) {
+  const response = await nativeRequest({ url, prepare: true });
   if (!response || !response.ok) {
+    throw new Error(response?.message || "The qtIDM native host is not ready to receive the download.");
+  }
+  return response.prepared === true;
+}
+
+async function sendBatchToHost(urls, tab) {
+  const response = await nativeRequest({ downloads: await Promise.all(urls.map((url) => makeDownloadEntry(url, tab, tab?.url || ""))) });
+  if (!response || !response.ok || response.accepted !== true) {
     throw new Error(response?.message || "The qtIDM native host did not acknowledge the batch.");
   }
 }
 
 browser.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "qtidm-all-links" || info.menuItemId === "qtidm-selected-links") {
+    const selected = info.menuItemId === "qtidm-selected-links";
+    const code = selected
+      ? `(() => { const wrapper=document.createElement('div'); const selection=window.getSelection(); for(let i=0;selection&&i<selection.rangeCount;++i) wrapper.append(selection.getRangeAt(i).cloneContents()); return [...new Set([...wrapper.querySelectorAll('a[href]')].map(e=>e.href).filter(url=>/^(?:https?|ftp):/i.test(url)))].slice(0,100); })()`
+      : `(() => [...new Set([...document.querySelectorAll('a[href],img[src]')].map(e=>e.href||e.src).filter(url=>/^(?:https?|ftp):/i.test(url)))].slice(0,100))()`;
+    browser.tabs.executeScript(tab.id, { frameId: info.frameId, code })
+      .then((results) => sendBatchToHost(results.flat(), tab)).catch((error) => showError(error.message));
+    return;
+  }
   const url = info.linkUrl || info.srcUrl || info.pageUrl;
   if (url) {
     sendToHost(url, tab).catch((error) => showError(error.message));
@@ -283,6 +389,8 @@ browser.contextMenus.onClicked.addListener((info, tab) => {
 
 async function redirectBrowserDownload(item, url) {
   let paused = false;
+  let removed = false;
+  const request = recentRequestInfo(url);
   try {
     await browser.downloads.pause(item.id);
     paused = true;
@@ -291,19 +399,32 @@ async function redirectBrowserDownload(item, url) {
   }
 
   try {
+    const prepared = await prepareBrowserDownload(url);
+    if (prepared) {
+      await browser.downloads.cancel(item.id);
+      await browser.downloads.removeFile(item.id).catch(() => {});
+      await browser.downloads.erase({ id: item.id });
+      removed = true;
+    }
     await sendToHost(
-      url, null, item.referrer || "", {}, "", item.filename || recentResponseFilename(url)
+      url, null, item.referrer || "", {}, "", item.filename || recentResponseFilename(url), request.method, request.body
     );
+    if (!prepared) {
+      await browser.downloads.cancel(item.id).catch(() => {});
+      await browser.downloads.removeFile(item.id).catch(() => {});
+      await browser.downloads.erase({ id: item.id });
+    }
   } catch (error) {
-    if (paused) {
+    if (removed) {
+      const restore = { url: item.url || url };
+      if (request.method === "POST") { restore.method = "POST"; restore.body = request.body; }
+      await browser.downloads.download(restore).catch(() => {});
+    } else if (paused) {
       await browser.downloads.resume(item.id).catch(() => {});
     }
     throw error;
   }
 
-  await browser.downloads.cancel(item.id).catch(() => {});
-  await browser.downloads.removeFile(item.id).catch(() => {});
-  await browser.downloads.erase({ id: item.id });
 }
 
 browser.downloads.onCreated.addListener((item) => {
@@ -312,7 +433,7 @@ browser.downloads.onCreated.addListener((item) => {
     return;
   }
   settings()
-    .then((value) => value.interceptDownloads && !isExcluded(url, value)
+    .then((value) => shouldIntercept(item, value)
       ? redirectBrowserDownload(item, url)
       : undefined)
     .catch((error) => showError(`Could not redirect the browser download: ${error.message}`));
@@ -320,12 +441,14 @@ browser.downloads.onCreated.addListener((item) => {
 
 browser.webRequest.onBeforeRequest.addListener(
   (details) => {
+    rememberRequestDetails(details);
     settings().then((value) => {
       if (value.captureMedia && (isManifestUrl(details.url) || isSubtitleUrl(details.url))) return rememberMedia(details, value);
       return undefined;
     }).catch((error) => showError(error.message));
   },
-  { urls: ["<all_urls>"], types: ["xmlhttprequest", "media", "other"] }
+  { urls: ["<all_urls>"], types: ["main_frame", "sub_frame", "xmlhttprequest", "media", "other"] },
+  ["requestBody"]
 );
 
 browser.webRequest.onBeforeSendHeaders.addListener(
@@ -355,7 +478,16 @@ browser.webRequest.onHeadersReceived.addListener(
   ["responseHeaders"]
 );
 
-browser.runtime.onMessage.addListener(async (message) => {
+browser.runtime.onMessage.addListener(async (message, sender) => {
+  if (message.type === "modifierState") {
+    if (sender.tab?.id >= 0) modifierByTab.set(sender.tab.id, !!message.active);
+    return { ok: true };
+  }
+  if (message.type === "qtidmScheme") {
+    const tab = sender.tab || await browser.tabs.get(message.tabId);
+    await sendToHost(message.url, tab, tab.url);
+    return { ok: true };
+  }
   const key = mediaKey(message.tabId);
   if (message.type === "listMedia") {
     const stored = (await captureStorage.get(key))[key];
@@ -412,5 +544,6 @@ browser.runtime.onMessage.addListener(async (message) => {
 });
 
 browser.tabs.onRemoved.addListener((tabId) => {
+  modifierByTab.delete(tabId);
   captureStorage.remove(mediaKey(tabId)).catch(() => {});
 });

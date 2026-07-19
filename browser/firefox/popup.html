@@ -33,6 +33,13 @@
     <textarea id="excludedHosts" rows="3" placeholder="example.com&#10;*.internal.example"></textarea>
     <label for="excludedExtensions">Excluded file extensions</label>
     <textarea id="excludedExtensions" rows="2" placeholder="pdf, jpg, png"></textarea>
+    <label for="includedExtensions">Only intercept extensions</label>
+    <textarea id="includedExtensions" rows="2" placeholder="zip, iso, mp4"></textarea>
+    <label for="minDownloadBytes">Minimum intercepted size (bytes)</label>
+    <input id="minDownloadBytes" type="number" min="0" step="1024" placeholder="0">
+    <label class="switch-row"><span><b>Pause interception</b><small>Leave browser downloads alone until resumed.</small></span><input id="pauseInterception" type="checkbox"><i></i></label>
+    <label class="switch-row"><span><b>Alt bypass</b><small>Hold Alt while starting a download to leave it in the browser.</small></span><input id="bypassWhenModifier" type="checkbox"><i></i></label>
+    <button id="excludeCurrentSite" class="text-button">EXCLUDE CURRENT SITE</button>
     <button id="saveSettings" class="primary">SAVE SETTINGS</button>
     <p class="hint">DRM-protected streams cannot be downloaded.</p>
   </section>

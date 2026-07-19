@@ -4,6 +4,7 @@
   "version": "0.3.2",
   "permissions": ["contextMenus", "nativeMessaging", "downloads", "cookies", "tabs", "storage", "webRequest", "<all_urls>"],
   "background": { "scripts": ["background.js"] },
+  "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content_bridge.js"], "run_at": "document_start" }],
   "browser_action": {
     "default_title": "Download detected media with qtIDM",
     "default_popup": "popup.html"

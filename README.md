@@ -47,8 +47,9 @@ or material distributed under compatible open-source licences.
 
 ### Desktop Application
 
-- Qt6 Widgets UI with category filtering, download properties, segment visualization, and system tray integration.
+- Qt6 Widgets UI with category filtering, download properties, segment visualization, and system tray integration; closing the window keeps qtIDM running in the tray, with an active-download confirmation before quitting.
 - Search and status filtering, sortable columns, multi-row actions, automatic categories, file/folder actions, and desktop notifications.
+- New single-URL downloads default to created category folders under `~/Downloads` (`Videos`, `Music`, `Images`, `Programs`, `Documents`, `Compressed`, or `Others`); the destination remains editable before confirmation.
 - Batch URL editor that creates multiple downloads without opening one dialog per URL.
 - Clipboard monitoring for HTTP and HTTPS links.
 - Replacement of expired source URLs while preserving downloaded ranges.
@@ -65,13 +66,15 @@ or material distributed under compatible open-source licences.
 
 - Chrome and Firefox extensions with native messaging integration.
 - Automated Chromium ZIP, signed Chrome CRX, and signed Firefox XPI packaging.
-- Browser-download interception that can be enabled or disabled from the popup.
-- Context-menu capture for links, images, audio, and video.
-- Cookies, referrer, and browser user agent forwarding.
-- Captured-media list with per-item submission and clearing.
-- Manual single-URL and batch submission of up to 100 addresses.
-- Native application-side batch options for destination, queue, scheduling, connections, and conflict handling.
-- Chrome and Firefox end-to-end tests for interception and native-messaging context forwarding.
+- Persistent, request-correlated native messaging with explicit desktop acceptance; a failed handoff resumes or recreates the browser download.
+- Browser-download interception policy controls for included/excluded extensions, excluded hosts, minimum size, pause, current-site exclusion, and an optional Alt-key bypass.
+- Context-menu capture for links, images, audio, video, all page links/images, and selected links; batches are limited to 100 URLs.
+- Cookies, referrer, browser user agent, resolved `Content-Disposition` filenames, and per-URL request headers forwarding; redirected browser files are removed before qtIDM presents its download-options dialog to avoid false filename collisions.
+- POST forwarding for form data and raw/binary request bodies up to 4 MiB; POST downloads use one safe connection rather than ranged segments.
+- Captured HLS, DASH, direct audio/video, and subtitle requests are retained in bounded per-tab storage for review and submission.
+- `qtidm:` links can explicitly send an HTTP, HTTPS, or FTP URL to qtIDM.
+- Manual single-URL and batch submission of up to 100 addresses, with one shared application-side batch-options dialog for destination, queue, scheduling, connections, and conflict handling.
+- Real Chrome and Firefox E2E tests verify interception, browser context forwarding, and persistent native-messaging sessions.
 
 ### Distribution
 
@@ -157,14 +160,17 @@ performance smoke tests. The downloader and browser-extension integration
 suites start localhost HTTP fixture servers, so restricted sandboxes must
 permit localhost port binding.
 
-Browser extension tests skip when their optional local tooling is unavailable; CI runs them strictly with Chrome for Testing plus Puppeteer, and Firefox plus `web-ext`:
+Browser extension tests skip when their optional local tooling is unavailable; CI runs them strictly with Chrome for Testing plus Puppeteer, and Firefox plus `web-ext`. To run the same required checks locally, make Node available on `PATH`, install the tools, build the tests, and run:
 
 ```bash
-python3 tests/browser_extension_e2e.py --browser chrome --strict
-python3 tests/browser_extension_e2e.py --browser firefox --strict
+export PATH="$HOME/.nvm/versions/node/v24.16.0/bin:$PATH" # adapt if Node is installed elsewhere
+npm install --global puppeteer web-ext
+QTIDM_BROWSER_E2E_STRICT=1 \
+ctest --test-dir build -R '^qtIDM_(chrome|firefox)_extension_e2e_tests$' \
+  --output-on-failure
 ```
 
-Chrome 137 and newer branded builds no longer accept command-line unpacked extensions. Use Chrome for Testing or Chromium for the Chrome test.
+Set `QTIDM_E2E_CHROME` and/or `QTIDM_E2E_FIREFOX` if the browser executables are not on `PATH`. Chrome 137 and newer branded builds no longer accept command-line unpacked extensions; use Chrome for Testing or Chromium for the Chrome test.
 
 Performance smoke tests run in CI on the weekly schedule. To run them locally:
 
@@ -387,8 +393,10 @@ Current behavior:
 - release app packages use `QTIDM_CHROME_EXTENSION_ID` for the Chrome native host allowlist,
 - the popup provides Captures, Add URL, and Settings views,
 - media captures can be reviewed and submitted individually,
-- manual batches are forwarded to one application-side batch editor,
-- interception and media capture can be toggled independently,
+- manual and page/selection batches are forwarded to one application-side batch editor with per-URL browser context,
+- interception and media capture can be toggled independently, with extension/host/size rules and an Alt-key bypass,
+- raw POST request bodies are forwarded only when exposed by the browser and are limited to 4 MiB,
+- `qtidm:` links provide an explicit page-to-application download handoff,
 - Firefox extension `0.3.2` requires Firefox 140 or newer for Mozilla's built-in
   data-collection consent declaration,
 - real Chrome and Firefox automation verifies download interception through a temporary native host.

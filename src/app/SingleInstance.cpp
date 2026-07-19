@@ -44,19 +44,47 @@ bool SingleInstance::notifyExistingInstance(const QStringList& urls)
     return true;
 }
 
+void SingleInstance::setUrlHandler(std::function<bool(QString, QVariantMap)> handler)
+{
+    urlHandler_ = std::move(handler);
+}
+
+void SingleInstance::setUrlsHandler(std::function<bool(QStringList, QVariantMap)> handler)
+{
+    urlsHandler_ = std::move(handler);
+}
+
+void SingleInstance::setDownloadsHandler(std::function<bool(QVariantList)> handler)
+{
+    downloadsHandler_ = std::move(handler);
+}
+
 void SingleInstance::Activate()
 {
     emit activateRequested();
 }
 
-void SingleInstance::AddUrl(const QString& url, const QVariantMap& headers)
+bool SingleInstance::AddUrl(const QString& url, const QVariantMap& headers)
 {
+    if (urlHandler_) {
+        return urlHandler_(url, headers);
+    }
     emit urlReceived(url, headers);
+    return true;
 }
 
-void SingleInstance::AddUrls(const QStringList& urls, const QVariantMap& headers)
+bool SingleInstance::AddUrls(const QStringList& urls, const QVariantMap& headers)
 {
+    if (urlsHandler_) {
+        return urlsHandler_(urls, headers);
+    }
     emit urlsReceived(urls, headers);
+    return true;
+}
+
+bool SingleInstance::AddDownloads(const QVariantList& downloads)
+{
+    return downloadsHandler_ ? downloadsHandler_(downloads) : false;
 }
 
 }

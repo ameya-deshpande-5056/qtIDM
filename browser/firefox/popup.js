@@ -66,6 +66,10 @@ async function loadSettings() {
   $("#captureMedia").checked = response.settings.captureMedia;
   $("#excludedHosts").value = response.settings.excludedHosts || "";
   $("#excludedExtensions").value = response.settings.excludedExtensions || "";
+  $("#includedExtensions").value = response.settings.includedExtensions || "";
+  $("#minDownloadBytes").value = response.settings.minDownloadBytes || 0;
+  $("#pauseInterception").checked = !!response.settings.pauseInterception;
+  $("#bypassWhenModifier").checked = response.settings.bypassWhenModifier !== false;
 }
 
 async function saveSettings() {
@@ -75,7 +79,11 @@ async function saveSettings() {
       interceptDownloads: $("#interceptDownloads").checked,
       captureMedia: $("#captureMedia").checked,
       excludedHosts: $("#excludedHosts").value,
-      excludedExtensions: $("#excludedExtensions").value
+      excludedExtensions: $("#excludedExtensions").value,
+      includedExtensions: $("#includedExtensions").value,
+      minDownloadBytes: Number($("#minDownloadBytes").value) || 0,
+      pauseInterception: $("#pauseInterception").checked,
+      bypassWhenModifier: $("#bypassWhenModifier").checked
     }
   });
   notice("Integration settings saved.");
@@ -99,6 +107,18 @@ $("#sendManual").addEventListener("click", async () => {
 });
 $("#interceptDownloads").addEventListener("change", saveSettings);
 $("#captureMedia").addEventListener("change", saveSettings);
+$("#pauseInterception").addEventListener("change", saveSettings);
+$("#bypassWhenModifier").addEventListener("change", saveSettings);
+$("#excludeCurrentSite").addEventListener("click", async () => {
+  tab ||= await activeTab();
+  try {
+    const host = new URL(tab.url).hostname;
+    const current = $("#excludedHosts").value.trim();
+    if (!current.split(/[\s,;]+/).includes(host)) $("#excludedHosts").value = [current, host].filter(Boolean).join("\n");
+    await saveSettings();
+    notice(`${host} excluded from interception.`);
+  } catch (_) { notice("This tab does not have an excludable web address.", true); }
+});
 $("#saveSettings").addEventListener("click", saveSettings);
 
 Promise.all([refresh(), loadSettings()]).catch((error) => notice(error.message, true));

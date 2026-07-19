@@ -34,6 +34,8 @@ private slots:
         request.username = QStringLiteral("user");
         request.password = QStringLiteral("pass");
         request.proxyUrl = QStringLiteral("http://proxy:8080");
+        request.httpMethod = QStringLiteral("POST");
+        request.requestBody = QByteArray("report=weekly&format=csv");
         request.checksumAlgorithm = QStringLiteral("sha512");
         request.expectedChecksum = QStringLiteral("abcdef");
         request.completionCommand = QStringLiteral("/usr/bin/notify-send \"Finished file\"");
@@ -74,6 +76,8 @@ private slots:
         QCOMPARE(copy.username, request.username);
         QCOMPARE(copy.password, request.password);
         QCOMPARE(copy.proxyUrl, request.proxyUrl);
+        QCOMPARE(copy.httpMethod, QStringLiteral("POST"));
+        QCOMPARE(copy.requestBody, request.requestBody);
         QCOMPARE(copy.checksumAlgorithm, request.checksumAlgorithm);
         QCOMPARE(copy.expectedChecksum, request.expectedChecksum);
         QCOMPARE(copy.completionCommand, request.completionCommand);

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <QObject>
+#include <functional>
 #include <QVariantMap>
+#include <QVariantList>
 
 namespace qtidm {
 
@@ -12,16 +14,25 @@ public:
     explicit SingleInstance(QObject* parent = nullptr);
     bool acquire();
     bool notifyExistingInstance(const QStringList& urls);
+    void setUrlHandler(std::function<bool(QString, QVariantMap)> handler);
+    void setUrlsHandler(std::function<bool(QStringList, QVariantMap)> handler);
+    void setDownloadsHandler(std::function<bool(QVariantList)> handler);
 
 public slots:
     Q_SCRIPTABLE void Activate();
-    Q_SCRIPTABLE void AddUrl(const QString& url, const QVariantMap& headers);
-    Q_SCRIPTABLE void AddUrls(const QStringList& urls, const QVariantMap& headers);
+    Q_SCRIPTABLE bool AddUrl(const QString& url, const QVariantMap& headers);
+    Q_SCRIPTABLE bool AddUrls(const QStringList& urls, const QVariantMap& headers);
+    Q_SCRIPTABLE bool AddDownloads(const QVariantList& downloads);
 
 signals:
     void activateRequested();
     void urlReceived(QString url, QVariantMap headers);
     void urlsReceived(QStringList urls, QVariantMap headers);
+
+private:
+    std::function<bool(QString, QVariantMap)> urlHandler_;
+    std::function<bool(QStringList, QVariantMap)> urlsHandler_;
+    std::function<bool(QVariantList)> downloadsHandler_;
 };
 
 }

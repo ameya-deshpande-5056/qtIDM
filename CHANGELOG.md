@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.5
+
+- Reworked browser native messaging into a persistent, request-correlated session with explicit desktop acceptance before a browser download is removed; failed handoffs restore or resume the browser download.
+- Added browser forwarding for POST downloads, including form data and raw/binary request bodies up to 4 MiB.
+- Added one shared application-side options dialog for browser batches while preserving each URL's cookies, headers, filename, media hint, and POST context.
+- Added context-menu collection for page links/images and selected links, bounded to 100 URLs per batch.
+- Added browser interception policies for included/excluded extensions, minimum size, pause, current-site exclusion, and configurable Alt-key bypass.
+- Added explicit `qtidm:` link handling and bounded per-tab capture of HLS, DASH, direct media, and subtitle requests.
+- Strengthened real Chrome and Firefox E2E tests to require a persistent native-messaging prepare/download session on the same host process; CI now fails if either E2E test is missing.
+- Updated CI browser tooling to resolve the current active Node.js LTS automatically.
+- Browser downloads now use the resolved `Content-Disposition` filename and remove the browser's temporary file before qtIDM opens its download-options dialog, avoiding spurious ` (1)` suffixes.
+- New single-URL downloads default to category folders in `~/Downloads` (such as Videos, Music, Images, Programs, Documents, Compressed, and Others), creating the selected destination folder when the download is confirmed.
+- Closing the main window now keeps qtIDM running in the system tray; active downloads prompt to keep running, quit, or cancel the close.
+
 ## 0.1.4
 
 - Added collision-free browser-extension version generation for signed CI runs and reruns.
