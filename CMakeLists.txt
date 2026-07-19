@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(qtIDM VERSION 0.1.1 LANGUAGES CXX)
+project(qtIDM VERSION 0.2.0 LANGUAGES CXX)
 
 set(QTIDM_PROJECT_URL "https://github.com/ameya-deshpande-5056/qtIDM")
 string(TIMESTAMP QTIDM_BUILD_TIMESTAMP "%Y-%m-%dT%H:%M:%SZ" UTC)

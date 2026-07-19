@@ -16,6 +16,14 @@ for size in 16 32 48 64 128 256 512; do
         -vf "scale=${size}:${size}" -frames:v 1 "$destination/io.qtidm.Qtidm.png"
 done
 
+action_destination="$ROOT/assets/icons/actions/png"
+mkdir -p "$action_destination"
+for source in "$ROOT"/assets/icons/actions/*.svg; do
+    name="${source##*/}"
+    ffmpeg -hide_banner -loglevel error -y -i "$source" \
+        -vf "scale=48:48" -frames:v 1 "$action_destination/${name%.svg}.png"
+done
+
 for browser in chrome firefox; do
     destination="$ROOT/browser/$browser/icons"
     mkdir -p "$destination"

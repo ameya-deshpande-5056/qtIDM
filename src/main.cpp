@@ -22,7 +22,7 @@ int main(int argc, char** argv)
     QApplication::setApplicationName(QStringLiteral("qtIDM"));
     QApplication::setApplicationDisplayName(QStringLiteral("qtIDM"));
     QApplication::setDesktopFileName(QStringLiteral("io.qtidm.Qtidm"));
-    QApplication::setWindowIcon(QIcon(QStringLiteral(":/qtidm/icons/application.svg")));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/qtidm/icons/application.png")));
     QApplication::setOrganizationName(QStringLiteral("qtIDM"));
     QApplication::setApplicationVersion(QStringLiteral(QTIDM_VERSION));
     qtidm::Paths::ensureRuntimeDirs();

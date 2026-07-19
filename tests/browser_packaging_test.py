@@ -100,6 +100,8 @@ class BrowserPackagingTest(unittest.TestCase):
             )
             self.assertTrue((development / "qtidm-chrome.zip").is_file())
             self.assertTrue((development / "qtidm-firefox-unsigned.xpi").is_file())
+            self._assert_package_branding(development / "qtidm-chrome.zip")
+            self._assert_package_branding(development / "qtidm-firefox-unsigned.xpi")
 
             release = work / "release"
             env.update(
@@ -146,8 +148,10 @@ class BrowserPackagingTest(unittest.TestCase):
                     chr(ord("a") + int(character, 16)) for character in digest
                 )
                 self.assertEqual(packaged_id, extension_id)
+            self._assert_package_branding(release / "qtidm-chrome.zip")
             with zipfile.ZipFile(release / "qtidm-firefox.xpi") as package:
                 self.assertIn("META-INF/mozilla.rsa", package.namelist())
+            self._assert_package_branding(release / "qtidm-firefox.xpi")
 
             template = json.loads(
                 (ROOT / "browser" / "chrome" / "external-extension.json.in")
@@ -159,6 +163,19 @@ class BrowserPackagingTest(unittest.TestCase):
                 template["external_crx"],
                 "/usr/share/qtidm/browser/packages/qtidm-chrome.crx",
             )
+
+    @staticmethod
+    def _assert_package_branding(path: Path) -> None:
+        with zipfile.ZipFile(path) as package:
+            names = package.namelist()
+            assert "popup.css" in names
+            assert "popup.html" in names
+            assert "icons/icon-48.png" in names
+            css = package.read("popup.css").decode("utf-8")
+            popup = package.read("popup.html").decode("utf-8")
+            assert "--brand: #6d2f45" in css
+            assert "#2457a6" not in css.lower()
+            assert 'src="icons/icon-48.png"' in popup
 
     @staticmethod
     def _write_executable(path: Path, source: str) -> None:

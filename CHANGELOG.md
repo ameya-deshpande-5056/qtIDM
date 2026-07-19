@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- Replaced runtime SVG toolbar and application icons with embedded PNG assets so icons render consistently even when a Linux Qt package omits the SVG image plugin.
+- Regenerated the application, desktop, tray, README, About dialog, and browser-extension logo variants in the dark wine brand palette, removing the retired royal-blue identity from shipped assets.
+- Bumped the Chrome and Firefox extensions to version 0.4.0 so browsers install the redesigned popup, stylesheet, and icon assets as an update instead of continuing to use cached 0.3.2 files.
+- Strengthened browser-package tests to inspect generated ZIP and XPI contents for the current dark stylesheet, popup logo, toolbar icons, and brand colors.
+- Added resource tests that require PNG application and action icons and prevent accidental fallback to runtime SVG resources.
+
 ## 0.2.0
 
 - Added a permanent session dashboard to the bottom status bar with combined download speed, data downloaded during the current session, and an alternate per-download speed-limit control.

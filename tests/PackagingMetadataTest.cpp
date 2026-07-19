@@ -48,6 +48,8 @@ private slots:
         QFile resourceFile(QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/resources.qrc"));
         QVERIFY(resourceFile.open(QIODevice::ReadOnly));
         const auto resources = QString::fromUtf8(resourceFile.readAll());
+        QVERIFY(resources.contains(QStringLiteral("alias=\"icons/application.png\"")));
+        QVERIFY(!resources.contains(QStringLiteral("alias=\"icons/application.svg\"")));
         const QStringList names {
             QStringLiteral("add"), QStringLiteral("start"), QStringLiteral("pause"),
             QStringLiteral("stop"), QStringLiteral("delete"), QStringLiteral("edit"),
@@ -57,15 +59,19 @@ private slots:
             QStringLiteral("speed-limit")
         };
         for (const auto& name : names) {
-            const auto relativePath = QStringLiteral("assets/icons/actions/%1.svg").arg(name);
-            QFile iconFile(QStringLiteral(QTIDM_SOURCE_DIR) + QLatin1Char('/') + relativePath);
-            QVERIFY2(iconFile.open(QIODevice::ReadOnly), qPrintable(relativePath));
+            const auto sourcePath = QStringLiteral("assets/icons/actions/%1.svg").arg(name);
+            const auto runtimePath = QStringLiteral("assets/icons/actions/png/%1.png").arg(name);
+            QFile iconFile(QStringLiteral(QTIDM_SOURCE_DIR) + QLatin1Char('/') + sourcePath);
+            QVERIFY2(iconFile.open(QIODevice::ReadOnly), qPrintable(sourcePath));
             const auto iconData = QString::fromUtf8(iconFile.readAll());
             QVERIFY2(!iconData.contains(QStringLiteral("#2457a6"), Qt::CaseInsensitive),
-                     qPrintable(QStringLiteral("%1 reuses the retired royal-blue brand").arg(relativePath)));
+                     qPrintable(QStringLiteral("%1 reuses the retired royal-blue brand").arg(sourcePath)));
             QVERIFY2(!iconData.contains(QStringLiteral("#6d2f45"), Qt::CaseInsensitive),
-                     qPrintable(QStringLiteral("%1 reuses the application brand color").arg(relativePath)));
-            QVERIFY2(resources.contains(relativePath), qPrintable(relativePath));
+                     qPrintable(QStringLiteral("%1 reuses the application brand color").arg(sourcePath)));
+            QVERIFY2(QFileInfo::exists(
+                         QStringLiteral(QTIDM_SOURCE_DIR) + QLatin1Char('/') + runtimePath),
+                     qPrintable(runtimePath));
+            QVERIFY2(resources.contains(runtimePath), qPrintable(runtimePath));
         }
     }
 

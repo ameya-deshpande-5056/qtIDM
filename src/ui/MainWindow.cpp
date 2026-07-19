@@ -230,7 +230,7 @@ bool isStoppableStatus(DownloadStatus status)
 
 QIcon staticActionIcon(const QString& name)
 {
-    return QIcon(QStringLiteral(":/qtidm/icons/actions/%1.svg").arg(name));
+    return QIcon(QStringLiteral(":/qtidm/icons/actions/%1.png").arg(name));
 }
 }
 

@@ -201,7 +201,7 @@ Build and test the Debian package:
 
 ```bash
 sh packaging/build-deb.sh
-sudo apt-get install -y ./dist/qtidm_0.1.1-1_amd64.deb
+sudo apt-get install -y ./dist/qtidm_0.2.0-1_amd64.deb
 qtIDM --version
 ```
 
@@ -223,7 +223,7 @@ chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
 sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
 sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
 APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.1.1-x86_64.AppImage --version
+APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.2.0-x86_64.AppImage --version
 ```
 
 The script writes exactly one versioned AppImage to `dist/`. The checksums pin
@@ -236,7 +236,7 @@ Build and test the Flatpak bundle:
 ```bash
 sh packaging/release/version-info.sh
 sh packaging/release/build-flatpak-bundle.sh
-flatpak install --user -y dist/qtIDM-0.1.1.flatpak
+flatpak install --user -y dist/qtIDM-0.2.0.flatpak
 flatpak run io.qtidm.Qtidm --version
 ```
 
@@ -290,8 +290,8 @@ The application and browser integrations have independent version tracks:
 
 | Component | Current version | Authoritative files |
 | --- | --- | --- |
-| qtIDM application and release tag | `0.1.1` / `v0.1.1` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
-| Chrome and Firefox extensions | `0.3.2` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
+| qtIDM application and release tag | `0.2.0` / `v0.2.0` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
+| Chrome and Firefox extensions | `0.4.0` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
 
 The two checked-in browser manifest versions must always match each other, but
 they do not need to match the application version. Signed CI builds derive a
@@ -303,7 +303,7 @@ extension ID, Firefox add-on ID, Chrome signing key, or AMO API credentials.
 
 For application releases, a valid tag is authoritative when it is newer than
 the version in `CMakeLists.txt`. For example, a `v0.1.2` tag on a checkout that
-still declares `0.1.1` updates the CI checkout to `0.1.2` before configuration,
+still declares `0.2.0` updates the CI checkout to `0.2.1` before configuration,
 testing, and packaging. This is an ephemeral runner change and is not committed
 back to the branch. Matching versions are left unchanged, and tags older than
 the CMake version are rejected to prevent downgrade releases.
@@ -405,7 +405,7 @@ Current behavior:
 - interception and media capture can be toggled independently, with extension/host/size rules and an Alt-key bypass,
 - raw POST request bodies are forwarded only when exposed by the browser and are limited to 4 MiB,
 - `qtidm:` links provide an explicit page-to-application download handoff,
-- Firefox extension `0.3.2` requires Firefox 140 or newer for Mozilla's built-in
+- Firefox extension `0.4.0` requires Firefox 140 or newer for Mozilla's built-in
   data-collection consent declaration,
 - real Chrome and Firefox automation verifies download interception through a temporary native host.
 

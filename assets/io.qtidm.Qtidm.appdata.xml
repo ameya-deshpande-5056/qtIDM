@@ -30,6 +30,16 @@
   <launchable type="desktop-id">io.qtidm.Qtidm.desktop</launchable>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.0" date="2026-07-19">
+      <description>
+        <p>
+          Adds stable transfer-rate and ETA reporting, session statistics,
+          live alternate speed limits, embedded static icons, refreshed
+          application identity and branding, and a matching dark browser
+          extension interface.
+        </p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-07-18">
       <description>
         <p>
