@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.24)
 
 project(qtIDM VERSION 0.1.1 LANGUAGES CXX)
 
+set(QTIDM_PROJECT_URL "https://github.com/ameya-deshpande-5056/qtIDM")
+string(TIMESTAMP QTIDM_BUILD_TIMESTAMP "%Y-%m-%dT%H:%M:%SZ" UTC)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -107,7 +110,11 @@ add_executable(qtIDM
 )
 
 target_include_directories(qtIDM PRIVATE src)
-target_compile_definitions(qtIDM PRIVATE QTIDM_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(qtIDM PRIVATE
+    QTIDM_VERSION="${PROJECT_VERSION}"
+    QTIDM_BUILD_TIMESTAMP="${QTIDM_BUILD_TIMESTAMP}"
+    QTIDM_PROJECT_URL="${QTIDM_PROJECT_URL}"
+)
 target_link_libraries(qtIDM PRIVATE
     Qt6::Core
     Qt6::Gui

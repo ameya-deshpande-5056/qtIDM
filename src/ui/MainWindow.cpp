@@ -49,6 +49,14 @@
 #include <QVBoxLayout>
 #include <algorithm>
 
+#ifndef QTIDM_BUILD_TIMESTAMP
+#define QTIDM_BUILD_TIMESTAMP "unknown"
+#endif
+
+#ifndef QTIDM_PROJECT_URL
+#define QTIDM_PROJECT_URL "https://github.com/ameya-deshpande-5056/qtIDM"
+#endif
+
 namespace qtidm {
 
 namespace {
@@ -1734,9 +1742,40 @@ void MainWindow::showOptions()
 
 void MainWindow::showAbout()
 {
-    QMessageBox::about(this,
-                       QStringLiteral("qtIDM"),
-                       QStringLiteral("qtIDM\nLinux-native Qt download manager\nOriginal implementation."));
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("About qtIDM"));
+    auto* layout = new QVBoxLayout(&dialog);
+
+    auto* title = new QLabel(QStringLiteral("<h2>qtIDM %1</h2>").arg(
+        QCoreApplication::applicationVersion().toHtmlEscaped()));
+    title->setTextFormat(Qt::RichText);
+    layout->addWidget(title);
+
+    auto* description = new QLabel(
+        QStringLiteral("A Linux-native Qt download manager."));
+    description->setWordWrap(true);
+    layout->addWidget(description);
+
+    auto* details = new QFormLayout;
+    details->addRow(QStringLiteral("Version:"),
+                    new QLabel(QCoreApplication::applicationVersion()));
+    details->addRow(QStringLiteral("Build time:"),
+                    new QLabel(QStringLiteral(QTIDM_BUILD_TIMESTAMP)));
+    details->addRow(QStringLiteral("Qt runtime:"),
+                    new QLabel(QString::fromLatin1(qVersion())));
+    auto* projectLink = new QLabel(
+        QStringLiteral("<a href=\"%1\">%1</a>").arg(QStringLiteral(QTIDM_PROJECT_URL)));
+    projectLink->setTextFormat(Qt::RichText);
+    projectLink->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    projectLink->setOpenExternalLinks(true);
+    details->addRow(QStringLiteral("Project:"), projectLink);
+    layout->addLayout(details);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    dialog.setMinimumWidth(480);
+    dialog.exec();
 }
 
 void MainWindow::resumeSelected()
@@ -2174,6 +2213,8 @@ void MainWindow::buildLayout()
     centralLayout->addLayout(filterLayout);
 
     navigationSplitter_ = new QSplitter(Qt::Horizontal, central);
+    navigationSplitter_->setHandleWidth(3);
+    navigationSplitter_->setOpaqueResize(true);
     categories_ = new QTreeWidget;
     categories_->setHeaderHidden(true);
     categories_->addTopLevelItem(new QTreeWidgetItem(QStringList { QStringLiteral("All Downloads") }));
@@ -2184,13 +2225,15 @@ void MainWindow::buildLayout()
     categories_->addTopLevelItem(new QTreeWidgetItem(QStringList { QStringLiteral("Music") }));
     categories_->addTopLevelItem(new QTreeWidgetItem(QStringList { QStringLiteral("Programs") }));
     categories_->addTopLevelItem(new QTreeWidgetItem(QStringList { QStringLiteral("Video") }));
-    categories_->setMaximumWidth(220);
+    categories_->setMinimumWidth(140);
     categories_->setCurrentItem(categories_->topLevelItem(0));
     connect(categories_, &QTreeWidget::currentItemChanged, this, [this] { applyCategoryFilter(); });
     connect(search_, &QLineEdit::textChanged, this, [this] { applyCategoryFilter(); });
     connect(statusFilter_, &QComboBox::currentTextChanged, this, [this] { applyCategoryFilter(); });
 
     downloadSplitter_ = new QSplitter(Qt::Vertical);
+    downloadSplitter_->setHandleWidth(3);
+    downloadSplitter_->setOpaqueResize(true);
     downloads_ = new QTableWidget;
     downloads_->setColumnCount(9);
     downloads_->setHorizontalHeaderLabels({ QStringLiteral("ID"), QStringLiteral("Source URL"), QStringLiteral("Save To"),

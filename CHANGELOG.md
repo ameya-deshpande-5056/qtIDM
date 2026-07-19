@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.8
+
+- Fixed Flatpak builds with stricter Qt headers by including the complete JSON array type used by single-instance browser handoffs.
+- Fixed Firefox browser-download forwarding so suggested filenames from the browser are preserved without synthetic collision suffixes.
+- Fixed browser-originated signed and encoded URLs being decoded too early, which could make libcurl reject valid URLs as malformed.
+- Added a persistent bottom properties pane inspired by qBittorrent, with General, Request, and Segments tabs for inspecting selected downloads without opening a blocking edit dialog.
+- Updated toolbar, menu, and context-menu actions so start, pause, stop, delete, and edit are enabled only when the current download selection supports them.
+- Tightened the main splitter layout so the category pane, download list, and details pane no longer leave a large empty gap between panes.
+- Expanded the About dialog with the application version, UTC build time, Qt runtime version, and project GitHub URL.
+
 ## 0.1.6
 
 - Fixed structured browser downloads and captured HLS/DASH requests being decoded as empty D-Bus maps, which caused valid URLs to be rejected with a batch-download warning.
