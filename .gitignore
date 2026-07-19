@@ -26,6 +26,10 @@ qtidm-chrome.pem
 *.log
 *.tmp
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # Editors and OS
 .idea/
 .vscode/

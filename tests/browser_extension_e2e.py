@@ -50,16 +50,14 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
 <script>
 document.cookie = "qtidm_e2e=cookie; SameSite=Lax; path=/";
 window.addEventListener("load", () => {
-  const trigger = () => {
+  setTimeout(() => {
     const link = document.createElement("a");
     link.href = "/download.bin?from=e2e";
     link.download = "qtidm-e2e.bin";
     document.body.appendChild(link);
     link.click();
     link.remove();
-  };
-  setTimeout(trigger, 1500);
-  setInterval(trigger, 4000);
+  }, 1500);
 });
 </script>
 <body>qtIDM extension end-to-end fixture</body>
