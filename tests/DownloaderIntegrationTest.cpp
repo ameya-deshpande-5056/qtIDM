@@ -314,12 +314,18 @@ private slots:
         rename.fileConflictPolicy = qtidm::FileConflictPolicy::AutoRename;
         const auto renameId = downloader.enqueue(rename);
         QVERIFY(waitForStatus(statusSpy, renameId, qtidm::DownloadStatus::Completed, 15000));
+
+        const auto secondRenameId = downloader.enqueue(rename);
+        QVERIFY(waitForStatus(statusSpy, secondRenameId, qtidm::DownloadStatus::Completed, 15000));
         downloader.stop();
 
-        QCOMPARE(addedSpy.size(), 1);
-        const auto renamedPath = addedSpy.first().first().value<qtidm::DownloadRecord>().targetPath;
-        QVERIFY(renamedPath.endsWith(QStringLiteral("existing (1).bin")));
-        QVERIFY(QFileInfo::exists(renamedPath));
+        QCOMPARE(addedSpy.size(), 2);
+        const auto firstRenamedPath = addedSpy.at(0).first().value<qtidm::DownloadRecord>().targetPath;
+        const auto secondRenamedPath = addedSpy.at(1).first().value<qtidm::DownloadRecord>().targetPath;
+        QVERIFY(firstRenamedPath.endsWith(QStringLiteral("existing (1).bin")));
+        QVERIFY(secondRenamedPath.endsWith(QStringLiteral("existing (2).bin")));
+        QVERIFY(QFileInfo::exists(firstRenamedPath));
+        QVERIFY(QFileInfo::exists(secondRenamedPath));
         QVERIFY(existing.open(QIODevice::ReadOnly));
         QCOMPARE(existing.readAll(), QByteArray("keep"));
     }

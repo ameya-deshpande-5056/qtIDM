@@ -273,10 +273,12 @@ export WEB_EXT_API_SECRET=<your AMO API secret>
 sh packaging/browser/build-extensions.sh --mode release
 ```
 
-The release command creates a private-key-signed CRX and requests an unlisted,
-Mozilla-signed XPI. Subsequent `.deb`, AppImage, and Flatpak builds bundle both
-files from `browser/packages/`. Release packaging additionally requires a
-Chrome/Chromium executable and `web-ext` 8 or newer.
+The release command creates a stable-ID Chrome unpacked ZIP, a
+private-key-signed CRX for Linux package registration, and an unlisted
+Mozilla-signed XPI. Subsequent `.deb`, AppImage, and Flatpak builds bundle the
+CRX and XPI from `browser/packages/`; GitHub releases publish the stable-ID
+Chrome ZIP, developer-signed Chromium CRX, and Firefox XPI. Release packaging
+additionally requires a Chrome/Chromium executable and `web-ext` 8 or newer.
 
 ### Versioning
 
@@ -337,7 +339,8 @@ Version tag push:
 
 - validates the Chrome signing key and extension ID,
 - runs build and tests,
-- builds a signed CRX and an unlisted Mozilla-signed XPI,
+- builds a stable-ID Chrome ZIP, a package-internal signed CRX, and an unlisted
+  Mozilla-signed XPI,
 - bundles both extensions into every application package,
 - builds and smoke-tests packages,
 - uploads artifacts,
@@ -384,7 +387,8 @@ Current behavior:
 
 - browser extension source is kept under `browser/chrome` and `browser/firefox`,
 - every CI run lints and builds development extension archives,
-- tagged releases build `qtidm-chrome.crx` and `qtidm-firefox.xpi`,
+- tagged releases build a stable-ID Chrome ZIP, a package-internal Chrome CRX,
+  and `qtidm-firefox.xpi`,
 - signed extension files are included in the `.deb`, AppImage, and Flatpak,
 - the `.deb` registers the bundled CRX as an external Google Chrome extension,
 - the signed XPI remains available for user installation from a file,
@@ -406,6 +410,16 @@ Extension signing, private-key handling, and installation boundaries are documen
 [Browser Extension Packaging and Private Distribution](docs/BROWSER_EXTENSION_PUBLISHING.md).
 
 ### Installing bundled extensions
+
+For the standalone Chrome asset from a GitHub release, extract
+`qtIDM-browser-chrome-<version>.zip`, open `chrome://extensions`, enable
+**Developer mode**, select **Load unpacked**, and choose the extracted
+directory. Directly opening a developer-signed CRX in branded Chrome fails
+with `CRX_REQUIRED_PROOF_MISSING`; use the ZIP for branded Chrome.
+
+The release also provides `qtIDM-browser-chromium-<version>.crx` for Chromium
+variants that accept developer-signed CRX files. Support varies by browser,
+platform, version, and policy, so the stable-ID ZIP is the reliable fallback.
 
 The release `.deb` installs the signed files at:
 

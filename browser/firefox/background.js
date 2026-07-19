@@ -204,6 +204,24 @@ function leafFilename(value) {
   return normalized.split("/").pop() || "";
 }
 
+function browserSuggestedFilename(filename, url) {
+  const captured = leafFilename(filename);
+  const response = recentResponseFilename(url);
+  if (!captured || !response || captured === response) return captured || response;
+
+  // Browsers reserve a local name before the extension can cancel the download,
+  // so their temporary collision suffix must not become qtIDM's requested name.
+  // qtIDM applies its own conflict policy against the real destination.
+  const extensionAt = response.lastIndexOf(".");
+  const stem = extensionAt > 0 ? response.slice(0, extensionAt) : response;
+  const extension = extensionAt > 0 ? response.slice(extensionAt) : "";
+  const collisionSuffix = captured.slice(stem.length, captured.length - extension.length);
+  if (captured.startsWith(stem) && captured.endsWith(extension) && /^\(\d+\)$/.test(collisionSuffix)) {
+    return response;
+  }
+  return captured;
+}
+
 function responseFilename(details) {
   const disposition = (details.responseHeaders || [])
     .find((header) => String(header.name || "").toLowerCase() === "content-disposition")?.value || "";
@@ -407,7 +425,7 @@ async function redirectBrowserDownload(item, url) {
       removed = true;
     }
     await sendToHost(
-      url, null, item.referrer || "", {}, "", item.filename || recentResponseFilename(url), request.method, request.body
+      url, null, item.referrer || "", {}, "", browserSuggestedFilename(item.filename, url), request.method, request.body
     );
     if (!prepared) {
       await browser.downloads.cancel(item.id).catch(() => {});

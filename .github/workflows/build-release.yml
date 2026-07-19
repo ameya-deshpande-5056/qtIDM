@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       sign_extensions:
-        description: Build and bundle release-signed CRX/XPI packages
+        description: Build Chrome ZIP/CRX and signed Firefox XPI packages
         required: false
         default: false
         type: boolean
@@ -148,7 +148,8 @@ jobs:
           WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
         run: |
           sh packaging/browser/build-extensions.sh --mode release --output browser/packages
-          cp browser/packages/qtidm-chrome.crx "dist/qtIDM-browser-chrome-${{ steps.version.outputs.version }}.crx"
+          cp browser/packages/qtidm-chrome.zip "dist/qtIDM-browser-chrome-${{ steps.version.outputs.version }}.zip"
+          cp browser/packages/qtidm-chrome.crx "dist/qtIDM-browser-chromium-${{ steps.version.outputs.version }}.crx"
           cp browser/packages/qtidm-firefox.xpi "dist/qtIDM-browser-firefox-${{ steps.version.outputs.version }}.xpi"
 
       - name: Build Debian package

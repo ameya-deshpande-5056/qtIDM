@@ -158,8 +158,20 @@ async function testVariant(relativePath, rootName) {
     `${rootName} must remove the browser file before opening qtIDM's download dialog`
   );
 
+  for (const copy of [1, 2, 37]) {
+    await context.redirectBrowserDownload(
+      { id: 7 + copy, referrer: "https://example.test/page", filename: `/home/test/Server supplied name(${copy}).mp4` },
+      "https://example.test/archive.bin"
+    );
+    assert.equal(
+      mock.nativeMessages.at(-1).downloads[0].suggestedFilename,
+      "Server supplied name.mp4",
+      `${rootName} must discard the browser's (${copy}) collision suffix`
+    );
+  }
+
   await context.redirectBrowserDownload(
-    { id: 8, referrer: "https://example.test/page", filename: "" },
+    { id: 45, referrer: "https://example.test/page", filename: "" },
     "https://example.test/archive.bin"
   );
   assert.equal(mock.nativeMessages.at(-1).downloads[0].suggestedFilename, "Server supplied name.mp4");

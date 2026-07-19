@@ -99,15 +99,38 @@ export WEB_EXT_API_SECRET=<AMO-API-secret>
 sh packaging/browser/build-extensions.sh --mode release
 ```
 
-This creates `browser/packages/qtidm-chrome.crx` and
-`browser/packages/qtidm-firefox.xpi`. CMake includes both files in subsequent
-application package builds. GitHub Actions also publishes versioned copies as
-standalone release assets.
+This creates `browser/packages/qtidm-chrome.zip`,
+`browser/packages/qtidm-chrome.crx`, and
+`browser/packages/qtidm-firefox.xpi`. The ZIP contains the release public key,
+so loading it unpacked retains the same extension ID as the bundled CRX and
+native-host allowlist.
+
+CMake includes the CRX and XPI in subsequent application package builds.
+GitHub Actions publishes the stable-ID Chrome ZIP, developer-signed Chromium
+CRX, and Firefox XPI as standalone release assets. The CRX is retained for
+Chromium variants and managed Linux external-extension installation; branded
+Chrome may reject direct installation because developer-signed CRX3 files lack
+Chrome Web Store publisher proof (`CRX_REQUIRED_PROOF_MISSING`).
 
 The Debian package installs an external-extension descriptor for Google Chrome,
 pointing at the bundled CRX. AppImage and Flatpak contain both files but do not
 modify host-browser configuration. Firefox installation remains user-driven
 unless an administrator deploys an enterprise extension policy.
+
+For a standalone Chrome installation from a GitHub release:
+
+1. Extract `qtIDM-browser-chrome-<version>.zip` to a permanent directory.
+2. Open `chrome://extensions` and enable **Developer mode**.
+3. Select **Load unpacked** and choose the extracted directory.
+
+Do not try to open or drag the CRX bundled inside an application package into
+Chrome. On Linux, that CRX is intended only for the package-installed external
+extension descriptor.
+
+The standalone `qtIDM-browser-chromium-<version>.crx` is also available for
+Chromium-family browsers that permit developer-signed CRX installation.
+Acceptance depends on the browser, version, platform, and administrator policy;
+the stable-ID ZIP remains the portable manual-install option.
 
 ## Flatpak Boundary
 

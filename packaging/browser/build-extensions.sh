@@ -6,8 +6,9 @@ usage() {
 Usage: $0 --mode development|release [--output DIRECTORY]
 
 Development mode builds an unpacked-install ZIP for Chromium and an unsigned
-Firefox XPI. Release mode builds a private-key-signed CRX and requests an
-unlisted, Mozilla-signed XPI.
+Firefox XPI. Release mode builds a stable-ID unpacked ZIP, a private-key-signed
+CRX for Linux external-extension registration, and an unlisted Mozilla-signed
+XPI.
 
 Release environment:
   QTIDM_CHROME_EXECUTABLE             Chrome/Chromium executable
@@ -111,6 +112,23 @@ if [ "$DERIVED_CHROME_ID" != "$QTIDM_CHROME_EXTENSION_ID" ]; then
 fi
 
 cp -R "$ROOT/browser/chrome" "$WORK/chrome"
+CHROME_PUBLIC_KEY="$(
+    openssl pkey -in "$QTIDM_CHROME_EXTENSION_KEY" -pubout -outform DER 2>/dev/null \
+        | openssl base64 -A
+)"
+if [ -z "$CHROME_PUBLIC_KEY" ]; then
+    echo "Could not derive the Chrome manifest public key." >&2
+    exit 1
+fi
+sed '1a\
+  "key": "'"$CHROME_PUBLIC_KEY"'",
+' "$WORK/chrome/manifest.json" > "$WORK/chrome/manifest.json.with-key"
+mv "$WORK/chrome/manifest.json.with-key" "$WORK/chrome/manifest.json"
+
+(
+    cd "$WORK/chrome"
+    zip -q -X -r "$WORK/qtidm-chrome.zip" . -x '*.DS_Store'
+)
 "$QTIDM_CHROME_EXECUTABLE" \
     --headless=new \
     --disable-gpu \
@@ -125,6 +143,7 @@ if [ ! -s "$WORK/chrome.crx" ] || [ "$(dd if="$WORK/chrome.crx" bs=1 count=4 2>/
     exit 1
 fi
 install -m 0644 "$WORK/chrome.crx" "$OUTPUT/qtidm-chrome.crx"
+install -m 0644 "$WORK/qtidm-chrome.zip" "$OUTPUT/qtidm-chrome.zip"
 
 mkdir -p "$WORK/firefox-signed"
 web-ext sign \
@@ -145,4 +164,4 @@ if ! unzip -Z1 "$1" | grep -q '^META-INF/.*\.rsa$'; then
 fi
 install -m 0644 "$1" "$OUTPUT/qtidm-firefox.xpi"
 
-printf 'Built signed browser packages for extension version %s in %s\n' "$CHROME_VERSION" "$OUTPUT"
+printf 'Built release browser packages for extension version %s in %s\n' "$CHROME_VERSION" "$OUTPUT"

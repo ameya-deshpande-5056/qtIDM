@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -136,6 +138,14 @@ class BrowserPackagingTest(unittest.TestCase):
                 check=True,
             )
             self.assertEqual((release / "qtidm-chrome.crx").read_bytes()[:4], b"Cr24")
+            with zipfile.ZipFile(release / "qtidm-chrome.zip") as package:
+                chrome_manifest = json.loads(package.read("manifest.json"))
+                public_key = base64.b64decode(chrome_manifest["key"])
+                digest = hashlib.sha256(public_key).hexdigest()[:32]
+                packaged_id = "".join(
+                    chr(ord("a") + int(character, 16)) for character in digest
+                )
+                self.assertEqual(packaged_id, extension_id)
             with zipfile.ZipFile(release / "qtidm-firefox.xpi") as package:
                 self.assertIn("META-INF/mozilla.rsa", package.namelist())
 

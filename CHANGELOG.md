@@ -10,7 +10,8 @@
 - Added explicit `qtidm:` link handling and bounded per-tab capture of HLS, DASH, direct media, and subtitle requests.
 - Strengthened real Chrome and Firefox E2E tests to require a persistent native-messaging prepare/download session on the same host process; CI now fails if either E2E test is missing.
 - Updated CI browser tooling to resolve the current active Node.js LTS automatically.
-- Browser downloads now use the resolved `Content-Disposition` filename and remove the browser's temporary file before qtIDM opens its download-options dialog, avoiding spurious ` (1)` suffixes.
+- Browser downloads now use the resolved `Content-Disposition` filename, discard browser-generated collision suffixes such as `(1)` or `(2)`, and remove the browser's temporary file before qtIDM opens its download-options dialog; qtIDM adds numbered suffixes only for real destination or active `.part` conflicts.
+- Chrome release packaging now publishes both a stable-ID unpacked ZIP for branded Chrome and a developer-signed CRX for compatible Chromium variants and managed Linux installation, avoiding `CRX_REQUIRED_PROOF_MISSING` as the only GitHub installation path.
 - New single-URL downloads default to category folders in `~/Downloads` (such as Videos, Music, Images, Programs, Documents, Compressed, and Others), creating the selected destination folder when the download is confirmed.
 - Closing the main window now keeps qtIDM running in the system tray; active downloads prompt to keep running, quit, or cancel the close.
 
