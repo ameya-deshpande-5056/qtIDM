@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6
+
+- Fixed structured browser downloads and captured HLS/DASH requests being decoded as empty D-Bus maps, which caused valid URLs to be rejected with a batch-download warning.
+- Prevented failed browser handoffs from repeatedly intercepting their own restored downloads, and made browser-originated dialogs non-reentrant so malformed or repeated requests cannot create an uncontrollable modal popup storm.
+
 ## 0.1.5
 
 - Reworked browser native messaging into a persistent, request-correlated session with explicit desktop acceptance before a browser download is removed; failed handoffs restore or resume the browser download.

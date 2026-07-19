@@ -5,6 +5,7 @@ project(qtIDM VERSION 0.1.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
@@ -149,6 +150,15 @@ add_executable(qtIDM_download_types_tests
 target_include_directories(qtIDM_download_types_tests PRIVATE src)
 target_link_libraries(qtIDM_download_types_tests PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME qtIDM_download_types_tests COMMAND qtIDM_download_types_tests)
+
+add_executable(qtIDM_single_instance_tests
+    tests/SingleInstanceTest.cpp
+    src/app/SingleInstance.cpp
+)
+
+target_include_directories(qtIDM_single_instance_tests PRIVATE src)
+target_link_libraries(qtIDM_single_instance_tests PRIVATE Qt6::Core Qt6::DBus Qt6::Test)
+add_test(NAME qtIDM_single_instance_tests COMMAND qtIDM_single_instance_tests)
 
 add_executable(qtIDM_import_export_tests
     tests/ImportExportServiceTest.cpp

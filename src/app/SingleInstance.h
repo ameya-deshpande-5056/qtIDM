@@ -23,6 +23,7 @@ public slots:
     Q_SCRIPTABLE bool AddUrl(const QString& url, const QVariantMap& headers);
     Q_SCRIPTABLE bool AddUrls(const QStringList& urls, const QVariantMap& headers);
     Q_SCRIPTABLE bool AddDownloads(const QVariantList& downloads);
+    Q_SCRIPTABLE bool AddDownloadsJson(const QString& downloadsJson);
 
 signals:
     void activateRequested();

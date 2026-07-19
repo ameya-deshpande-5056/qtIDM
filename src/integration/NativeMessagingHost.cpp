@@ -62,6 +62,7 @@ QJsonObject handle(const QJsonObject& object)
         return { { QStringLiteral("ok"), true }, { QStringLiteral("status"), QStringLiteral("ready") }, { QStringLiteral("persistent"), true } };
     QVariantList downloads;
     QStringList urls;
+    QString downloadsJson;
     if (object.value(QStringLiteral("downloads")).isArray()) {
         const auto values = object.value(QStringLiteral("downloads")).toArray();
         if (values.isEmpty() || values.size() > 100) return errorReply(QStringLiteral("invalid-downloads"), QStringLiteral("A browser batch must contain between 1 and 100 downloads."));
@@ -85,6 +86,10 @@ QJsonObject handle(const QJsonObject& object)
                 || (!body.isEmpty() && decodedBody.isEmpty())) return errorReply(QStringLiteral("invalid-body"), QStringLiteral("Browser sent an invalid or oversized POST body."));
             downloads.append(QVariantMap { { QStringLiteral("url"), url }, { QStringLiteral("headers"), headers }, { QStringLiteral("method"), method }, { QStringLiteral("body"), QString::fromLatin1(body) }, { QStringLiteral("suggestedFilename"), item.value(QStringLiteral("suggestedFilename")).toString().trimmed() } });
         }
+        // Nested QVariant maps can arrive from D-Bus as opaque QDBusArgument
+        // wrappers. JSON uses an unambiguous string signature and preserves
+        // the browser payload that was validated above.
+        downloadsJson = QString::fromUtf8(QJsonDocument(values).toJson(QJsonDocument::Compact));
     } else if (object.value(QStringLiteral("urls")).isArray()) {
         for (const auto& value : object.value(QStringLiteral("urls")).toArray()) urls.append(value.toString());
     } else if (!object.value(QStringLiteral("prepare")).toBool()) urls.append(object.value(QStringLiteral("url")).toString());
@@ -97,7 +102,7 @@ QJsonObject handle(const QJsonObject& object)
         QDBusInterface iface(QStringLiteral("io.github.qtidm"), QStringLiteral("/io/github/qtidm/Application"), QStringLiteral("io.github.qtidm.Application"), QDBusConnection::sessionBus());
         if (iface.isValid()) {
             if (object.value(QStringLiteral("prepare")).toBool()) return { { QStringLiteral("ok"), true }, { QStringLiteral("prepared"), true }, { QStringLiteral("persistent"), true } };
-            const auto reply = !downloads.isEmpty() ? iface.call(QStringLiteral("AddDownloads"), downloads) : (urls.size() == 1 ? iface.call(QStringLiteral("AddUrl"), urls.first(), QVariantMap {}) : iface.call(QStringLiteral("AddUrls"), urls, QVariantMap {}));
+            const auto reply = !downloads.isEmpty() ? iface.call(QStringLiteral("AddDownloadsJson"), downloadsJson) : (urls.size() == 1 ? iface.call(QStringLiteral("AddUrl"), urls.first(), QVariantMap {}) : iface.call(QStringLiteral("AddUrls"), urls, QVariantMap {}));
             if (reply.type() != QDBusMessage::ErrorMessage) return { { QStringLiteral("ok"), true }, { QStringLiteral("accepted"), reply.arguments().value(0).toBool() } };
             lastError = reply.errorMessage();
         } else lastError = QStringLiteral("qtIDM D-Bus service is not available yet.");

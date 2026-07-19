@@ -7,6 +7,7 @@ const requestHeadersByUrl = new Map();
 const responseFilenamesByUrl = new Map();
 const mediaWriteQueues = new Map();
 const modifierByTab = new Map();
+const restoredDownloads = new Map();
 let nativePort = null;
 let nativeSequence = 0;
 const nativePending = new Map();
@@ -80,6 +81,17 @@ function shouldIntercept(item, value) {
   if (included.length && (!extension || !included.includes(extension))) return false;
   const total = Number(item.totalBytes ?? item.fileSize ?? -1);
   return !(Number(value.minDownloadBytes) > 0 && total >= 0 && total < Number(value.minDownloadBytes));
+}
+
+function markRestoredDownload(url) {
+  restoredDownloads.set(url, Date.now() + 10000);
+}
+
+function consumeRestoredDownload(url) {
+  const expiresAt = restoredDownloads.get(url);
+  if (!expiresAt) return false;
+  restoredDownloads.delete(url);
+  return expiresAt >= Date.now();
 }
 
 function forwardedRequestHeaders(details) {
@@ -436,7 +448,10 @@ async function redirectBrowserDownload(item, url) {
     if (removed) {
       const restore = { url: item.url || url };
       if (request.method === "POST") { restore.method = "POST"; restore.body = request.body; }
-      await browser.downloads.download(restore).catch(() => {});
+      markRestoredDownload(restore.url);
+      await browser.downloads.download(restore).catch(() => {
+        restoredDownloads.delete(restore.url);
+      });
     } else if (paused) {
       await browser.downloads.resume(item.id).catch(() => {});
     }
@@ -447,7 +462,11 @@ async function redirectBrowserDownload(item, url) {
 
 browser.downloads.onCreated.addListener((item) => {
   const url = item.finalUrl || item.url;
-  if (!url || item.byExtensionId === browser.runtime.id || !/^https?:/i.test(url)) {
+  // Some browser versions omit byExtensionId for downloads created by an
+  // extension background worker. The one-shot marker also prevents a restored
+  // browser download from being intercepted in an endless loop.
+  if (!url || consumeRestoredDownload(item.url || url)
+      || item.byExtensionId === browser.runtime.id || !/^https?:/i.test(url)) {
     return;
   }
   settings()

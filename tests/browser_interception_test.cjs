@@ -21,6 +21,7 @@ function browserApi(rootName) {
   const calls = [];
   const nativeMessages = [];
   let nativeError = null;
+  let nativeDownloadError = null;
   const api = {
     runtime: {
       id: "qtidm-test-extension",
@@ -30,6 +31,7 @@ function browserApi(rootName) {
         calls.push("native");
         nativeMessages.push(message);
         if (nativeError) throw nativeError;
+        if (nativeDownloadError && message.prepare !== true) throw nativeDownloadError;
         return { ok: true, prepared: message.prepare === true, accepted: message.prepare !== true };
       }
     },
@@ -50,7 +52,14 @@ function browserApi(rootName) {
       async resume() { calls.push("resume"); },
       async cancel() { calls.push("cancel"); },
       async removeFile() { calls.push("removeFile"); },
-      async erase() { calls.push("erase"); }
+      async erase() { calls.push("erase"); },
+      async download(options) {
+        calls.push("download");
+        for (const listener of api.downloads.onCreated.listeners) {
+          listener({ id: 99, url: options.url });
+        }
+        return 99;
+      }
     },
     cookies: {
       async getAll() { return []; }
@@ -75,6 +84,9 @@ function browserApi(rootName) {
     nativeMessages,
     failNative(error) {
       nativeError = error;
+    },
+    failNativeAfterPrepare(error) {
+      nativeDownloadError = error;
     }
   };
 }
@@ -186,6 +198,23 @@ async function testVariant(relativePath, rootName) {
     mock.calls,
     ["pause", "native", "resume"],
     `${rootName} must resume the browser download when native messaging fails`
+  );
+
+  mock.failNative(null);
+  mock.calls.length = 0;
+  mock.failNativeAfterPrepare(new Error("application rejected download"));
+  await assert.rejects(
+    context.redirectBrowserDownload(
+      { ...item, url: "https://example.test/archive.bin" },
+      "https://example.test/archive.bin"
+    ),
+    /application rejected download/
+  );
+  await Promise.resolve();
+  assert.deepEqual(
+    mock.calls,
+    ["pause", "native", "cancel", "removeFile", "erase", "native", "download"],
+    `${rootName} must restore a rejected browser download without intercepting the restoration`
   );
 }
 

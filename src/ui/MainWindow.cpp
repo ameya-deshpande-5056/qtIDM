@@ -34,6 +34,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QScopedValueRollback>
 #include <QScrollArea>
 #include <QSplitter>
 #include <QSpinBox>
@@ -583,13 +584,27 @@ bool MainWindow::addUrl(QString url, QVariantMap headers)
 
 bool MainWindow::addBrowserDownloads(QVariantList downloads)
 {
-    if (downloads.isEmpty() || downloads.size() > 100) {
+    // QMessageBox/QDialog::exec() runs a nested event loop. Without this guard,
+    // another D-Bus request can enter this method and stack a second modal
+    // dialog, eventually making the application impossible to control.
+    if (browserRequestActive_ || downloads.isEmpty() || downloads.size() > 100) {
         return false;
     }
+    QScopedValueRollback requestGuard(browserRequestActive_, true);
+
     QStringList urls;
     urls.reserve(downloads.size());
     for (const auto& value : std::as_const(downloads)) {
-        urls.append(value.toMap().value(QStringLiteral("url")).toString());
+        const auto urlText = value.toMap().value(QStringLiteral("url")).toString().trimmed();
+        const QUrl url(urlText);
+        if (!url.isValid() || (url.scheme() != QStringLiteral("http")
+            && url.scheme() != QStringLiteral("https") && url.scheme() != QStringLiteral("ftp"))) {
+            // Browser/native-messaging validation failures are returned to the
+            // sender instead of shown modally. A broken extension may retry
+            // continuously, but it must never take over the desktop UI.
+            return false;
+        }
+        urls.append(urlText);
     }
     // Keep protocol-specific metadata out of the editable header field.  The
     // batch dialog consumes it per row after the user accepts shared options.

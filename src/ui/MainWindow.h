@@ -89,6 +89,7 @@ private:
     QSystemTrayIcon* tray_ = nullptr;
     QMetaObject::Connection clipboardConnection_;
     QString lastClipboardUrl_;
+    bool browserRequestActive_ = false;
     bool quitting_ = false;
 };
 

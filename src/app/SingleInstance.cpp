@@ -2,6 +2,7 @@
 
 #include <QDBusConnection>
 #include <QDBusInterface>
+#include <QJsonDocument>
 
 namespace {
 constexpr auto serviceName = "io.github.qtidm";
@@ -85,6 +86,16 @@ bool SingleInstance::AddUrls(const QStringList& urls, const QVariantMap& headers
 bool SingleInstance::AddDownloads(const QVariantList& downloads)
 {
     return downloadsHandler_ ? downloadsHandler_(downloads) : false;
+}
+
+bool SingleInstance::AddDownloadsJson(const QString& downloadsJson)
+{
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(downloadsJson.toUtf8(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isArray()) {
+        return false;
+    }
+    return AddDownloads(document.array().toVariantList());
 }
 
 }
