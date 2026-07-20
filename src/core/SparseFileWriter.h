@@ -11,7 +11,8 @@ public:
     SparseFileWriter() = default;
     ~SparseFileWriter();
 
-    bool open(const QString& path, std::int64_t size);
+    bool open(const QString& path, std::int64_t size, bool preserveUnknownLength = false);
+    bool setExpectedSize(std::int64_t size);
     bool writeAt(std::int64_t offset, const char* data, std::int64_t size);
     void close();
     QString lastError() const;

@@ -272,6 +272,25 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
     connect(&downloader_, &CurlEpollDownloader::downloadAdded, this, &MainWindow::onDownloadAdded);
     connect(&downloader_, &CurlEpollDownloader::progressChanged, this, &MainWindow::onProgressChanged);
     connect(&downloader_, &CurlEpollDownloader::segmentsChanged, this, &MainWindow::onSegmentsChanged);
+    connect(&downloader_, &CurlEpollDownloader::metadataChanged, this,
+        [this](const QString& id, qint64 total, const QString& entityTag, const QString& lastModified) {
+            const auto records = repository_.listDownloads();
+            const auto it = std::find_if(records.cbegin(), records.cend(), [&id](const DownloadRecord& record) {
+                return record.id == id;
+            });
+            if (it == records.cend()) {
+                return;
+            }
+            auto updated = *it;
+            if (total >= 0) {
+                updated.totalBytes = total;
+                updated.request.expectedTotalBytes = total;
+            }
+            updated.request.entityTag = entityTag;
+            updated.request.lastModified = lastModified;
+            updated.updatedAt = QDateTime::currentDateTimeUtc();
+            repository_.upsertDownload(updated);
+        });
     connect(&downloader_, &CurlEpollDownloader::statusChanged, this, &MainWindow::onStatusChanged);
     connect(&mediaDownloader_, &MediaDownloader::downloadAdded, this, &MainWindow::onDownloadAdded);
     connect(&mediaDownloader_, &MediaDownloader::progressChanged, this, &MainWindow::onProgressChanged);

@@ -21,7 +21,7 @@ SparseFileWriter::~SparseFileWriter()
     close();
 }
 
-bool SparseFileWriter::open(const QString& path, std::int64_t size)
+bool SparseFileWriter::open(const QString& path, std::int64_t size, bool preserveUnknownLength)
 {
     QMutexLocker lock(&mutex_);
     QDir().mkpath(QFileInfo(path).absolutePath());
@@ -33,13 +33,30 @@ bool SparseFileWriter::open(const QString& path, std::int64_t size)
     fileSize_ = size;
     // Unknown-length downloads start from an empty file. Without truncation,
     // a shorter replacement download could leave bytes from an older file.
+    const auto shouldResize = size >= 0 || !preserveUnknownLength;
     const auto initialSize = size > 0 ? size : 0;
-    if (::ftruncate(fd_, initialSize) != 0) {
+    if (shouldResize && ::ftruncate(fd_, initialSize) != 0) {
         lastError_ = QString::fromLocal8Bit(std::strerror(errno));
         ::close(fd_);
         fd_ = -1;
         return false;
     }
+    return true;
+}
+
+bool SparseFileWriter::setExpectedSize(std::int64_t size)
+{
+    QMutexLocker lock(&mutex_);
+    if (fd_ < 0 || size < 0) {
+        lastError_ = QStringLiteral("writer is not open");
+        return false;
+    }
+    unmap();
+    if (::ftruncate(fd_, size) != 0) {
+        lastError_ = QString::fromLocal8Bit(std::strerror(errno));
+        return false;
+    }
+    fileSize_ = size;
     return true;
 }
 

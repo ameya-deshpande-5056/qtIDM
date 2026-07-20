@@ -93,6 +93,8 @@ QJsonObject requestToJson(const DownloadRequest& request)
         { QStringLiteral("speedLimitBytesPerSecond"), QString::number(request.speedLimitBytesPerSecond) },
         { QStringLiteral("sessionDataLimitBytes"), QString::number(request.sessionDataLimitBytes) },
         { QStringLiteral("expectedTotalBytes"), QString::number(request.expectedTotalBytes) },
+        { QStringLiteral("entityTag"), request.entityTag },
+        { QStringLiteral("lastModified"), request.lastModified },
         { QStringLiteral("headers"), headers }
     };
 }
@@ -154,6 +156,8 @@ DownloadRequest requestFromJson(const QJsonObject& object)
     request.expectedTotalBytes = object.contains(QStringLiteral("expectedTotalBytes"))
         ? object.value(QStringLiteral("expectedTotalBytes")).toString().toLongLong()
         : -1;
+    request.entityTag = object.value(QStringLiteral("entityTag")).toString().trimmed();
+    request.lastModified = object.value(QStringLiteral("lastModified")).toString().trimmed();
     const auto headers = object.value(QStringLiteral("headers")).toObject();
     for (auto it = headers.begin(); it != headers.end(); ++it) {
         request.headers.insert(it.key(), it.value().toVariant());

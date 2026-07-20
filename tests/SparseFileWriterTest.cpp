@@ -70,6 +70,28 @@ private slots:
         QVERIFY(existing.open(QIODevice::ReadOnly));
         QCOMPARE(existing.readAll(), data);
     }
+
+    void preservesExistingFileForUnknownLengthResume()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        const auto path = dir.path() + QStringLiteral("/unknown-resume.bin");
+        QFile existing(path);
+        QVERIFY(existing.open(QIODevice::WriteOnly));
+        QCOMPARE(existing.write("prefix"), qint64(6));
+        existing.close();
+
+        qtidm::SparseFileWriter writer;
+        QVERIFY(writer.open(path, -1, true));
+        const QByteArray suffix("-suffix");
+        QVERIFY(writer.writeAt(6, suffix.constData(), suffix.size()));
+        QVERIFY(writer.setExpectedSize(6 + suffix.size()));
+        writer.close();
+
+        QVERIFY(existing.open(QIODevice::ReadOnly));
+        QCOMPARE(existing.readAll(), QByteArray("prefix-suffix"));
+    }
 };
 
 QTEST_MAIN(SparseFileWriterTest)

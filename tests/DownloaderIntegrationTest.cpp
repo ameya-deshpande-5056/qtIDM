@@ -228,6 +228,151 @@ private slots:
         QCOMPARE(file.readAll(), expectedPayload(fixtureSize));
     }
 
+    void discoversSizeWhenHeadIsRejected()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy addedSpy(&downloader, &qtidm::CurlEpollDownloader::downloadAdded);
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/head-rejected-range.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/head-rejected.bin");
+        request.segments = 4;
+        const auto id = downloader.enqueue(request);
+
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 15000));
+        downloader.stop();
+        QCOMPARE(addedSpy.size(), 1);
+        QCOMPARE(addedSpy.first().first().value<qtidm::DownloadRecord>().totalBytes, fixtureSize);
+
+        QFile file(request.targetPath);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), expectedPayload(fixtureSize));
+    }
+
+    void discoversSizeFromContentRangeWhenHeadOmitsIt()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy addedSpy(&downloader, &qtidm::CurlEpollDownloader::downloadAdded);
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/head-no-length-range.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/head-no-length.bin");
+        const auto id = downloader.enqueue(request);
+
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 15000));
+        downloader.stop();
+        QCOMPARE(addedSpy.size(), 1);
+        QCOMPARE(addedSpy.first().first().value<qtidm::DownloadRecord>().totalBytes, fixtureSize);
+        QCOMPARE(QFileInfo(request.targetPath).size(), fixtureSize);
+    }
+
+    void safelyResumesUnknownLengthAfterDisconnect()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy progressSpy(&downloader, &qtidm::CurlEpollDownloader::progressChanged);
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/unknown-resume.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/unknown-resume.bin");
+        request.segments = 1;
+        request.maxRetries = 2;
+        request.retryBaseDelayMs = 10;
+        const auto id = downloader.enqueue(request);
+
+        QString message;
+        QVERIFY2(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 15000, &message),
+                 qPrintable(message));
+        downloader.stop();
+
+        QFile file(request.targetPath);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.size(), fixtureSize);
+        QCOMPARE(file.readAll(), expectedPayload(fixtureSize));
+        QVERIFY(!progressSpy.isEmpty());
+        const auto finalProgress = progressSpy.last();
+        QCOMPARE(finalProgress.at(1).toLongLong(), fixtureSize);
+        QCOMPARE(finalProgress.at(2).toLongLong(), fixtureSize);
+    }
+
+    void rejectsIgnoredUnknownLengthResumeWithoutAppending()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/ignored-unknown-resume.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/ignored-resume.bin");
+        request.segments = 1;
+        request.maxRetries = 2;
+        request.retryBaseDelayMs = 10;
+        const auto id = downloader.enqueue(request);
+
+        QString message;
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Failed, 15000, &message));
+        downloader.stop();
+        QCOMPARE(message, QStringLiteral("server did not honor requested byte range"));
+        QVERIFY(!QFileInfo::exists(request.targetPath));
+
+        QFile partial(request.targetPath + QStringLiteral(".part"));
+        QVERIFY(partial.open(QIODevice::ReadOnly));
+        QCOMPARE(partial.size(), fixtureSize / 4);
+        QCOMPARE(partial.readAll(), expectedPayload(fixtureSize / 4));
+    }
+
+    void preservesUnknownLengthPartialAcrossManualResume()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        constexpr qint64 preservedBytes = fixtureSize / 3;
+        qtidm::DownloadRequest request;
+        request.existingId = QStringLiteral("manual-unknown-resume");
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/unknown-resume.bin?manual").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/manual-unknown-resume.bin");
+        request.resumeSegments = {
+            { 0, 0, -1, preservedBytes, qtidm::DownloadStatus::Paused }
+        };
+
+        QFile partial(request.targetPath + QStringLiteral(".part"));
+        QVERIFY(partial.open(QIODevice::WriteOnly));
+        QCOMPARE(partial.write(expectedPayload(preservedBytes)), preservedBytes);
+        partial.close();
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+        const auto id = downloader.enqueue(request);
+
+        QString message;
+        QVERIFY2(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 15000, &message),
+                 qPrintable(message));
+        downloader.stop();
+
+        QFile completed(request.targetPath);
+        QVERIFY(completed.open(QIODevice::ReadOnly));
+        QCOMPARE(completed.size(), fixtureSize);
+        QCOMPARE(completed.readAll(), expectedPayload(fixtureSize));
+    }
+
     void supportsBasicAuthentication()
     {
         QTemporaryDir dir;
@@ -411,7 +556,8 @@ private slots:
         const auto unknownId = downloader.enqueue(request);
         QVERIFY(waitForStatus(statusSpy, unknownId, qtidm::DownloadStatus::Failed, 5000, &message));
         QCOMPARE(message, QStringLiteral("session data limit exceeded"));
-        QVERIFY(downloader.sessionBytesReceived() > request.sessionDataLimitBytes);
+        QVERIFY(downloader.sessionBytesReceived() > 0);
+        QVERIFY(downloader.sessionBytesReceived() <= request.sessionDataLimitBytes);
         downloader.resetSessionBytesReceived();
         QCOMPARE(downloader.sessionBytesReceived(), qint64(0));
         downloader.stop();
@@ -438,6 +584,37 @@ private slots:
         QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Failed, 5000, &message));
         QCOMPARE(message, QStringLiteral("remote size changed; resume refused"));
         downloader.stop();
+    }
+
+    void rejectsResumeWhenEntityValidatorChanged()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::DownloadRequest request;
+        request.existingId = QStringLiteral("changed-entity-resume");
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/changed-etag.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/changed-entity.bin");
+        request.expectedTotalBytes = fixtureSize;
+        request.entityTag = QStringLiteral("\"old-entity\"");
+        request.resumeSegments = {
+            { 0, 0, fixtureSize - 1, 12, qtidm::DownloadStatus::Paused }
+        };
+        QFile partial(request.targetPath + QStringLiteral(".part"));
+        QVERIFY(partial.open(QIODevice::WriteOnly));
+        QCOMPARE(partial.write(expectedPayload(12)), qint64(12));
+        partial.close();
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+        const auto id = downloader.enqueue(request);
+
+        QString message;
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Failed, 5000, &message));
+        QCOMPARE(message, QStringLiteral("remote entity changed; resume refused"));
+        downloader.stop();
+        QCOMPARE(QFileInfo(request.targetPath + QStringLiteral(".part")).size(), qint64(12));
     }
 
     void pausesAndCancelsActiveTransfer()

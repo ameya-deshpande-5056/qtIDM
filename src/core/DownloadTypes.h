@@ -80,6 +80,8 @@ struct DownloadRequest {
     qint64 speedLimitBytesPerSecond = 0;
     qint64 sessionDataLimitBytes = 0;
     qint64 expectedTotalBytes = -1;
+    QString entityTag;
+    QString lastModified;
     QVector<SegmentInfo> resumeSegments;
 };
 
