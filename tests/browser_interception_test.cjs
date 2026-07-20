@@ -158,6 +158,18 @@ async function testVariant(relativePath, rootName) {
   assert.equal(sent.headers["Sec-Fetch-Site"], "same-origin");
   mock.calls.length = 0;
 
+  await context.sendToHost(
+    "https://cdn.example.test/fresh-stream.m3u8",
+    { url: "https://player.example.test/watch/1" },
+    "",
+    {},
+    "HLS"
+  );
+  const fallbackContext = mock.nativeMessages.at(-1).downloads[0];
+  assert.equal(fallbackContext.headers.Referer, "https://player.example.test/watch/1");
+  assert.equal(fallbackContext.headers.Origin, "https://player.example.test");
+  mock.calls.length = 0;
+
   mock.api.webRequest.onHeadersReceived.listeners[0]({
     url: "https://example.test/archive.bin",
     responseHeaders: [

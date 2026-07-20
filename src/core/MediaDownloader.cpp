@@ -102,7 +102,13 @@ bool MediaDownloader::declaresUnsupportedDrm(const QByteArray& manifest)
 
 QStringList MediaDownloader::httpInputArguments(const QVariantMap& headers)
 {
-    QStringList arguments;
+    // HLS can otherwise default analyzeduration to zero. That is not enough for
+    // manifests whose first segments contain sparse codec headers or image
+    // metadata before the playable streams.
+    QStringList arguments {
+        QStringLiteral("-analyzeduration"), QStringLiteral("10000000"),
+        QStringLiteral("-probesize"), QStringLiteral("10000000")
+    };
     const auto userAgent = headerValue(headers, u"User-Agent");
     if (!userAgent.isEmpty()) {
         arguments << QStringLiteral("-user_agent") << userAgent;
@@ -318,8 +324,17 @@ void MediaDownloader::finish(const QString& id, bool succeeded, const QString& e
             || diagnostics.contains(QStringLiteral("playready"), Qt::CaseInsensitive)
             || diagnostics.contains(QStringLiteral("fairplay"), Qt::CaseInsensitive)
             || diagnostics.contains(QStringLiteral("DRM"), Qt::CaseInsensitive);
+        const bool accessDenied = diagnostics.contains(QStringLiteral("403 Forbidden"), Qt::CaseInsensitive)
+            || diagnostics.contains(QStringLiteral("HTTP error 401"), Qt::CaseInsensitive);
+        const bool invalidManifestMedia =
+            diagnostics.contains(QStringLiteral("Could not find codec parameters"), Qt::CaseInsensitive)
+            && diagnostics.contains(QStringLiteral("unspecified size"), Qt::CaseInsensitive);
         const auto message = drmDiagnostic
             ? QStringLiteral("The media appears to be DRM-protected. qtIDM does not bypass DRM.")
+            : accessDenied
+            ? QStringLiteral("The media server denied the request. Its signed URL or browser session may have expired; reload playback in the browser, capture the stream again, and retry.")
+            : invalidManifestMedia
+            ? QStringLiteral("The captured manifest did not expose a playable audio/video stream. Reload playback and capture the main stream again; image/preview playlists cannot be muxed as video.")
             : !error.isEmpty() ? error
             : diagnostics.isEmpty() ? QStringLiteral("FFmpeg failed without diagnostic output.")
                                     : QStringLiteral("FFmpeg failed: %1").arg(diagnostics.right(2000));

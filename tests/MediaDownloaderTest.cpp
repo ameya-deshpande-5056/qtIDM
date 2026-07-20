@@ -43,11 +43,17 @@ private slots:
         const auto userAgent = arguments.indexOf(QStringLiteral("-user_agent"));
         const auto referer = arguments.indexOf(QStringLiteral("-referer"));
         const auto customHeaders = arguments.indexOf(QStringLiteral("-headers"));
+        const auto analyzeDuration = arguments.indexOf(QStringLiteral("-analyzeduration"));
+        const auto probeSize = arguments.indexOf(QStringLiteral("-probesize"));
         QVERIFY(userAgent >= 0);
         QVERIFY(referer >= 0);
         QVERIFY(customHeaders >= 0);
+        QVERIFY(analyzeDuration >= 0);
+        QVERIFY(probeSize >= 0);
         QCOMPARE(arguments.at(userAgent + 1), QStringLiteral("Mozilla/5.0 qtIDM-test"));
         QCOMPARE(arguments.at(referer + 1), QStringLiteral("https://embed.example.test/player"));
+        QCOMPARE(arguments.at(analyzeDuration + 1), QStringLiteral("10000000"));
+        QCOMPARE(arguments.at(probeSize + 1), QStringLiteral("10000000"));
         const auto headerText = arguments.at(customHeaders + 1);
         QVERIFY(headerText.contains(QStringLiteral("Cookie: session=browser-cookie\r\n")));
         QVERIFY(headerText.contains(QStringLiteral("Origin: https://embed.example.test\r\n")));
