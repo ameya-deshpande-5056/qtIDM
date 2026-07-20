@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.3
+
+- Improved protected HLS/DASH downloads by restoring a missing browser `Origin` header and giving FFmpeg additional time and data to detect sparse codec metadata.
+- Replaced raw FFmpeg failures for expired or denied media sessions and image/preview manifests with concise recovery guidance.
+- Updated the release workflow to Node.js 24-compatible major versions of the checkout, Node setup, artifact upload, and GitHub release actions.
+- Fixed unknown-length downloads growing beyond their real size after a connection drop by resuming with validated open-ended HTTP Range requests instead of appending a restarted response.
+- Improved remote-size detection by falling back from HEAD to a one-byte Range probe, reading totals from `Content-Range`, and adopting metadata from the actual download response.
+- Hardened resumed downloads with exact segment and final-file size validation, per-range write bounds, preserved unknown-length partial files, and persisted ETag/Last-Modified source checks.
+- Added regression coverage for missing or rejected HEAD metadata, unknown-length automatic and manual resume, ignored Range requests, changed remote entities, and committed-byte session accounting.
+
 ## 0.2.2
 
 - Changed new download queues to allow unlimited concurrent downloads by default, while retaining optional per-queue limits from 1 to 64 and preserving existing saved limits.
