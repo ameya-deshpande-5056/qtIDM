@@ -210,6 +210,15 @@ function setHeaderDefault(headers, name, value) {
   if (value && !hasHeader(headers, name)) headers[name] = value;
 }
 
+function httpOrigin(value) {
+  try {
+    const parsed = new URL(value);
+    return /^https?:$/.test(parsed.protocol) ? parsed.origin : "";
+  } catch (_) {
+    return "";
+  }
+}
+
 function leafFilename(value) {
   const normalized = String(value || "").replace(/\0/g, "").trim();
   if (!normalized) return "";
@@ -372,8 +381,12 @@ async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, 
   const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
   const request = recentRequestInfo(url);
   const headers = { ...request.headers, ...capturedHeaders };
+  const pageReferrer = referrer || (tab && tab.url ? tab.url : "");
   setHeaderDefault(headers, "Cookie", cookieHeader);
-  setHeaderDefault(headers, "Referer", referrer || (tab && tab.url ? tab.url : ""));
+  setHeaderDefault(headers, "Referer", pageReferrer);
+  if (mediaTypeHint === "HLS" || mediaTypeHint === "DASH") {
+    setHeaderDefault(headers, "Origin", httpOrigin(pageReferrer));
+  }
   setHeaderDefault(headers, "User-Agent", navigator.userAgent);
   if (mediaTypeHint === "HLS" || mediaTypeHint === "DASH") headers._qtidmMediaType = mediaTypeHint;
   return { url, headers, method: method === "POST" || request.method === "POST" ? "POST" : "", body: body ? textToBase64(body) : (request.bodyBase64 || textToBase64(request.body)), suggestedFilename: leafFilename(suggestedFilename) };

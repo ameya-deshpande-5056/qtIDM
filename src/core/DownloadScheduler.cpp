@@ -87,6 +87,8 @@ DownloadScheduler::DownloadScheduler(CurlEpollDownloader& downloader, QObject* p
                 auto it = activeRequests_.find(record.id);
                 if (it != activeRequests_.end()) {
                     it->targetPath = record.targetPath;
+                    it->entityTag = record.request.entityTag;
+                    it->lastModified = record.request.lastModified;
                 }
             });
     connect(&downloader_, &CurlEpollDownloader::segmentsChanged, this,
@@ -102,6 +104,17 @@ DownloadScheduler::DownloadScheduler(CurlEpollDownloader& downloader, QObject* p
             auto it = activeRequests_.find(id);
             if (it != activeRequests_.end() && total >= 0) {
                 it->expectedTotalBytes = total;
+            }
+        });
+    connect(&downloader_, &CurlEpollDownloader::metadataChanged, this,
+        [this](const QString& id, qint64 total, const QString& entityTag, const QString& lastModified) {
+            auto it = activeRequests_.find(id);
+            if (it != activeRequests_.end()) {
+                if (total >= 0) {
+                    it->expectedTotalBytes = total;
+                }
+                it->entityTag = entityTag;
+                it->lastModified = lastModified;
             }
         });
     connect(&archiveExtractor_, &ArchiveExtractor::extractionFailed,

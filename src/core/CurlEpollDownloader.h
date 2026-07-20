@@ -36,6 +36,7 @@ signals:
     void downloadAdded(qtidm::DownloadRecord record);
     void progressChanged(QString id, qint64 received, qint64 total, double bytesPerSecond);
     void segmentsChanged(QString id, QVector<qtidm::SegmentInfo> segments);
+    void metadataChanged(QString id, qint64 total, QString entityTag, QString lastModified);
     void statusChanged(QString id, qtidm::DownloadStatus status, QString message);
     void hostConnectionCountChanged(QString host, int activeConnections);
 
@@ -65,7 +66,8 @@ private:
     int activeConnectionsForHost(const QString& host) const;
     void updateSocket(curl_socket_t socket, int action);
     void removeSocket(curl_socket_t socket);
-    qint64 probeSize(const DownloadRequest& request, bool* rangeSupported);
+    qint64 probeSize(const DownloadRequest& request, bool* rangeSupported,
+                     QString* entityTag, QString* lastModified);
     void applyControlRequests();
     void checkCompleted();
     void retryTransfer(std::unique_ptr<SegmentTransfer> transfer, long responseCode, CURLcode result);

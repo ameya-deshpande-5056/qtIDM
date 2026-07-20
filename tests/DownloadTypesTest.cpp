@@ -64,6 +64,8 @@ private slots:
         request.speedLimitBytesPerSecond = 4096;
         request.sessionDataLimitBytes = 1024 * 1024;
         request.expectedTotalBytes = 123456;
+        request.entityTag = QStringLiteral("\"fixture-etag\"");
+        request.lastModified = QStringLiteral("Sun, 20 Jul 2026 12:00:00 GMT");
 
         request.url = QUrl(QStringLiteral(
             "https://example.com/file.bin?"
@@ -113,6 +115,8 @@ private slots:
         QCOMPARE(copy.speedLimitBytesPerSecond, qint64(4096));
         QCOMPARE(copy.sessionDataLimitBytes, qint64(1024 * 1024));
         QCOMPARE(copy.expectedTotalBytes, qint64(123456));
+        QCOMPARE(copy.entityTag, QStringLiteral("\"fixture-etag\""));
+        QCOMPARE(copy.lastModified, QStringLiteral("Sun, 20 Jul 2026 12:00:00 GMT"));
     }
 
     void vaultBackedPasswordIsNotSerialized()
