@@ -56,7 +56,7 @@ private slots:
             QStringLiteral("queue"), QStringLiteral("import"), QStringLiteral("export"),
             QStringLiteral("links"), QStringLiteral("grabber"), QStringLiteral("social"),
             QStringLiteral("zip"), QStringLiteral("options"), QStringLiteral("about"),
-            QStringLiteral("speed-limit")
+            QStringLiteral("speed-limit"), QStringLiteral("speed-limit-active")
         };
         for (const auto& name : names) {
             const auto sourcePath = QStringLiteral("assets/icons/actions/%1.svg").arg(name);

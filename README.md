@@ -42,7 +42,7 @@ or material distributed under compatible open-source licences.
 
 ### Queues And Scheduling
 
-- Persistent named queues with independent concurrency limits.
+- Persistent named queues, unlimited by default, with optional independent concurrency limits.
 - Pause and resume dispatch for each queue without interrupting active downloads.
 - Editable, removable, and reorderable pending entries with stable schedule IDs.
 - Per-download start times, allowed weekdays, daily time windows, priorities, and repeat intervals.

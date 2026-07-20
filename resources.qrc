@@ -17,5 +17,6 @@
     <file alias="icons/actions/options.png">assets/icons/actions/png/options.png</file>
     <file alias="icons/actions/about.png">assets/icons/actions/png/about.png</file>
     <file alias="icons/actions/speed-limit.png">assets/icons/actions/png/speed-limit.png</file>
+    <file alias="icons/actions/speed-limit-active.png">assets/icons/actions/png/speed-limit-active.png</file>
   </qresource>
 </RCC>

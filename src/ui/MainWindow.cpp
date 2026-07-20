@@ -1558,7 +1558,8 @@ void MainWindow::showQueue()
     }
     queue->addItems(names);
     auto* concurrency = new QSpinBox;
-    concurrency->setRange(1, 64);
+    concurrency->setRange(0, 64);
+    concurrency->setSpecialValueText(QStringLiteral("Unlimited"));
     auto* enabled = new QCheckBox(QStringLiteral("Dispatch downloads from this queue"));
     form->addRow(QStringLiteral("Queue:"), queue);
     form->addRow(QStringLiteral("Concurrent downloads:"), concurrency);
@@ -1704,7 +1705,8 @@ void MainWindow::showOptions()
     });
     defaultConflictPolicy->setCurrentIndex(qBound(0, settings.value(QStringLiteral("downloads/defaultConflictPolicy"), 0).toInt(), 2));
     auto* concurrentDownloads = new QSpinBox;
-    concurrentDownloads->setRange(1, 64);
+    concurrentDownloads->setRange(0, 64);
+    concurrentDownloads->setSpecialValueText(QStringLiteral("Unlimited"));
     concurrentDownloads->setValue(scheduler_.queueConcurrency(QStringLiteral("Main")));
     auto* retryCount = new QSpinBox;
     retryCount->setRange(0, 999);
@@ -1824,24 +1826,38 @@ void MainWindow::showAbout()
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("About qtIDM"));
     auto* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(24, 24, 24, 18);
+    layout->setSpacing(20);
 
+    auto* content = new QHBoxLayout;
+    content->setSpacing(28);
     auto* logo = new QLabel;
-    logo->setAlignment(Qt::AlignCenter);
-    logo->setPixmap(QApplication::windowIcon().pixmap(96, 96));
+    logo->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
+    logo->setPixmap(QApplication::windowIcon().pixmap(112, 112));
+    logo->setFixedSize(112, 112);
     logo->setAccessibleName(QStringLiteral("qtIDM logo"));
-    layout->addWidget(logo);
+    content->addWidget(logo, 0, Qt::AlignTop);
 
-    auto* title = new QLabel(QStringLiteral("<h2>qtIDM %1</h2>").arg(
-        QCoreApplication::applicationVersion().toHtmlEscaped()));
-    title->setTextFormat(Qt::RichText);
-    layout->addWidget(title);
+    auto* text = new QVBoxLayout;
+    text->setSpacing(7);
+    auto* title = new QLabel(QStringLiteral("qtIDM %1").arg(
+        QCoreApplication::applicationVersion()));
+    auto titleFont = title->font();
+    titleFont.setBold(true);
+    titleFont.setPointSize(titleFont.pointSize() + 4);
+    title->setFont(titleFont);
+    text->addWidget(title);
 
     auto* description = new QLabel(
         QStringLiteral("A Linux-native Qt download manager."));
     description->setWordWrap(true);
-    layout->addWidget(description);
+    text->addWidget(description);
 
     auto* details = new QFormLayout;
+    details->setContentsMargins(0, 5, 0, 0);
+    details->setHorizontalSpacing(14);
+    details->setVerticalSpacing(7);
+    details->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     details->addRow(QStringLiteral("Version:"),
                     new QLabel(QCoreApplication::applicationVersion()));
     details->addRow(QStringLiteral("Build time:"),
@@ -1854,12 +1870,15 @@ void MainWindow::showAbout()
     projectLink->setTextInteractionFlags(Qt::TextBrowserInteraction);
     projectLink->setOpenExternalLinks(true);
     details->addRow(QStringLiteral("Project:"), projectLink);
-    layout->addLayout(details);
+    text->addLayout(details);
+    text->addStretch();
+    content->addLayout(text, 1);
+    layout->addLayout(content);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     layout->addWidget(buttons);
-    dialog.setMinimumWidth(480);
+    dialog.setMinimumWidth(600);
     dialog.exec();
 }
 
@@ -2523,6 +2542,8 @@ void MainWindow::setAlternateSpeedLimit(bool enabled, qint64 bytesPerSecond)
     settings.setValue(QStringLiteral("downloads/alternateSpeedLimitEnabled"), enabled);
     settings.setValue(QStringLiteral("downloads/alternateSpeedLimitKib"), limit / 1024);
     if (alternateLimitButton_) {
+        alternateLimitButton_->setIcon(staticActionIcon(
+            enabled ? QStringLiteral("speed-limit-active") : QStringLiteral("speed-limit")));
         alternateLimitButton_->setText(enabled
             ? QStringLiteral("Limit: %1/s").arg(formatBytes(limit))
             : QStringLiteral("Limit: Off"));

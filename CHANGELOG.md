@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Changed new download queues to allow unlimited concurrent downloads by default, while retaining optional per-queue limits from 1 to 64 and preserving existing saved limits.
+- Redesigned the alternate speed-limit control with larger, centered speedometer icons and distinct needle directions for inactive and active states.
+- Reworked the About dialog into a balanced two-column layout with the branding icon on the left and application details on the right.
+
 ## 0.2.1
 
 - Replaced runtime SVG toolbar and application icons with embedded PNG assets so icons render consistently even when a Linux Qt package omits the SVG image plugin.

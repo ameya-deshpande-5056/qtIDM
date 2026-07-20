@@ -151,7 +151,7 @@ bool DownloadScheduler::load()
                 continue;
             }
             const auto config = it.value().toObject();
-            concurrency_.insert(key, qBound(1, config.value(QStringLiteral("concurrency")).toInt(3), 64));
+            concurrency_.insert(key, qBound(0, config.value(QStringLiteral("concurrency")).toInt(0), 64));
             enabled_.insert(key, config.value(QStringLiteral("enabled")).toBool(true));
             queueDisplayNames_.insert(key, config.value(QStringLiteral("name")).toString(it.key()));
         }
@@ -190,7 +190,7 @@ bool DownloadScheduler::save() const
     for (const auto& key : keys) {
         queues.insert(key, QJsonObject {
             { QStringLiteral("name"), queueDisplayNames_.value(key, key) },
-            { QStringLiteral("concurrency"), concurrency_.value(key, 3) },
+            { QStringLiteral("concurrency"), concurrency_.value(key, 0) },
             { QStringLiteral("enabled"), enabled_.value(key, true) }
         });
     }
@@ -313,7 +313,7 @@ void DownloadScheduler::setQueueConcurrency(const QString& queueName, int maximu
     const auto normalized = queueName.trimmed().isEmpty() ? QStringLiteral("Main") : queueName.trimmed();
     const auto key = normalized.toLower();
     queueDisplayNames_.insert(key, normalized);
-    concurrency_.insert(key, qBound(1, maximum, 64));
+    concurrency_.insert(key, qBound(0, maximum, 64));
     save();
     emit queueChanged();
     dispatchDue();
@@ -321,7 +321,7 @@ void DownloadScheduler::setQueueConcurrency(const QString& queueName, int maximu
 
 int DownloadScheduler::queueConcurrency(const QString& queueName) const
 {
-    return concurrency_.value(queueName.trimmed().toLower(), 3);
+    return concurrency_.value(queueName.trimmed().toLower(), 0);
 }
 
 void DownloadScheduler::setQueueEnabled(const QString& queueName, bool enabled)
@@ -449,7 +449,8 @@ void DownloadScheduler::dispatchDue()
         if (!isQueueEnabled(queueKey)) {
             continue;
         }
-        if (activeByQueue_.value(queueKey, 0) >= queueConcurrency(queueKey)) {
+        const int concurrency = queueConcurrency(queueKey);
+        if (concurrency > 0 && activeByQueue_.value(queueKey, 0) >= concurrency) {
             continue;
         }
         auto request = queue_[index];

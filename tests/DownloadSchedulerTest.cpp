@@ -49,10 +49,30 @@ private slots:
     {
         qtidm::CurlEpollDownloader downloader;
         qtidm::DownloadScheduler scheduler(downloader);
-        QCOMPARE(scheduler.queueConcurrency(QStringLiteral("Main")), 3);
+        QCOMPARE(scheduler.queueConcurrency(QStringLiteral("Main")), 0);
         scheduler.setQueueConcurrency(QStringLiteral("Night"), 1);
         QCOMPARE(scheduler.queueConcurrency(QStringLiteral("night")), 1);
+        scheduler.setQueueConcurrency(QStringLiteral("Night"), 0);
+        QCOMPARE(scheduler.queueConcurrency(QStringLiteral("night")), 0);
         QCOMPARE(scheduler.activeCount(QStringLiteral("Night")), 0);
+    }
+
+    void dispatchesAllDueDownloadsWhenConcurrencyIsUnlimited()
+    {
+        qtidm::CurlEpollDownloader downloader;
+        qtidm::DownloadScheduler scheduler(downloader);
+        QSignalSpy dispatched(&scheduler, &qtidm::DownloadScheduler::downloadDispatched);
+
+        for (int index = 0; index < 5; ++index) {
+            qtidm::DownloadRequest request;
+            request.url = QUrl(QStringLiteral("https://example.com/file-%1.bin").arg(index));
+            request.targetPath = QStringLiteral("/tmp/file-%1.bin").arg(index);
+            scheduler.schedule(request);
+        }
+
+        QCOMPARE(dispatched.size(), 5);
+        QCOMPARE(scheduler.activeCount(QStringLiteral("Main")), 5);
+        QVERIFY(scheduler.queued().isEmpty());
     }
 
     void persistsQueueControlsAndPausesDispatch()
