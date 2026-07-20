@@ -50,14 +50,19 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
 <script>
 document.cookie = "qtidm_e2e=cookie; SameSite=Lax; path=/";
 window.addEventListener("load", () => {
-  setTimeout(() => {
+  const trigger = () => {
     const link = document.createElement("a");
     link.href = "/download.bin?from=e2e";
     link.download = "qtidm-e2e.bin";
     document.body.appendChild(link);
     link.click();
     link.remove();
-  }, 1500);
+  };
+  // web-ext opens the start page before the temporary Firefox add-on has
+  // necessarily finished installing. Retry so the extension observes a
+  // download even when its background listener misses the first attempt.
+  setTimeout(trigger, 1500);
+  setInterval(trigger, 4000);
 });
 </script>
 <body>qtIDM extension end-to-end fixture</body>
