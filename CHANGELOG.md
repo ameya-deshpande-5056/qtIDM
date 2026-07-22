@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.4
+
+- Ported the application to Windows. The download engine now uses a unified
+  libcurl polling loop (`curl_multi_perform` + `curl_multi_poll`) instead of
+  Linux `epoll`, making it cross-platform without code duplication.
+- Windows-specific file I/O: replaced `mmap`/`pwrite`/`ftruncate`/`fsync` with
+  `MapViewOfFile`/`WriteFile`/`_chsize_s`/`FlushFileBuffers` respectively.
+- Windows single-instance enforcement via `QLockFile` instead of D-Bus.
+- Windows native messaging host IPC via `QLocalServer`/`QLocalSocket` named
+  pipes instead of D-Bus.
+- Windows theme detection via Windows Registry (`AppsUseLightTheme`) instead of
+  the freedesktop portal and desktop-environment config files.
+- Windows metered-network detection via PowerShell `Get-NetConnectionProfile`
+  instead of NetworkManager D-Bus queries.
+- CMake build system: optional Qt6::DBus on Windows, MSVC-compatible compiler
+  flags, `ws2_32` linkage, and Linux-specific packaging/install targets guarded
+  with `if(NOT WIN32)`.
+- No administrator privileges are required to build or run on Windows.
+
 ## 0.2.3
 
 - Improved protected HLS/DASH downloads by restoring a missing browser `Origin` header and giving FFmpeg additional time and data to detect sparse codec metadata.

@@ -9,9 +9,6 @@
 #include <QStorageInfo>
 #include <QUrl>
 #include <curl/curl.h>
-#include <sys/epoll.h>
-#include <sys/eventfd.h>
-#include <unistd.h>
 #include <algorithm>
 #include <utility>
 
@@ -73,18 +70,6 @@ QString makeId(const QUrl& url, const QString& target)
 {
     const auto seed = url.toString() + QLatin1Char('|') + target + QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
     return QString::fromLatin1(QCryptographicHash::hash(seed.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));
-}
-
-int epollEventsFromCurl(int action)
-{
-    int events = 0;
-    if (action & CURL_POLL_IN) {
-        events |= EPOLLIN;
-    }
-    if (action & CURL_POLL_OUT) {
-        events |= EPOLLOUT;
-    }
-    return events;
 }
 
 qint64 batchReceived(const CurlEpollDownloader::DownloadBatch& batch)
@@ -408,23 +393,6 @@ void CurlEpollDownloader::resetSessionBytesReceived()
     sessionBytesReceived_.store(0);
 }
 
-int CurlEpollDownloader::socketCallback(CURL*, curl_socket_t socket, int what, void* userp, void*)
-{
-    auto* self = static_cast<CurlEpollDownloader*>(userp);
-    if (what == CURL_POLL_REMOVE) {
-        self->removeSocket(socket);
-    } else {
-        self->updateSocket(socket, what);
-    }
-    return 0;
-}
-
-int CurlEpollDownloader::timerCallback(CURLM*, long, void* userp)
-{
-    static_cast<CurlEpollDownloader*>(userp)->wake();
-    return 0;
-}
-
 size_t CurlEpollDownloader::writeCallback(char* ptr, size_t size, size_t nmemb, void* userdata)
 {
     const auto bytes = static_cast<qint64>(size * nmemb);
@@ -523,18 +491,7 @@ void CurlEpollDownloader::run()
 {
     curl_global_init(CURL_GLOBAL_DEFAULT);
     multi_ = curl_multi_init();
-    epollFd_ = epoll_create1(EPOLL_CLOEXEC);
-    wakeFd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-
-    curl_multi_setopt(multi_, CURLMOPT_SOCKETFUNCTION, &CurlEpollDownloader::socketCallback);
-    curl_multi_setopt(multi_, CURLMOPT_SOCKETDATA, this);
-    curl_multi_setopt(multi_, CURLMOPT_TIMERFUNCTION, &CurlEpollDownloader::timerCallback);
-    curl_multi_setopt(multi_, CURLMOPT_TIMERDATA, this);
-
-    epoll_event wakeEvent {};
-    wakeEvent.events = EPOLLIN;
-    wakeEvent.data.fd = wakeFd_;
-    epoll_ctl(epollFd_, EPOLL_CTL_ADD, wakeFd_, &wakeEvent);
+    curl_multi_setopt(multi_, CURLMOPT_PIPELINING, CURLPIPE_NOTHING);
 
     int active = 0;
     while (running_) {
@@ -542,32 +499,23 @@ void CurlEpollDownloader::run()
         addDueRetries();
         applyRateLimits();
         applyControlRequests();
-        epoll_event events[64] {};
-        const int count = epoll_wait(epollFd_, events, 64, 1000);
-        if (count == 0) {
-            curl_multi_socket_action(multi_, CURL_SOCKET_TIMEOUT, 0, &active);
-            checkCompleted();
-            applyControlRequests();
-            continue;
+
+        // Perform I/O with libcurl — processes any ready transfers
+        while (curl_multi_perform(multi_, &active) == CURLM_CALL_MULTI_PERFORM) {
         }
-        for (int i = 0; i < count; ++i) {
-            if (events[i].data.fd == wakeFd_) {
-                eventfd_t value = 0;
-                eventfd_read(wakeFd_, &value);
-                curl_multi_socket_action(multi_, CURL_SOCKET_TIMEOUT, 0, &active);
-            } else {
-                int action = 0;
-                if (events[i].events & EPOLLIN) action |= CURL_CSELECT_IN;
-                if (events[i].events & EPOLLOUT) action |= CURL_CSELECT_OUT;
-                if (events[i].events & EPOLLERR) action |= CURL_CSELECT_ERR;
-                curl_multi_socket_action(multi_, events[i].data.fd, action, &active);
-            }
-            checkCompleted();
-            applyControlRequests();
-        }
+
+        checkCompleted();
+        applyControlRequests();
+
+        // Wait for activity or timeout — curl_multi_poll is available since 7.66.0.
+        // It supports curl_multi_wakeup() for immediate unblock on control requests.
+        // Using a 250ms timeout ensures timely processing even without wakeup support.
+        const int numFds = 0;
+        curl_multi_poll(multi_, nullptr, numFds, 250, nullptr);
     }
 
     for (const auto& [easy, transfer] : transfers_) {
+        Q_UNUSED(transfer);
         curl_multi_remove_handle(multi_, easy);
         curl_easy_cleanup(easy);
     }
@@ -576,9 +524,17 @@ void CurlEpollDownloader::run()
     retries_.clear();
     curl_multi_cleanup(multi_);
     multi_ = nullptr;
-    close(wakeFd_);
-    close(epollFd_);
     curl_global_cleanup();
+}
+
+void CurlEpollDownloader::wake()
+{
+    // curl_multi_wakeup() unblocks curl_multi_poll() if it is currently waiting.
+    // Available since libcurl 7.68.0. If unavailable, the 250ms poll timeout
+    // ensures control requests are processed within a reasonable delay.
+    if (multi_) {
+        curl_multi_wakeup(multi_);
+    }
 }
 
 void CurlEpollDownloader::applyRateLimits()
@@ -621,13 +577,6 @@ void CurlEpollDownloader::addDueRetries()
     }
 }
 
-void CurlEpollDownloader::wake()
-{
-    if (wakeFd_ >= 0) {
-        eventfd_write(wakeFd_, 1);
-    }
-}
-
 void CurlEpollDownloader::addPendingTransfers()
 {
     QQueue<QueuedRequest> local;
@@ -661,8 +610,6 @@ void CurlEpollDownloader::addTransfer(QueuedRequest queued)
     bool rangeSupported = false;
     QString probedEntityTag;
     QString probedLastModified;
-    // Repeating a POST for probing or for independent byte ranges is unsafe:
-    // it can create a second server-side action or return a different export.
     auto total = queued.request.httpMethod == QStringLiteral("POST")
         ? qint64(-1) : probeSize(queued.request, &rangeSupported,
                                 &probedEntityTag, &probedLastModified);
@@ -1071,22 +1018,6 @@ void CurlEpollDownloader::retryTransfer(std::unique_ptr<SegmentTransfer> transfe
         transfer->segmentIndex,
         nextAttempt
     });
-}
-
-void CurlEpollDownloader::updateSocket(curl_socket_t socket, int action)
-{
-    epoll_event event {};
-    event.events = epollEventsFromCurl(action) | EPOLLET;
-    event.data.fd = socket;
-    const bool known = sockets_.contains(socket);
-    epoll_ctl(epollFd_, known ? EPOLL_CTL_MOD : EPOLL_CTL_ADD, socket, &event);
-    sockets_[socket] = event.events;
-}
-
-void CurlEpollDownloader::removeSocket(curl_socket_t socket)
-{
-    epoll_ctl(epollFd_, EPOLL_CTL_DEL, socket, nullptr);
-    sockets_.erase(socket);
 }
 
 qint64 CurlEpollDownloader::probeSize(const DownloadRequest& request, bool* rangeSupported,

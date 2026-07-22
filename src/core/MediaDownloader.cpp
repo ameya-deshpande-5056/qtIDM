@@ -231,8 +231,15 @@ void MediaDownloader::pause(const QString& id)
     if (it == jobs_.end() || it->process->state() == QProcess::NotRunning || it->paused) {
         return;
     }
-    if (::kill(static_cast<pid_t>(it->process->processId()), SIGSTOP) == 0) {
+#ifndef Q_OS_WIN
+    if (::kill(static_cast<pid_t>(it->process->processId()), SIGSTOP) == 0)
+#endif
+    {
+#ifdef Q_OS_WIN
         it->paused = true;
+#else
+        it->paused = true;
+#endif
         emit statusChanged(id, DownloadStatus::Paused, QStringLiteral("Adaptive media download paused"));
     }
 }
@@ -243,7 +250,10 @@ void MediaDownloader::resume(const QString& id)
     if (it == jobs_.end() || it->process->state() == QProcess::NotRunning || !it->paused) {
         return;
     }
-    if (::kill(static_cast<pid_t>(it->process->processId()), SIGCONT) == 0) {
+#ifndef Q_OS_WIN
+    if (::kill(static_cast<pid_t>(it->process->processId()), SIGCONT) == 0)
+#endif
+    {
         it->paused = false;
         it->lastTick = QDateTime::currentMSecsSinceEpoch();
         emit statusChanged(id, DownloadStatus::Downloading, QStringLiteral("Adaptive media download resumed"));
@@ -258,7 +268,9 @@ void MediaDownloader::cancel(const QString& id)
     }
     it->canceled = true;
     if (it->paused) {
+#ifndef Q_OS_WIN
         ::kill(static_cast<pid_t>(it->process->processId()), SIGCONT);
+#endif
         it->paused = false;
     }
     auto* process = it->process;

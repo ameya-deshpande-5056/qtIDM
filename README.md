@@ -4,9 +4,10 @@
 
 # qtIDM
 
-qtIDM is a Linux-native Qt6 Widgets download manager written in C++20. It
+qtIDM is a cross-platform Qt6 Widgets download manager written in C++20. It
 combines segmented HTTP/HTTPS/FTP transfers, persistent queues, adaptive-media
 handling, browser integration, and desktop automation in one application.
+Supports Linux and Windows.
 
 The project is independently developed and accepts only original contributions
 or material distributed under compatible open-source licences.
@@ -15,10 +16,10 @@ or material distributed under compatible open-source licences.
 
 ### Download Engine
 
-- Segmented HTTP, HTTPS, and FTP downloads through the libcurl multi-interface and Linux `epoll`.
+- Segmented HTTP, HTTPS, and FTP downloads through the libcurl multi-interface.
 - Up to 32 simultaneous connections per download with configurable per-host connection limits.
 - Dynamic range planning that keeps connections occupied as queued ranges complete.
-- Sparse `.part` files using `mmap` windows with a `pwrite` fallback.
+- Sparse `.part` files using memory-mapped I/O (`mmap` on Linux, `MapViewOfFile` on Windows) with a seek-write fallback.
 - Atomic promotion from `.part` to the final destination after successful completion.
 - Pause, cancel, and range-based resume with remote-size validation.
 - Exponential retries for temporary transfer failures.
@@ -62,8 +63,8 @@ or material distributed under compatible open-source licences.
 - Classic ZIP and ZIP64 central-directory preview.
 - JSON history import and export.
 - Newline-separated URL list import and export.
-- D-Bus single-instance URL forwarding.
-- Dynamic light/dark theme tracking through the desktop portal with desktop-environment fallbacks.
+- Single-instance URL forwarding (D-Bus on Linux, `QLockFile` on Windows).
+- Dynamic light/dark theme tracking (desktop portal on Linux, Windows Registry on Windows) with palette fallbacks.
 - Persistent diagnostic logging in the Qt application-data directory.
 
 ### Browser Integration
@@ -98,20 +99,38 @@ them when available:
 | `secret-tool` from libsecret | Desktop Secret Service credential storage |
 | `yt-dlp` | Maintained social-site format extraction |
 | Chrome or Chromium | JavaScript-rendered site grabbing and Chrome extension testing |
-| NetworkManager | Automatic metered-network state detection |
+| NetworkManager | Automatic metered-network state detection (Linux); PowerShell `Get-NetConnectionProfile` (Windows) |
 
 Missing optional tools are reported in the relevant dialog and do not prevent
 ordinary HTTP, HTTPS, or FTP downloads.
 
 ## Build
 
-Linux only:
+### Linux
 
 ```bash
 sudo apt-get install -y cmake ninja-build g++ qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
+
+### Windows
+
+Prerequisites (install via vcpkg, MSYS2, or manually):
+
+- Qt 6 (Core, Gui, Widgets — DBus is optional)
+- libcurl
+- SQLite3
+- CMake 3.24+
+- C++20 compiler (MSVC 2022 or MinGW-w64)
+
+```powershell
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+No administrator privileges are required to build or run. The application stores
+configuration and data in `%APPDATA%` and `%LOCALAPPDATA%`.
 
 Install all optional runtime integrations on Ubuntu with:
 
@@ -131,7 +150,11 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DQTIDM_CHROME_EXTENSION
 Start the locally built application:
 
 ```bash
+# Linux
 ./build/qtIDM
+
+# Windows
+.\build\qtIDM.exe
 ```
 
 Common entry points:
@@ -310,11 +333,14 @@ the CMake version are rejected to prevent downgrade releases.
 
 ## GitHub Actions
 
-The repo uses one workflow:
+The repo uses two workflows:
 
 ```text
-.github/workflows/build-release.yml
+.github/workflows/build-release.yml            (Linux)
+.github/workflows/build-release-windows.yml     (Windows)
 ```
+
+### Linux (`.github/workflows/build-release.yml`)
 
 Normal push or pull request:
 
@@ -349,6 +375,29 @@ Version tag push:
 - builds and smoke-tests packages,
 - uploads artifacts,
 - publishes the GitHub Release.
+
+### Windows (`.github/workflows/build-release-windows.yml`)
+
+Normal push or pull request:
+
+- installs vcpkg, Qt 6 (MinGW), and CURL/SQLite3 dependencies,
+- configures CMake with MinGW Makefiles,
+- builds,
+- runs the CTest suite (excluding browser-extension and performance tests).
+
+Manual workflow dispatch:
+
+- runs build and tests,
+- packages a portable `qtIDM-<version>-win64.zip` with required Qt and vcpkg DLLs,
+- uploads workflow artifacts,
+- does not publish a GitHub Release.
+
+Version tag push:
+
+- runs build and tests,
+- packages a portable ZIP with bundled DLLs,
+- uploads artifacts,
+- publishes the ZIP in the GitHub Release alongside the Linux packages.
 
 ## Browser Signing Configuration
 
@@ -458,6 +507,9 @@ The release `.deb` installs the signed files at:
 - Flatpak does not install native messaging manifests into host browser directories; install a host package for browser integration.
 - JavaScript-rendered site grabbing requires an installed Chrome/Chromium-family browser; static grabbing remains available as a fallback.
 - Website-specific extraction and browser interception can be affected by site or browser changes.
+- Windows: native messaging host communicates with the main process via a named pipe (`QLocalServer`/`QLocalSocket`) instead of D-Bus.
+- Windows: metered-network detection uses PowerShell `Get-NetConnectionProfile`; if unavailable the connection is treated as unmetered.
+- Windows: browser extension packaging (CRX/XPI) is not yet automated; use the Linux packaging scripts or manual extension loading.
 
 ## Logs
 
@@ -466,6 +518,8 @@ Application and native-host diagnostics are written to `qtidm.log` below each ex
 ```bash
 find "${XDG_DATA_HOME:-$HOME/.local/share}" -name qtidm.log -print
 ```
+
+On Windows, logs are written to `%LOCALAPPDATA%/qtIDM/qtidm.log`.
 
 Transfer failures are also shown in the download status and recorded with their download ID. Sensitive headers such as cookies should be removed before sharing logs.
 

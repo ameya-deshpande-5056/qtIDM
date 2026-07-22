@@ -20,6 +20,107 @@ permissions:
   contents: write
 
 jobs:
+  build-windows:
+    runs-on: windows-2025
+    env:
+      DEV_CHROME_EXTENSION_ID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      QTIDM_CHROME_EXTENSION_ID: ${{ vars.QTIDM_CHROME_EXTENSION_ID }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Synchronize version from release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: sh packaging/release/sync-tag-version.sh --apply "$GITHUB_REF_NAME"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+
+      - name: Install vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git "$env:RUNNER_TEMP\vcpkg"
+          & "$env:RUNNER_TEMP\vcpkg\bootstrap-vcpkg.bat"
+          echo "VCPKG_ROOT=$env:RUNNER_TEMP\vcpkg" >> $env:GITHUB_ENV
+
+      - name: Install Qt6
+        shell: pwsh
+        run: |
+          pip install aqtinstall
+          aqt install-qt --outputdir "$env:RUNNER_TEMP\Qt" windows desktop 6.8.0 win64_mingw
+          echo "QT_PREFIX=$env:RUNNER_TEMP\Qt\6.8.0\mingw_64" >> $env:GITHUB_ENV
+
+      - name: Install dependencies via vcpkg
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_ROOT\vcpkg" install curl sqlite3 --triplet x64-mingw-dynamic
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          $env:Path = "$env:RUNNER_TEMP\Qt\6.8.0\mingw_64\bin;$env:RUNNER_TEMP\Qt\Tools\mingw1310_64\bin;$env:Path"
+          $chromeId = if ("${{ env.QTIDM_CHROME_EXTENSION_ID }}") { "${{ env.QTIDM_CHROME_EXTENSION_ID }}" } else { "${{ env.DEV_CHROME_EXTENSION_ID }}" }
+          cmake -S . -B build -G "MinGW Makefiles" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_CXX_COMPILER="$env:RUNNER_TEMP\Qt\Tools\mingw1310_64\bin\g++.exe" `
+            -DCMAKE_MAKE_PROGRAM="$env:RUNNER_TEMP\Qt\Tools\mingw1310_64\bin\mingw32-make.exe" `
+            -DCMAKE_PREFIX_PATH="$env:RUNNER_TEMP\Qt\6.8.0\mingw_64" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-mingw-dynamic `
+            -DQTIDM_CHROME_EXTENSION_ID="$chromeId"
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $env:Path = "$env:RUNNER_TEMP\Qt\Tools\mingw1310_64\bin;$env:Path"
+          mingw32-make -C build -j "$(nproc)"
+
+      - name: Test
+        shell: pwsh
+        run: |
+          $env:Path = "$env:RUNNER_TEMP\Qt\Tools\mingw1310_64\bin;$env:RUNNER_TEMP\vcpkg\installed\x64-mingw-dynamic\debug\bin;$env:Path"
+          ctest --test-dir build -E 'extension_e2e|perf' --output-on-failure
+
+      - name: Prepare release metadata
+        id: version
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          VERSION="$(sh packaging/release/version-info.sh)"
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "${GITHUB_REF_NAME:-}" != "v$VERSION" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match CMake version v$VERSION" >&2
+            exit 1
+          fi
+          sh packaging/release/extract-changelog.sh "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Package portable ZIP
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $dist = "dist"
+          New-Item -ItemType Directory -Path $dist -Force | Out-Null
+          $pkg = "qtIDM-$version-win64"
+          New-Item -ItemType Directory -Path "$dist\$pkg" -Force | Out-Null
+          Copy-Item "build\qtIDM.exe" "$dist\$pkg\"
+          Copy-Item "build\qtIDM-native-host.exe" "$dist\$pkg\"
+          $qtBin = "$env:RUNNER_TEMP\Qt\6.8.0\mingw_64\bin"
+          $vcpkgBin = "$env:RUNNER_TEMP\vcpkg\installed\x64-mingw-dynamic\bin"
+          foreach ($dll in @("Qt6Core.dll","Qt6Gui.dll","Qt6Widgets.dll","Qt6Network.dll")) { Copy-Item "$qtBin\$dll" "$dist\$pkg\" }
+          foreach ($dll in @("libcurl.dll","libsqlite3.dll","libz.dll")) { Copy-Item "$vcpkgBin\$dll" "$dist\$pkg\" }
+          New-Item -ItemType Directory -Path "$dist\$pkg\platforms" -Force | Out-Null
+          Copy-Item "$qtBin\..\plugins\platforms\qwindows.dll" "$dist\$pkg\platforms\"
+          Compress-Archive -Path "$dist\$pkg\*" -DestinationPath "$dist\qtIDM-$version-win64.zip" -Force
+
+      - name: Upload workflow artifacts
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v6
+        with:
+          name: qtIDM-${{ steps.version.outputs.version }}-windows-packages
+          path: dist/*.zip
+
   build-release:
     runs-on: ubuntu-24.04
     env:
@@ -238,6 +339,13 @@ jobs:
         with:
           name: qtIDM-${{ steps.version.outputs.version }}-linux-packages
           path: dist/*
+
+      - name: Download Windows artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/download-artifact@v6
+        with:
+          name: qtIDM-${{ steps.version.outputs.version }}-windows-packages
+          path: dist/
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')

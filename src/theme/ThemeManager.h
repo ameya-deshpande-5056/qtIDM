@@ -22,7 +22,9 @@ public:
     static ThemeMode detectSystemTheme();
 
 public slots:
+#ifndef Q_OS_WIN
     void refreshFromPortal();
+#endif
     void refreshFromSystemTheme();
 
 signals:

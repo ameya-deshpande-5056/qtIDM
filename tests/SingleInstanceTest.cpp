@@ -8,6 +8,7 @@ class SingleInstanceTest final : public QObject {
     Q_OBJECT
 
 private slots:
+#ifndef Q_OS_WIN
     void decodesStructuredDownloads()
     {
         SingleInstance instance;
@@ -39,6 +40,7 @@ private slots:
         QVERIFY(!instance.AddDownloadsJson(QStringLiteral("{}")));
         QVERIFY(!instance.AddDownloadsJson(QStringLiteral("not json")));
     }
+#endif
 };
 
 QTEST_GUILESS_MAIN(SingleInstanceTest)

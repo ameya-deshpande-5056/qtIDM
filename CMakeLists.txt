@@ -13,14 +13,23 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-if(NOT UNIX OR APPLE)
-    message(FATAL_ERROR "qtIDM is Linux-only.")
+# Windows is now supported alongside Linux.
+if(NOT UNIX AND NOT WIN32)
+    message(FATAL_ERROR "qtIDM requires Linux or Windows.")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Test)
 find_package(CURL REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
+
+# DBus is optional on Windows, required on other platforms.
+if(WIN32)
+    find_package(Qt6 QUIET COMPONENTS DBus)
+else()
+    find_package(Qt6 REQUIRED COMPONENTS DBus)
+endif()
+
 include(GNUInstallDirs)
 
 set(QTIDM_CHROME_EXTENSION_ID "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" CACHE STRING "Chrome extension ID allowed to use native messaging")
@@ -71,14 +80,24 @@ if(QTIDM_INSTALL_EXTERNAL_CHROME_EXTENSION)
     )
 endif()
 
-add_compile_options(-Wall -Wextra -Wpedantic)
-
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    add_compile_options(-O3 -flto)
-    add_link_options(-flto)
+if(MSVC)
+    add_compile_options(/W4 /utf-8)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS _SCL_SECURE_NO_WARNINGS)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-if(QTIDM_ENABLE_NATIVE_TUNING)
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    if(MSVC)
+        add_compile_options(/O2 /GL)
+        add_link_options(/LTCG)
+    else()
+        add_compile_options(-O3 -flto)
+        add_link_options(-flto)
+    endif()
+endif()
+
+if(QTIDM_ENABLE_NATIVE_TUNING AND NOT MSVC)
     add_compile_options(-march=native)
 endif()
 
@@ -120,11 +139,20 @@ target_link_libraries(qtIDM PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
-    Qt6::DBus
+    Qt6::Network
     CURL::libcurl
     SQLite::SQLite3
     Threads::Threads
 )
+
+if(Qt6DBus_FOUND)
+    target_link_libraries(qtIDM PRIVATE Qt6::DBus)
+    target_compile_definitions(qtIDM PRIVATE QTIDM_HAVE_DBUS)
+endif()
+
+if(WIN32)
+    target_link_libraries(qtIDM PRIVATE ws2_32 dbghelp)
+endif()
 
 add_executable(qtIDM-native-host
     src/integration/NativeMessagingHost.cpp
@@ -133,7 +161,15 @@ add_executable(qtIDM-native-host
 )
 
 target_include_directories(qtIDM-native-host PRIVATE src)
-target_link_libraries(qtIDM-native-host PRIVATE Qt6::Core Qt6::DBus)
+
+if(NOT WIN32)
+    target_link_libraries(qtIDM-native-host PRIVATE Qt6::Core Qt6::DBus)
+else()
+    target_link_libraries(qtIDM-native-host PRIVATE Qt6::Core Qt6::Network dbghelp)
+    if(Qt6DBus_FOUND)
+        target_link_libraries(qtIDM-native-host PRIVATE Qt6::DBus)
+    endif()
+endif()
 
 if(QTIDM_BUILD_TESTS)
 enable_testing()
@@ -165,7 +201,13 @@ add_executable(qtIDM_single_instance_tests
 )
 
 target_include_directories(qtIDM_single_instance_tests PRIVATE src)
-target_link_libraries(qtIDM_single_instance_tests PRIVATE Qt6::Core Qt6::DBus Qt6::Test)
+
+if(NOT WIN32)
+    target_link_libraries(qtIDM_single_instance_tests PRIVATE Qt6::Core Qt6::DBus Qt6::Test)
+else()
+    target_link_libraries(qtIDM_single_instance_tests PRIVATE Qt6::Core Qt6::Test)
+endif()
+
 add_test(NAME qtIDM_single_instance_tests COMMAND qtIDM_single_instance_tests)
 
 add_executable(qtIDM_import_export_tests
@@ -261,7 +303,13 @@ add_executable(qtIDM_metered_network_tests
     src/integration/MeteredNetworkMonitor.cpp
 )
 target_include_directories(qtIDM_metered_network_tests PRIVATE src)
-target_link_libraries(qtIDM_metered_network_tests PRIVATE Qt6::Core Qt6::DBus Qt6::Test)
+
+if(NOT WIN32)
+    target_link_libraries(qtIDM_metered_network_tests PRIVATE Qt6::Core Qt6::DBus Qt6::Test)
+else()
+    target_link_libraries(qtIDM_metered_network_tests PRIVATE Qt6::Core Qt6::Test)
+endif()
+
 add_test(NAME qtIDM_metered_network_tests COMMAND qtIDM_metered_network_tests)
 
 add_executable(qtIDM_social_media_extractor_tests
@@ -293,7 +341,11 @@ add_executable(qtIDM_media_downloader_tests
 )
 
 target_include_directories(qtIDM_media_downloader_tests PRIVATE src)
-target_link_libraries(qtIDM_media_downloader_tests PRIVATE Qt6::Core Qt6::Test)
+if(WIN32)
+    target_link_libraries(qtIDM_media_downloader_tests PRIVATE Qt6::Core Qt6::Test dbghelp)
+else()
+    target_link_libraries(qtIDM_media_downloader_tests PRIVATE Qt6::Core Qt6::Test)
+endif()
 add_test(NAME qtIDM_media_downloader_tests COMMAND qtIDM_media_downloader_tests)
 
 add_executable(qtIDM_performance_smoke_tests
@@ -325,6 +377,7 @@ target_link_libraries(qtIDM_zip_preview_tests PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME qtIDM_zip_preview_tests COMMAND qtIDM_zip_preview_tests)
 endif()
 
+if(NOT WIN32)
 install(TARGETS qtIDM qtIDM-native-host RUNTIME DESTINATION bin)
 install(FILES assets/io.qtidm.Qtidm.desktop DESTINATION share/applications)
 install(FILES assets/io.qtidm.Qtidm.svg DESTINATION share/icons/hicolor/scalable/apps)
@@ -372,4 +425,5 @@ if(QTIDM_INSTALL_EXTERNAL_CHROME_EXTENSION)
         FILES "${CMAKE_BINARY_DIR}/generated/browser/chrome/${QTIDM_CHROME_EXTENSION_ID}.json"
         DESTINATION /opt/google/chrome/extensions
     )
+endif()
 endif()

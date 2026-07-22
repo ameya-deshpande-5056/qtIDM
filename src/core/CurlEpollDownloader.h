@@ -49,8 +49,6 @@ public:
     };
 
 private:
-    static int socketCallback(CURL* easy, curl_socket_t socket, int what, void* userp, void* socketp);
-    static int timerCallback(CURLM* multi, long timeoutMs, void* userp);
     static size_t writeCallback(char* ptr, size_t size, size_t nmemb, void* userdata);
     static int progressCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t, curl_off_t);
 
@@ -64,8 +62,6 @@ private:
     void startQueuedSegments(const std::shared_ptr<DownloadBatch>& batch);
     void refillQueuedSegments();
     int activeConnectionsForHost(const QString& host) const;
-    void updateSocket(curl_socket_t socket, int action);
-    void removeSocket(curl_socket_t socket);
     qint64 probeSize(const DownloadRequest& request, bool* rangeSupported,
                      QString* entityTag, QString* lastModified);
     void applyControlRequests();
@@ -83,10 +79,7 @@ private:
     QMutex controlMutex_;
     QHash<QString, DownloadStatus> controls_;
     CURLM* multi_ = nullptr;
-    int epollFd_ = -1;
-    int wakeFd_ = -1;
     std::unordered_map<CURL*, std::unique_ptr<SegmentTransfer>> transfers_;
-    std::unordered_map<curl_socket_t, int> sockets_;
     QHash<QString, std::shared_ptr<DownloadBatch>> batches_;
     struct DelayedRetry {
         qint64 dueAtMs = 0;

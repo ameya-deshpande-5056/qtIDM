@@ -1,10 +1,6 @@
 #include "theme/ThemeManager.h"
 
 #include <QApplication>
-#include <QDBusConnection>
-#include <QDBusInterface>
-#include <QDBusMessage>
-#include <QDBusReply>
 #include <QEvent>
 #include <QFile>
 #include <QFileInfo>
@@ -16,6 +12,15 @@
 #include <QStandardPaths>
 #include <QTimer>
 #include <QVariant>
+
+#ifndef Q_OS_WIN
+#include <QDBusConnection>
+#include <QDBusInterface>
+#include <QDBusMessage>
+#include <QDBusReply>
+#else
+#include <QSettings>
+#endif
 
 namespace qtidm {
 
@@ -57,6 +62,7 @@ ThemeManager::ThemeManager(QObject* parent)
     qApp->installEventFilter(this);
     setupThemeWatchers();
     mode_ = detectSystemTheme();
+#ifndef Q_OS_WIN
     QDBusConnection::sessionBus().connect(QStringLiteral("org.freedesktop.portal.Desktop"),
                                           QStringLiteral("/org/freedesktop/portal/desktop"),
                                           QStringLiteral("org.freedesktop.portal.Settings"),
@@ -64,6 +70,7 @@ ThemeManager::ThemeManager(QObject* parent)
                                           this,
                                           SLOT(refreshFromPortal()));
     refreshFromPortal();
+#endif
 }
 
 ThemeMode ThemeManager::mode() const
@@ -101,6 +108,7 @@ QString ThemeManager::styleSheet() const
 
 ThemeMode ThemeManager::detectSystemTheme()
 {
+#ifndef Q_OS_WIN
     const auto desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP").toUpper();
     const auto window = QApplication::palette().color(QPalette::Window).lightness();
     const auto text = QApplication::palette().color(QPalette::WindowText).lightness();
@@ -143,6 +151,18 @@ ThemeMode ThemeManager::detectSystemTheme()
     }
 
     return paletteMode;
+#else
+    // Windows: read the personalization registry key.
+    // HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize
+    // AppsUseLightTheme: 0 = dark, 1 = light
+    QSettings reg(QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+                  QSettings::NativeFormat);
+    const auto appsUseLight = reg.value(QStringLiteral("AppsUseLightTheme"), 1).toInt();
+    const auto window = QApplication::palette().color(QPalette::Window).lightness();
+    const auto text = QApplication::palette().color(QPalette::WindowText).lightness();
+    const auto paletteMode = window < text ? ThemeMode::Dark : ThemeMode::Light;
+    return appsUseLight == 0 ? ThemeMode::Dark : paletteMode;
+#endif
 }
 
 bool ThemeManager::eventFilter(QObject* watched, QEvent* event)
@@ -164,6 +184,7 @@ void ThemeManager::setupThemeWatchers()
         watcher_->removePaths(watchedDirectories);
     }
 
+#ifndef Q_OS_WIN
     QStringList paths;
     const auto desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP").toUpper();
     const auto configDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
@@ -210,6 +231,11 @@ void ThemeManager::setupThemeWatchers()
             watcher_->addPath(info.dir().path());
         }
     }
+#else
+    // Windows: no file-based watcher for registry. The palette change event
+    // (ApplicationPaletteChange) is caught by eventFilter above.
+    Q_UNUSED(watcher_);
+#endif
 }
 
 void ThemeManager::scheduleThemeRefresh()
@@ -238,6 +264,7 @@ void ThemeManager::refreshFromSystemTheme()
     refreshTheme();
 }
 
+#ifndef Q_OS_WIN
 void ThemeManager::refreshFromPortal()
 {
     QDBusInterface iface(QStringLiteral("org.freedesktop.portal.Desktop"),
@@ -247,8 +274,6 @@ void ThemeManager::refreshFromPortal()
     const QDBusReply<QVariant> reply = iface.call(QStringLiteral("Read"),
                                                   QStringLiteral("org.freedesktop.appearance"),
                                                   QStringLiteral("color-scheme"));
-    // The portal protocol defines 0 as "no preference", which must not be
-    // treated as a request for a light application theme.
     const auto preference = reply.isValid() ? reply.value().toUInt() : 0;
     const auto next = preference == 1 ? ThemeMode::Dark
         : preference == 2 ? ThemeMode::Light
@@ -259,5 +284,6 @@ void ThemeManager::refreshFromPortal()
     mode_ = next;
     emit themeChanged();
 }
+#endif
 
 }

@@ -1,10 +1,14 @@
 #include "integration/MeteredNetworkMonitor.h"
 
+#ifndef Q_OS_WIN
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QDBusMessage>
 #include <QDBusReply>
 #include <QDBusVariant>
+#else
+#include <QProcess>
+#endif
 
 namespace qtidm {
 
@@ -30,6 +34,7 @@ bool MeteredNetworkMonitor::valueMeansMetered(uint value)
 
 void MeteredNetworkMonitor::refresh()
 {
+#ifndef Q_OS_WIN
     QDBusInterface properties(
         QStringLiteral("org.freedesktop.NetworkManager"),
         QStringLiteral("/org/freedesktop/NetworkManager"),
@@ -51,6 +56,29 @@ void MeteredNetworkMonitor::refresh()
         metered_ = metered;
         emit meteredChanged(metered_);
     }
+#else
+    // Windows: attempt to detect metered network via PowerShell.
+    // Falls back to unmetered if detection fails.
+    QProcess proc;
+    proc.start(QStringLiteral("powershell"),
+               { QStringLiteral("-NoProfile"),
+                 QStringLiteral("-Command"),
+                 QStringLiteral("(Get-NetConnectionProfile | Where-Object { $_.IPv4Connectivity -eq 2 }).Metered") });
+    if (!proc.waitForFinished(2000)) {
+        return;
+    }
+    const auto output = QString::fromUtf8(proc.readAllStandardOutput()).trimmed();
+    bool ok = false;
+    const uint value = output.toUInt(&ok);
+    if (!ok) {
+        return;
+    }
+    const bool metered = valueMeansMetered(value);
+    if (metered_ != metered) {
+        metered_ = metered;
+        emit meteredChanged(metered_);
+    }
+#endif
 }
 
 }
