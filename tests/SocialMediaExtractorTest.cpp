@@ -139,11 +139,17 @@ private slots:
         const auto result = extractor.extract(
             QUrl(QStringLiteral("https://www.bilibili.com/video/BV1qNnY66EUY")), {}, &error);
         QVERIFY2(error.isEmpty(), qPrintable(error));
-        QCOMPARE(result.formats.size(), 2);
-        QCOMPARE(result.formats[0].id, QStringLiteral("30280"));
-        QCOMPARE(result.formats[0].label, QStringLiteral("M4A · audio only"));
-        QCOMPARE(result.formats[1].id, QStringLiteral("30032"));
-        QCOMPARE(result.formats[1].label, QStringLiteral("480p · MP4 · video only"));
+        QCOMPARE(result.formats.size(), 3);
+        QCOMPARE(result.formats[0].id, QStringLiteral("30032+30280"));
+        QCOMPARE(result.formats[0].label, QStringLiteral("480p · MP4 · video + audio"));
+        QVERIFY(result.formats[0].isCombined);
+        QCOMPARE(result.formats[0].audioUrl, QUrl(QStringLiteral("https://cdn.example.test/audio.m4a")));
+        QCOMPARE(result.formats[1].id, QStringLiteral("30280"));
+        QCOMPARE(result.formats[1].label, QStringLiteral("M4A · audio only"));
+        QVERIFY(!result.formats[1].isCombined);
+        QCOMPARE(result.formats[2].id, QStringLiteral("30032"));
+        QCOMPARE(result.formats[2].label, QStringLiteral("480p · MP4 · video only"));
+        QVERIFY(!result.formats[2].isCombined);
     }
 };
 

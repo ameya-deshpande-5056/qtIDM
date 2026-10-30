@@ -27,7 +27,8 @@ public:
     static QStringList httpInputArguments(const QVariantMap& headers);
     static QString suggestedFilename(const QString& name);
     static QString mediaStagingPath(const QString& targetPath);
-    QString enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId = {});
+    QString enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId = {},
+        const QUrl& audioUrl = {}, const QVariantMap& audioHeaders = {});
     bool contains(const QString& id) const;
     void pause(const QString& id);
     void resume(const QString& id);
@@ -42,6 +43,7 @@ private:
     struct Job {
         QProcess* process = nullptr;
         std::shared_ptr<MediaStreamProxy> proxy;
+        std::shared_ptr<MediaStreamProxy> audioProxy;
         QString targetPath;
         QString stagingPath;
         QByteArray diagnostics;

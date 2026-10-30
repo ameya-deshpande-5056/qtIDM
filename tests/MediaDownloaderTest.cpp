@@ -242,6 +242,71 @@ private slots:
         proxy.stop();
         QVERIFY(!proxy.isRunning());
     }
+
+    void muxesSeparateVideoAndAudioStreams()
+    {
+        const auto ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+        if (ffmpeg.isEmpty()) {
+            QSKIP("FFmpeg is not installed");
+        }
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const auto videoFile = dir.path() + QStringLiteral("/video.mp4");
+        const auto audioFile = dir.path() + QStringLiteral("/audio.m4a");
+        const auto outputFile = dir.path() + QStringLiteral("/combined.mp4");
+
+        QProcess vGen;
+        vGen.setProgram(ffmpeg);
+        vGen.setArguments({
+            QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"), QStringLiteral("error"),
+            QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"), QStringLiteral("testsrc=size=64x64:rate=10"),
+            QStringLiteral("-t"), QStringLiteral("1"),
+            QStringLiteral("-c:v"), QStringLiteral("mpeg4"),
+            videoFile
+        });
+        vGen.start();
+        QVERIFY(vGen.waitForFinished(10000));
+        QCOMPARE(vGen.exitCode(), 0);
+
+        QProcess aGen;
+        aGen.setProgram(ffmpeg);
+        aGen.setArguments({
+            QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"), QStringLiteral("error"),
+            QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"), QStringLiteral("sine=frequency=1000:sample_rate=48000"),
+            QStringLiteral("-t"), QStringLiteral("1"),
+            QStringLiteral("-c:a"), QStringLiteral("aac"),
+            audioFile
+        });
+        aGen.start();
+        QVERIFY(aGen.waitForFinished(10000));
+        QCOMPARE(aGen.exitCode(), 0);
+
+        qRegisterMetaType<qtidm::DownloadStatus>("qtidm::DownloadStatus");
+        qtidm::MediaDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::MediaDownloader::statusChanged);
+
+        const auto id = downloader.enqueue(
+            QUrl::fromLocalFile(videoFile), outputFile, {}, {},
+            QUrl::fromLocalFile(audioFile));
+        QVERIFY(!id.isEmpty());
+
+        bool completed = false;
+        for (int i = 0; i < 50; ++i) {
+            for (const auto& event : statusSpy) {
+                if (event.at(0).toString() == id
+                    && event.at(1).value<qtidm::DownloadStatus>() == qtidm::DownloadStatus::Completed) {
+                    completed = true;
+                    break;
+                }
+            }
+            if (completed) break;
+            QTest::qWait(200);
+        }
+        QVERIFY(completed);
+        QVERIFY(QFile::exists(outputFile));
+        QVERIFY(QFileInfo(outputFile).size() > 0);
+    }
 };
 
 QTEST_MAIN(MediaDownloaderTest)

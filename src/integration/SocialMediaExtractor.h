@@ -12,8 +12,11 @@ struct SocialMediaFormat {
     QString label;
     QString extension;
     QUrl url;
+    QUrl audioUrl;
     QVariantMap headers;
+    QVariantMap audioHeaders;
     bool adaptive = false;
+    bool isCombined = false;
 };
 
 struct SocialMediaExtraction {

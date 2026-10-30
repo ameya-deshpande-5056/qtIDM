@@ -154,7 +154,8 @@ bool MediaDownloader::supports(const QUrl& url, const QString& mediaTypeHint)
         }
     }
     const auto normalizedHint = mediaTypeHint.trimmed().toUpper();
-    if (normalizedHint == QStringLiteral("HLS") || normalizedHint == QStringLiteral("DASH")) {
+    if (normalizedHint == QStringLiteral("HLS") || normalizedHint == QStringLiteral("DASH")
+        || normalizedHint == QStringLiteral("COMBINED")) {
         return true;
     }
     const auto value = url.path(QUrl::FullyDecoded).toLower();
@@ -207,7 +208,8 @@ QStringList MediaDownloader::httpInputArguments(const QVariantMap& headers)
     return arguments;
 }
 
-QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId)
+QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId,
+    const QUrl& audioUrl, const QVariantMap& audioHeaders)
 {
     const auto id = existingId.isEmpty() ? makeId(url, targetPath) : existingId;
     DownloadRecord record;
@@ -225,11 +227,20 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
     emit downloadAdded(record);
 
     const auto hint = headers.value(QStringLiteral("_qtidmMediaType")).toString();
-    if (!supports(url, hint)) {
+    const bool isCombined = audioUrl.isValid() || hint.toUpper() == QStringLiteral("COMBINED");
+    if (!isCombined && !supports(url, hint)) {
         const auto message = QStringLiteral("Unsupported, inaccessible, or invalid media URL.");
         emit statusChanged(id, DownloadStatus::Failed, message);
         Logger::error(QStringLiteral("Media download %1").arg(id), message);
         return id;
+    }
+    if (isCombined) {
+        if (!supports(url, QStringLiteral("COMBINED")) || (audioUrl.isValid() && !supports(audioUrl, QStringLiteral("COMBINED")))) {
+            const auto message = QStringLiteral("Unsupported, inaccessible, or invalid media URL.");
+            emit statusChanged(id, DownloadStatus::Failed, message);
+            Logger::error(QStringLiteral("Media download %1").arg(id), message);
+            return id;
+        }
     }
 
     if (url.isLocalFile()) {
@@ -251,9 +262,12 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
         return id;
     }
 
+    const bool isAdaptiveUrl = url.path(QUrl::FullyDecoded).contains(QStringLiteral(".m3u8"), Qt::CaseInsensitive)
+        || url.path(QUrl::FullyDecoded).contains(QStringLiteral(".mpd"), Qt::CaseInsensitive)
+        || hint.toUpper() == QStringLiteral("HLS") || hint.toUpper() == QStringLiteral("DASH");
     std::shared_ptr<MediaStreamProxy> proxy;
     QUrl inputUrl = url;
-    if (url.scheme() == QStringLiteral("http") || url.scheme() == QStringLiteral("https")) {
+    if ((url.scheme() == QStringLiteral("http") || url.scheme() == QStringLiteral("https")) && isAdaptiveUrl) {
         proxy = std::make_shared<MediaStreamProxy>();
         if (!proxy->start(url, headers)) {
             const auto message = QStringLiteral("Could not initialize local HTTP/2 stream proxy.");
@@ -262,6 +276,25 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
             return id;
         }
         inputUrl = proxy->proxyUrl();
+    }
+
+    std::shared_ptr<MediaStreamProxy> audioProxy;
+    QUrl audioInputUrl = audioUrl;
+    if (audioUrl.isValid()) {
+        const auto audioHint = audioHeaders.value(QStringLiteral("_qtidmMediaType")).toString();
+        const bool isAdaptiveAudio = audioUrl.path(QUrl::FullyDecoded).contains(QStringLiteral(".m3u8"), Qt::CaseInsensitive)
+            || audioUrl.path(QUrl::FullyDecoded).contains(QStringLiteral(".mpd"), Qt::CaseInsensitive)
+            || audioHint.toUpper() == QStringLiteral("HLS") || audioHint.toUpper() == QStringLiteral("DASH");
+        if ((audioUrl.scheme() == QStringLiteral("http") || audioUrl.scheme() == QStringLiteral("https")) && isAdaptiveAudio) {
+            audioProxy = std::make_shared<MediaStreamProxy>();
+            if (!audioProxy->start(audioUrl, audioHeaders)) {
+                const auto message = QStringLiteral("Could not initialize local HTTP/2 stream proxy for audio.");
+                emit statusChanged(id, DownloadStatus::Failed, message);
+                Logger::error(QStringLiteral("Media download %1").arg(id), message);
+                return id;
+            }
+            audioInputUrl = audioProxy->proxyUrl();
+        }
     }
 
     auto* process = new QProcess(this);
@@ -281,12 +314,25 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
         QStringLiteral("pipe:1"),
         QStringLiteral("-nostats")
     };
-    const auto whitelist = protocolWhitelist(url);
-    if (!whitelist.isEmpty()) {
-        arguments << QStringLiteral("-protocol_whitelist") << whitelist;
+    QStringList allowedProtocols;
+    const auto wl0 = protocolWhitelist(url);
+    if (!wl0.isEmpty()) {
+        for (const auto& p : wl0.split(QLatin1Char(','))) {
+            if (!allowedProtocols.contains(p)) allowedProtocols.append(p);
+        }
     }
-    arguments << QStringLiteral("-analyzeduration") << QStringLiteral("10000000")
-              << QStringLiteral("-probesize") << QStringLiteral("10000000");
+    if (audioUrl.isValid()) {
+        const auto wl1 = protocolWhitelist(audioUrl);
+        if (!wl1.isEmpty()) {
+            for (const auto& p : wl1.split(QLatin1Char(','))) {
+                if (!allowedProtocols.contains(p)) allowedProtocols.append(p);
+            }
+        }
+    }
+    if (!allowedProtocols.isEmpty()) {
+        arguments << QStringLiteral("-protocol_whitelist") << allowedProtocols.join(QLatin1Char(','));
+    }
+
     if (!proxy) {
         arguments << httpInputArguments(headers);
     }
@@ -297,13 +343,38 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
                   << QStringLiteral("-reconnect_on_http_error") << QStringLiteral("408,429,5xx")
                   << QStringLiteral("-reconnect_delay_max") << QStringLiteral("30");
     }
-    arguments << QStringLiteral("-i") << inputUrl.toString(QUrl::FullyEncoded)
-              << QStringLiteral("-map") << QStringLiteral("0:v?")
-              << QStringLiteral("-map") << QStringLiteral("0:a?")
-              << QStringLiteral("-map") << QStringLiteral("0:s?")
-              << QStringLiteral("-map_metadata") << QStringLiteral("0")
-              << QStringLiteral("-map_chapters") << QStringLiteral("0")
-              << QStringLiteral("-c") << QStringLiteral("copy");
+    arguments << QStringLiteral("-i") << inputUrl.toString(QUrl::FullyEncoded);
+
+    if (audioUrl.isValid()) {
+        if (!audioProxy) {
+            arguments << httpInputArguments(audioHeaders);
+        }
+        if (audioUrl.scheme() == QStringLiteral("http") || audioUrl.scheme() == QStringLiteral("https")) {
+            arguments << QStringLiteral("-reconnect") << QStringLiteral("1")
+                      << QStringLiteral("-reconnect_streamed") << QStringLiteral("1")
+                      << QStringLiteral("-reconnect_on_network_error") << QStringLiteral("1")
+                      << QStringLiteral("-reconnect_on_http_error") << QStringLiteral("408,429,5xx")
+                      << QStringLiteral("-reconnect_delay_max") << QStringLiteral("30");
+        }
+        arguments << QStringLiteral("-i") << audioInputUrl.toString(QUrl::FullyEncoded);
+    }
+
+    if (audioUrl.isValid()) {
+        arguments << QStringLiteral("-map") << QStringLiteral("0:v:0")
+                  << QStringLiteral("-map") << QStringLiteral("1:a:0")
+                  << QStringLiteral("-map_metadata") << QStringLiteral("0")
+                  << QStringLiteral("-map_chapters") << QStringLiteral("0")
+                  << QStringLiteral("-c") << QStringLiteral("copy")
+                  << QStringLiteral("-strict") << QStringLiteral("experimental");
+    } else {
+        arguments << QStringLiteral("-map") << QStringLiteral("0:v?")
+                  << QStringLiteral("-map") << QStringLiteral("0:a?")
+                  << QStringLiteral("-map") << QStringLiteral("0:s?")
+                  << QStringLiteral("-map_metadata") << QStringLiteral("0")
+                  << QStringLiteral("-map_chapters") << QStringLiteral("0")
+                  << QStringLiteral("-c") << QStringLiteral("copy");
+    }
+
     const auto suffix = QFileInfo(targetPath).suffix().toLower();
     if (suffix == QStringLiteral("mp4") || suffix == QStringLiteral("mov")) {
         arguments << QStringLiteral("-movflags") << QStringLiteral("+faststart");
@@ -311,10 +382,12 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
     arguments << stagingPath;
     process->setArguments(arguments);
 
-    jobs_.insert(id, Job { process, proxy, targetPath, stagingPath, {}, 0, QDateTime::currentMSecsSinceEpoch(), false, false });
+    jobs_.insert(id, Job { process, proxy, audioProxy, targetPath, stagingPath, {}, 0, QDateTime::currentMSecsSinceEpoch(), false, false });
 
-    connect(process, &QProcess::started, this, [this, id] {
-        emit statusChanged(id, DownloadStatus::Downloading, QStringLiteral("Downloading and muxing adaptive media"));
+    connect(process, &QProcess::started, this, [this, id, isCombined = audioUrl.isValid()] {
+        emit statusChanged(id, DownloadStatus::Downloading,
+            isCombined ? QStringLiteral("Downloading and muxing video and audio streams")
+                       : QStringLiteral("Downloading and muxing adaptive media"));
     });
     connect(process, &QProcess::readyReadStandardError, this, [this, id] { collectOutput(id); });
     connect(process, &QProcess::readyReadStandardOutput, this, [this, id] { collectOutput(id); });

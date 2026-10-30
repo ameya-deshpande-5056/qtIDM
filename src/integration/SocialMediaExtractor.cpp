@@ -1,5 +1,7 @@
 #include "integration/SocialMediaExtractor.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -68,7 +70,22 @@ SocialMediaExtractor::SocialMediaExtractor(QString executable)
 
 QString SocialMediaExtractor::executable() const
 {
-    return executable_.isEmpty() ? QStandardPaths::findExecutable(QStringLiteral("yt-dlp")) : executable_;
+    if (!executable_.isEmpty()) {
+        return executable_;
+    }
+    const auto standard = QStandardPaths::findExecutable(QStringLiteral("yt-dlp"));
+    if (!standard.isEmpty()) {
+        return standard;
+    }
+    const auto userLocal = QDir::home().filePath(QStringLiteral(".local/bin/yt-dlp"));
+    if (QFileInfo::exists(userLocal)) {
+        return userLocal;
+    }
+    const auto pyenvShim = QDir::home().filePath(QStringLiteral(".pyenv/shims/yt-dlp"));
+    if (QFileInfo::exists(pyenvShim)) {
+        return pyenvShim;
+    }
+    return {};
 }
 
 bool SocialMediaExtractor::isAvailable() const
@@ -170,6 +187,25 @@ SocialMediaExtraction SocialMediaExtractor::extract(
     result.extractor = root.value(QStringLiteral("extractor_key")).toString(
         root.value(QStringLiteral("extractor")).toString());
     const auto baseHeaders = headersFromJson(root.value(QStringLiteral("http_headers")).toObject());
+    struct ParsedFormat {
+        QString id;
+        QString label;
+        QString extension;
+        QUrl url;
+        QVariantMap headers;
+        bool adaptive = false;
+        bool video = false;
+        bool audio = false;
+        int height = 0;
+        int width = 0;
+        double abr = 0.0;
+        double tbr = 0.0;
+        QString vcodec;
+        QString acodec;
+        QString note;
+    };
+
+    QList<ParsedFormat> allParsed;
     QSet<QString> seenUrls;
     const auto formats = root.value(QStringLiteral("formats")).toArray();
     bool rejectedDrmFormat = false;
@@ -181,11 +217,14 @@ SocialMediaExtraction SocialMediaExtractor::extract(
             continue;
         }
         const auto ext = format.value(QStringLiteral("ext")).toString().toLower();
-        const auto note = format.value(QStringLiteral("format_note")).toString().toLower();
-        const bool video = format.value(QStringLiteral("vcodec")).toString(QStringLiteral("none")) != QStringLiteral("none")
-            || format.value(QStringLiteral("height")).toInt() > 0;
-        const bool audio = format.value(QStringLiteral("acodec")).toString(QStringLiteral("none")) != QStringLiteral("none");
-        if ((!video && !audio) || ext == QStringLiteral("mhtml") || note.contains(QStringLiteral("storyboard"))) {
+        const auto note = format.value(QStringLiteral("format_note")).toString().trimmed();
+        const auto noteLower = note.toLower();
+        const auto vcodec = format.value(QStringLiteral("vcodec")).toString(QStringLiteral("none"));
+        const auto acodec = format.value(QStringLiteral("acodec")).toString(QStringLiteral("none"));
+        const int height = format.value(QStringLiteral("height")).toInt();
+        const bool video = (vcodec != QStringLiteral("none")) || (height > 0);
+        const bool audio = (acodec != QStringLiteral("none"));
+        if ((!video && !audio) || ext == QStringLiteral("mhtml") || noteLower.contains(QStringLiteral("storyboard"))) {
             continue;
         }
         const QUrl mediaUrl(format.value(QStringLiteral("url")).toString());
@@ -205,13 +244,157 @@ SocialMediaExtraction SocialMediaExtractor::extract(
             || protocol.contains(QStringLiteral("dash"))
             || mediaAddress.contains(QStringLiteral(".m3u8"))
             || mediaAddress.contains(QStringLiteral(".mpd"));
+
+        ParsedFormat item;
+        item.id = format.value(QStringLiteral("format_id")).toString();
+        item.label = formatLabel(format);
+        item.extension = ext.isEmpty() ? QStringLiteral("mp4") : ext;
+        item.url = mediaUrl;
+        item.headers = headers;
+        item.adaptive = adaptive;
+        item.video = video;
+        item.audio = audio;
+        item.height = height;
+        item.width = format.value(QStringLiteral("width")).toInt();
+        item.abr = format.value(QStringLiteral("abr")).toDouble(0.0);
+        item.tbr = format.value(QStringLiteral("tbr")).toDouble(format.value(QStringLiteral("vbr")).toDouble(0.0));
+        item.vcodec = vcodec;
+        item.acodec = acodec;
+        item.note = note;
+        allParsed.append(std::move(item));
+    }
+
+    QList<ParsedFormat> videoOnly;
+    QList<ParsedFormat> audioOnly;
+    QList<ParsedFormat> preMuxed;
+
+    for (const auto& item : allParsed) {
+        if (item.video && item.audio) {
+            preMuxed.append(item);
+        } else if (item.video) {
+            videoOnly.append(item);
+        } else if (item.audio) {
+            audioOnly.append(item);
+        }
+    }
+
+    std::stable_sort(videoOnly.begin(), videoOnly.end(), [](const ParsedFormat& a, const ParsedFormat& b) {
+        if (a.height != b.height) {
+            return a.height > b.height;
+        }
+        return a.tbr > b.tbr;
+    });
+
+    std::stable_sort(audioOnly.begin(), audioOnly.end(), [](const ParsedFormat& a, const ParsedFormat& b) {
+        if (a.abr != b.abr) {
+            return a.abr > b.abr;
+        }
+        return a.tbr > b.tbr;
+    });
+
+    std::stable_sort(preMuxed.begin(), preMuxed.end(), [](const ParsedFormat& a, const ParsedFormat& b) {
+        if (a.height != b.height) {
+            return a.height > b.height;
+        }
+        return a.tbr > b.tbr;
+    });
+
+    if (!videoOnly.isEmpty() && !audioOnly.isEmpty()) {
+        auto findBestAudio = [&](const ParsedFormat& video) -> ParsedFormat {
+            ParsedFormat best = audioOnly.first();
+            double bestScore = -1.0;
+            for (const auto& audio : audioOnly) {
+                double score = audio.abr > 0 ? audio.abr : (audio.tbr > 0 ? audio.tbr : 1.0);
+                const auto vext = video.extension.toLower();
+                const auto aext = audio.extension.toLower();
+                const auto acodec = audio.acodec.toLower();
+                if (vext == QStringLiteral("mp4")) {
+                    if (aext == QStringLiteral("m4a") || aext == QStringLiteral("mp4")
+                        || acodec.contains(QStringLiteral("aac")) || acodec.contains(QStringLiteral("mp4a"))) {
+                        score += 10000.0;
+                    }
+                } else if (vext == QStringLiteral("webm")) {
+                    if (aext == QStringLiteral("webm") || acodec.contains(QStringLiteral("opus"))
+                        || acodec.contains(QStringLiteral("vorbis"))) {
+                        score += 10000.0;
+                    }
+                }
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = audio;
+                }
+            }
+            return best;
+        };
+
+        for (const auto& video : videoOnly) {
+            const auto bestAudio = findBestAudio(video);
+            SocialMediaFormat combined;
+            combined.id = QStringLiteral("%1+%2").arg(video.id, bestAudio.id);
+
+            QStringList parts;
+            if (!video.note.isEmpty() && !video.note.contains(QStringLiteral("video only"), Qt::CaseInsensitive)) {
+                parts.append(video.note);
+            }
+            if (video.height > 0) {
+                parts.append(QStringLiteral("%1p").arg(video.height));
+            }
+            if (!video.extension.isEmpty()) {
+                parts.append(video.extension.toUpper());
+            }
+            parts.append(QStringLiteral("video + audio"));
+            combined.label = parts.join(QStringLiteral(" · "));
+
+            combined.extension = video.extension;
+            combined.url = video.url;
+            combined.headers = video.headers;
+            combined.audioUrl = bestAudio.url;
+            combined.audioHeaders = bestAudio.headers;
+            combined.adaptive = video.adaptive || bestAudio.adaptive;
+            combined.isCombined = true;
+            result.formats.append(combined);
+        }
+    }
+
+    for (const auto& item : preMuxed) {
         result.formats.append({
-            format.value(QStringLiteral("format_id")).toString(),
-            formatLabel(format),
-            format.value(QStringLiteral("ext")).toString(QStringLiteral("mp4")),
-            mediaUrl,
-            headers,
-            adaptive
+            item.id,
+            item.label,
+            item.extension,
+            item.url,
+            {},
+            item.headers,
+            {},
+            item.adaptive,
+            false
+        });
+    }
+
+    for (const auto& item : audioOnly) {
+        result.formats.append({
+            item.id,
+            item.label,
+            item.extension,
+            item.url,
+            {},
+            item.headers,
+            {},
+            item.adaptive,
+            false
+        });
+    }
+
+    for (const auto& item : videoOnly) {
+        result.formats.append({
+            item.id,
+            item.label,
+            item.extension,
+            item.url,
+            {},
+            item.headers,
+            {},
+            item.adaptive,
+            false
         });
     }
     if (result.formats.isEmpty() && error) {

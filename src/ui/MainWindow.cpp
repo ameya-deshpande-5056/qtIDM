@@ -1649,7 +1649,10 @@ bool MainWindow::extractSocialMediaUrl(const QUrl& initialUrl)
         ? QStringLiteral("Music") : QStringLiteral("Video");
     request.headers = format.headers;
     applyRequestDefaults(request);
-    if (format.adaptive || MediaDownloader::supports(format.url)) {
+    if (format.isCombined) {
+        request.headers.insert(QStringLiteral("_qtidmMediaType"), QStringLiteral("COMBINED"));
+        mediaDownloader_.enqueue(request.url, request.targetPath, request.headers, {}, format.audioUrl, format.audioHeaders);
+    } else if (format.adaptive || MediaDownloader::supports(format.url)) {
         mediaDownloader_.enqueue(request.url, request.targetPath, request.headers);
     } else {
         scheduler_.schedule(std::move(request));
