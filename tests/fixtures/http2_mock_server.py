@@ -37,15 +37,35 @@ class MockServer:
         self.streams_served = []
         self.lock = threading.Lock()
         self.running = True
+        self.ssl_ctx = None
+        if self.mode == "https_alpn":
+            import os
+            import subprocess
+            import ssl
+            import tempfile
+            self._tmpdir = tempfile.TemporaryDirectory()
+            self.cert_file = os.path.join(self._tmpdir.name, "cert.pem")
+            self.key_file = os.path.join(self._tmpdir.name, "key.pem")
+            subprocess.run([
+                "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                "-keyout", self.key_file, "-out", self.cert_file, "-days", "1",
+                "-subj", "/CN=127.0.0.1"
+            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            self.ssl_ctx.load_cert_chain(self.cert_file, self.key_file)
+            self.ssl_ctx.set_alpn_protocols(["h2", "http/1.1"])
 
-    def save_stats(self):
+    def save_stats(self, extra=None):
         if self.stats_file:
+            data = {
+                "connections": self.connections,
+                "streams": self.streams_served,
+                "attempts": self.attempts
+            }
+            if extra:
+                data.update(extra)
             with open(self.stats_file, "w") as f:
-                json.dump({
-                    "connections": self.connections,
-                    "streams": self.streams_served,
-                    "attempts": self.attempts
-                }, f)
+                json.dump(data, f)
 
     def run(self):
         while self.running:
@@ -65,6 +85,81 @@ class MockServer:
 
     def handle_client(self, conn, attempt):
         try:
+            if self.mode == "https_alpn":
+                tls_conn = self.ssl_ctx.wrap_socket(conn, server_side=True)
+                proto = tls_conn.selected_alpn_protocol()
+                with self.lock:
+                    self.connections += 1
+
+                conn_streams = []
+                # Server sends initial SETTINGS frame
+                tls_conn.sendall(make_frame(0, 4, 0, 0, b""))
+                buf = bytearray()
+                preface_consumed = False
+                tls_conn.settimeout(6.0)
+                while self.running:
+                    try:
+                        chunk = tls_conn.recv(4096)
+                    except Exception:
+                        break
+                    if not chunk:
+                        break
+                    buf.extend(chunk)
+
+                    if not preface_consumed:
+                        if len(buf) >= len(PREFACE):
+                            if buf.startswith(PREFACE):
+                                buf = buf[len(PREFACE):]
+                                preface_consumed = True
+                            else:
+                                break
+                        else:
+                            continue
+
+                    while len(buf) >= 9:
+                        length = (buf[0] << 16) | (buf[1] << 8) | buf[2]
+                        ftype = buf[3]
+                        flags = buf[4]
+                        stream_id = struct.unpack(">I", buf[5:9])[0] & 0x7FFFFFFF
+                        if len(buf) < 9 + length:
+                            break
+                        payload = buf[9:9 + length]
+                        buf = buf[9 + length:]
+
+                        if ftype == 4 and (flags & 0x01) == 0:
+                            # Client SETTINGS -> send SETTINGS ACK
+                            tls_conn.sendall(make_frame(0, 4, 1, 0, b""))
+                            with self.lock:
+                                conn_streams.append(1)
+                                self.streams_served.append(1)
+                                self.save_stats({
+                                    "alpn": proto,
+                                    "max_streams_on_single_connection": len(conn_streams),
+                                    "multiplexed_stream_ids": conn_streams
+                                })
+                            h1 = make_frame(1, 1, 4, 1, b"\x88")
+                            d1 = make_frame(len(TEST_PAYLOAD), 0, 1, 1, TEST_PAYLOAD)
+                            tls_conn.sendall(h1 + d1)
+                        elif ftype == 1:
+                            # Stream 3 HEADERS
+                            with self.lock:
+                                conn_streams.append(stream_id)
+                                self.streams_served.append(stream_id)
+                                self.save_stats({
+                                    "alpn": proto,
+                                    "max_streams_on_single_connection": len(conn_streams),
+                                    "multiplexed_stream_ids": conn_streams
+                                })
+                            h_res = make_frame(1, 1, 4, stream_id, b"\x88")
+                            d_res = make_frame(len(TEST_PAYLOAD), 0, 1, stream_id, TEST_PAYLOAD)
+                            tls_conn.sendall(h_res + d_res)
+                            if len(conn_streams) >= 2:
+                                time.sleep(0.05)
+                                tls_conn.close()
+                                return
+                tls_conn.close()
+                return
+
             req = conn.recv(4096)
             if not req:
                 conn.close()

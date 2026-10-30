@@ -44,9 +44,10 @@ signals:
     void hostConnectionCountChanged(QString host, int activeConnections);
 
 public:
-    static bool isPrivateOrLoopbackHost(const QString& host);
+    static bool isPrivateOrLoopbackHost(const QString& host, QString* resolvedPublicIp = nullptr);
     static bool validateRedirectUrl(const QUrl& originalUrl, const QUrl& targetUrl,
-                                    bool allowPrivateNetworks, QString* error = nullptr);
+                                    bool allowPrivateNetworks, QString* error = nullptr,
+                                    QString* pinnedPublicIp = nullptr);
     static QString toNetscapeCookieLine(const CookieRecord& cookie);
     static bool isSafeCrossOriginHeader(const QString& name);
     static void applyCrossOriginHeaderPolicy(QVariantMap* headers, QString* username = nullptr, QString* password = nullptr);

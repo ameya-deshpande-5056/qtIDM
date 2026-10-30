@@ -102,6 +102,8 @@ QJsonObject requestToJson(const DownloadRequest& request)
         { QStringLiteral("lowSpeedTimeoutSeconds"), request.lowSpeedTimeoutSeconds },
         { QStringLiteral("maximumRedirects"), request.maximumRedirects },
         { QStringLiteral("allowPrivateNetworkRedirects"), request.allowPrivateNetworkRedirects },
+        { QStringLiteral("insecureSkipSslVerification"), request.insecureSkipSslVerification },
+        { QStringLiteral("pinnedIp"), request.pinnedIp },
         { QStringLiteral("priority"), request.priority },
         { QStringLiteral("repeatIntervalSeconds"), request.repeatIntervalSeconds },
         { QStringLiteral("fileConflictPolicy"), toStorageValue(request.fileConflictPolicy) },
@@ -164,6 +166,8 @@ DownloadRequest requestFromJson(const QJsonObject& object)
     request.lowSpeedTimeoutSeconds = qBound(1, object.value(QStringLiteral("lowSpeedTimeoutSeconds")).toInt(60), 3600);
     request.maximumRedirects = qBound(0, object.value(QStringLiteral("maximumRedirects")).toInt(20), 100);
     request.allowPrivateNetworkRedirects = object.value(QStringLiteral("allowPrivateNetworkRedirects")).toBool(false);
+    request.insecureSkipSslVerification = object.value(QStringLiteral("insecureSkipSslVerification")).toBool(false);
+    request.pinnedIp = object.value(QStringLiteral("pinnedIp")).toString();
     request.priority = object.value(QStringLiteral("priority")).toInt(0);
     request.repeatIntervalSeconds = qMax(0, object.value(QStringLiteral("repeatIntervalSeconds")).toInt(0));
     request.fileConflictPolicy = fileConflictPolicyFromStorage(

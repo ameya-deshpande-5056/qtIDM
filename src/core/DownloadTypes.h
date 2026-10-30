@@ -100,6 +100,8 @@ struct DownloadRequest {
     int lowSpeedTimeoutSeconds = 60;
     int maximumRedirects = 20;
     bool allowPrivateNetworkRedirects = false;
+    bool insecureSkipSslVerification = false;
+    QString pinnedIp;
     int priority = 0;
     int repeatIntervalSeconds = 0;
     FileConflictPolicy fileConflictPolicy = FileConflictPolicy::AutoRename;

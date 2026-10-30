@@ -1,6 +1,6 @@
 # 14 - Post-Implementation Engineering Audit, Durability Verification, and Release Certification Report
 
-**Document Status:** FORMAL ENGINEERING AUDIT & RELEASE CERTIFICATION  
+**Document Status:** RELEASE CANDIDATE (RC1) FOR TARGETED VERIFICATION & AUDIT
 **Target Repository:** `qtIDM` (Linux C++20 / Qt6 / libcurl 8.5.0)  
 **Baseline Git Commit:** `2ef921a4a6a1a0b02d4bdd74496618684c68f1fb`  
 **Audit Date:** 2026-10-30  
@@ -10,9 +10,11 @@
 
 ## 1. Executive Summary & Audit Mandate
 
-Following the phased implementation of Phases A, B, C, and D, an exhaustive, read-only engineering audit was conducted across the `qtIDM` codebase and its test fixtures. The audit evaluated implementation claims, verified architectural invariants, examined crash-consistency properties, reviewed security and durability boundaries, and audited all test evidence.
+Following the phased implementation of Phases A, B, C, and D, an exhaustive engineering audit was conducted across the `qtIDM` codebase and its test fixtures. The audit evaluated implementation claims, verified architectural invariants, examined crash-consistency properties, reviewed security and durability boundaries, and audited all test evidence.
 
-All defects and vulnerability surfaces identified during review—including redirect destination validation, private-network SSRF containment, RFC 6265 structured cookie injection, SQLite WAL `synchronous=FULL` commit durability, dynamic segment split persistence ordering, cross-origin custom header stripping, epoll generation tracking and 32-bit overflow handling, HTTP/2 protocol-level failure fallback, and in-page media boundary protections—have been systematically resolved, audited, and empirically verified with zero test regressions.
+The working tree has been hardened to candidate release quality. Key findings from review—including redirect destination validation, private-network SSRF containment, DNS TOCTOU rebinding protection via `CURLOPT_RESOLVE` address pinning, RFC 6265 structured cookie injection, SQLite WAL `synchronous=FULL` commit durability, dynamic segment split persistence ordering, cross-origin custom header stripping, epoll generation tracking and 32-bit overflow handling, HTTP/2 multiplexing across both cleartext (`h2c`) and TLS ALPN (`h2`), and in-page media boundary protections—have been implemented, hardened, and verified.
+
+Residual qualifications remain explicitly documented: physical storage power-loss recovery is architecturally designed and qualified (via `msync` + `fdatasync()` and SQLite WAL `synchronous=FULL`) but has not been empirically verified on a physical power-cycle test rig; and two browser extension E2E tests remain skipped in headless non-GUI CI environments. The software is formally certified as **Release Candidate 1 (RC1)**.
 
 ---
 
@@ -166,8 +168,8 @@ An objective engineering assessment requires distinguishing process crashes from
   - Custom flat `Cookie` header stripped from `CURLOPT_HTTPHEADER` to delegate full scoping authority to libcurl's engine.
   - Verified in `DownloaderIntegrationTest::cookieStandardsScopingAndHttpOnly` and `DownloaderIntegrationTest::structuredCookiesRfc6265Scoping`.
 
-### 4.2 Explicit Cookie, Authorization Handling and SSRF Protection Across Redirects
-- **Audit:** Explicit custom headers passed to `CURLOPT_HTTPHEADER` leak credentials across third-party redirect hops. Furthermore, redirect destination validation must strictly defend against IPv6 loopback, alternative IPv4 integer/octal/hex notations, cloud metadata services, and DNS rebinding to internal infrastructure.
+### 4.2 Explicit Cookie, Authorization Handling, SSRF Filtering, and TOCTOU DNS Rebinding Pinning
+- **Audit:** Explicit custom headers passed to `CURLOPT_HTTPHEADER` leak credentials across third-party redirect hops. Furthermore, redirect destination validation must strictly defend against IPv6 loopback, alternative IPv4 integer/octal/hex notations, cloud metadata services, and time-of-check-to-time-of-use (TOCTOU) DNS rebinding races where DNS answers change between validation and libcurl connection.
 - **Resolution:**
   - `validateRedirectUrl()` validates every hop against supported protocols (`http`, `https`, `ftp`) and rejects embedded credentials.
   - Comprehensive Private IP / Loopback / Metadata Containment (`isPrivateOrLoopbackHost`):
@@ -175,9 +177,15 @@ An objective engineering assessment requires distinguishing process crashes from
     - Raw 32-bit integer string representation parsing (e.g. `2130706433` for `127.0.0.1`).
     - IPv6 literal parsing via `inet_pton` with square bracket stripping (`[::1]`, `[fe80::1]`, `[fd00:ec2::254]`, `[::ffff:127.0.0.1]`).
     - Explicit cloud metadata blocking: AWS IMDS IPv4 (`169.254.169.254`) and IPv6 (`fd00:ec2::254`), Alibaba Cloud metadata (`100.100.100.200`), GCP metadata (`metadata.google.internal`, `metadata`), and single-label hostnames (`instance-data`).
-    - Synchronous DNS address resolution inspection: uses `getaddrinfo()` to verify that resolved destination IP addresses do not map to private, loopback, carrier-grade NAT (`100.64.0.0/10`), or link-local subnets, defeating DNS rebinding attacks.
+    - Synchronous DNS address resolution inspection: uses `getaddrinfo()` to verify that resolved destination IP addresses do not map to private, loopback, carrier-grade NAT (`100.64.0.0/10`), or link-local subnets.
+  - **TOCTOU DNS Rebinding Pinning via `CURLOPT_RESOLVE`:**
+    - To eliminate the time-of-check-to-time-of-use DNS rebinding gap (where a domain returns public IPs during validation, but re-resolves to `127.0.0.1` when libcurl connects), qtIDM binds the validated public IP address directly to `request.pinnedIp`.
+    - In `applyRequestOptions()`, `CURLOPT_RESOLVE` pins the host, port, and validated IP address (`HOST:PORT:PINNED_IP`). Libcurl bypasses subsequent DNS resolution and connects exclusively to the pre-validated IP.
+    - On redirects, because `CURLOPT_FOLLOWLOCATION = 0L`, each hop is intercepted; the redirect destination is resolved and validated; and its IP address is pinned for the redirected transfer.
+  - **Reactor Thread Execution Characteristic:**
+    - Synchronous DNS resolution runs during transfer initiation (`addTransfer()`) and probe execution (`probeSize()`), outside the epoll `epoll_wait` reactor loop. Active socket events are not blocked by destination DNS filtering.
   - On cross-origin redirects (scheme, host, or port mismatch), `applyCrossOriginHeaderPolicy()` purges `Authorization`, `Proxy-Authorization`, `Cookie`, `X-Api-Key`, `X-Auth-Token`, and `X-Custom-*` headers, and clears HTTP Basic credentials.
-  - Verified in `DownloaderIntegrationTest::validatesDnsRebindingAndAlternativeIpRepresentations`, `validatesRedirectUrlPolicy`, `rejectsRedirectToDisallowedSchemes`, and `rejectsRedirectWithEmbeddedCredentials`.
+  - Verified in `DownloaderIntegrationTest::dnsValidationPinsResolvedIpViaCurlOptResolve`, `validatesDnsRebindingAndAlternativeIpRepresentations`, `validatesRedirectUrlPolicy`, `rejectsRedirectToDisallowedSchemes`, and `rejectsRedirectWithEmbeddedCredentials`.
 
 ### 4.3 `pwrite()` EINTR, Partial-Write, Zero-Write and Overflow Handling
 - **Audit:** Potential signal interruptions (`EINTR`), zero-byte returns, or signed 64-bit integer overflow.
@@ -193,13 +201,18 @@ An objective engineering assessment requires distinguishing process crashes from
   - Counter increment handles overflow by explicitly skipping 0 (`if (++currentGeneration_ == 0) currentGeneration_ = 1`).
   - Reactor loop unpacks event token: if `sockets_.find(fd)` generation differs or FD is absent, event is immediately discarded.
 
-### 4.5 Actual HTTP/2 Connection Multiplexing & Strict Protocol Error Policy
-- **Audit:** Conflating transport errors with HTTP/2 protocol errors could cause unnecessary downgrades to HTTP/1.1. In addition, actual concurrent stream multiplexing over a single connection required empirical proof.
+### 4.5 HTTP/2 Multiplexing Across Cleartext and TLS ALPN
+- **Audit:** Conflating transport errors with HTTP/2 protocol errors could cause unnecessary downgrades to HTTP/1.1. In addition, actual concurrent stream multiplexing over a single connection required empirical proof under both cleartext HTTP/2 (`h2c`) and encrypted HTTPS with TLS ALPN (`h2`).
 - **Resolution:**
   - Refined error downgrade policy in `CurlEpollDownloader.cpp`: `forceHttp1 = true` is strictly restricted to `errCode == CURLE_HTTP2 || errCode == CURLE_HTTP2_STREAM`. Generic transport failures like `CURLE_RECV_ERROR` or timeouts trigger standard retries without corrupting the protocol negotiation state.
-  - Dedicated binary HTTP/2 frame test fixture in `tests/fixtures/http2_mock_server.py` supporting `h2c` upgrade, SETTINGS handshake, stream multiplexing, and GOAWAY error injection.
-  - Verified concurrent HTTP/2 stream multiplexing: `DownloaderIntegrationTest::http2MultiplexesConcurrentStreamsOverSingleConnection` concurrently dispatches two independent streams (`stream 1` and `stream 3`) to the server, verifying that both streams complete over a single TCP connection (`connections == 1`, `streams >= 2`) with byte-exact payload validation.
-  - Verified graceful fallback: `DownloaderIntegrationTest::http2FailureTriggersAutomaticFallbackToHttp1` verifies that on genuine HTTP/2 framing faults, the transfer transparently falls back to HTTP/1.1 and completes successfully.
+  - Dedicated binary HTTP/2 frame test fixture in `tests/fixtures/http2_mock_server.py` supporting:
+    - Cleartext `h2c` upgrade and multiplexing.
+    - HTTPS TLS with ALPN protocol negotiation (`h2`) via Python `ssl.SSLContext.set_alpn_protocols(["h2", "http/1.1"])`.
+    - GOAWAY framing error injection and transparent HTTP/1.1 fallback.
+  - **Empirical Multiplexing Verification:**
+    - Cleartext: `DownloaderIntegrationTest::http2MultiplexesConcurrentStreamsOverSingleConnection` concurrently dispatches two independent streams (`stream 1` and `stream 3`) to the server, verifying that both streams complete over a single TCP connection (`connections == 1`, `streams >= 2`) with byte-exact payload validation.
+    - HTTPS TLS ALPN: `DownloaderIntegrationTest::http2HttpsAlpnMultiplexesConcurrentStreamsOverSingleTlsConnection` concurrently dispatches two independent streams to `https://127.0.0.1:{port}` over TLS, verifying that `ALPN == "h2"` was negotiated, both streams multiplexed over a single TLS connection (`connections == 1`, `streams >= 2`), and both payloads match byte-for-byte.
+    - Graceful Fallback: `DownloaderIntegrationTest::http2FailureTriggersAutomaticFallbackToHttp1` verifies that on genuine HTTP/2 framing faults, the transfer transparently falls back to HTTP/1.1 and completes successfully.
 
 ### 4.6 `window.postMessage()` Validation and Media Boundary
 - **Audit:** Untrusted frames injecting arbitrary media URLs or malicious manifests referencing local files (`file:///etc/passwd`).
@@ -245,7 +258,7 @@ Executed via `ctest --test-dir build --output-on-failure`:
 | 21 | `qtIDM_crash_injection_tests` | 1.63 s | **PASSED** |
 
 ### 5.2 Standalone Downloader Integration Suite Breakdown
-Target: `tests/DownloaderIntegrationTest.cpp` — **38 passed, 0 failed, 0 skipped** (36 test methods + 2 QtTest lifecycle execution slots `initTestCase` and `cleanupTestCase`):
+Target: `tests/DownloaderIntegrationTest.cpp` — **40 passed, 0 failed, 0 skipped** (38 test methods + 2 QtTest lifecycle execution slots `initTestCase` and `cleanupTestCase`):
 - `initTestCase()` (QtTest lifecycle fixture setup: launches Python HTTP test server on dynamic loopback port)
 1. `downloadsSegmentedHttpRange`
 2. `alternateLimitCapsTheWholeSegmentedDownload`
@@ -283,8 +296,10 @@ Target: `tests/DownloaderIntegrationTest.cpp` — **38 passed, 0 failed, 0 skipp
 34. `cookieStandardsScopingAndHttpOnly`
 35. `http2MultiplexesConcurrentStreamsOverSingleConnection`
 36. `http2ServerNoUpgradeStaysOnHttp1`
+37. `dnsValidationPinsResolvedIpViaCurlOptResolve`
+38. `http2HttpsAlpnMultiplexesConcurrentStreamsOverSingleTlsConnection`
 - `cleanupTestCase()` (QtTest lifecycle fixture teardown: terminates Python HTTP test server)
-- **QtTest Summary:** `Totals: 38 passed, 0 failed, 0 skipped, 0 blacklisted` (11,496 ms).
+- **QtTest Summary:** `Totals: 40 passed, 0 failed, 0 skipped, 0 blacklisted` (11,542 ms).
 
 ### 5.3 Classification of Crash Tests: Out-of-Process vs In-Process
 - **Out-of-Process Crash Testing:**

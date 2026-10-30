@@ -12,6 +12,8 @@
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
 
+#include <arpa/inet.h>
+
 namespace {
 constexpr qint64 fixtureSize = 256 * 1024;
 
@@ -1426,6 +1428,15 @@ void persistsDurableCheckpointsWithAcknowledgement()
         QVERIFY(rootLine.contains(QStringLiteral("\t/\t")));
         QVERIFY(apiLine.contains(QStringLiteral("\t/api\t")));
         QVERIFY(rootLine != apiLine);
+
+        // 6. Same cookie name on two different domains remain distinct
+        qtidm::CookieRecord dom1Cookie(QStringLiteral("auth_token"), QStringLiteral("val1"), QStringLiteral("sub1.example.com"), false);
+        qtidm::CookieRecord dom2Cookie(QStringLiteral("auth_token"), QStringLiteral("val2"), QStringLiteral("sub2.example.com"), false);
+        const auto dom1Line = qtidm::CurlEpollDownloader::toNetscapeCookieLine(dom1Cookie);
+        const auto dom2Line = qtidm::CurlEpollDownloader::toNetscapeCookieLine(dom2Cookie);
+        QVERIFY(dom1Line.contains(QStringLiteral(".sub1.example.com")));
+        QVERIFY(dom2Line.contains(QStringLiteral(".sub2.example.com")));
+        QVERIFY(dom1Line != dom2Line);
     }
 
     void http2MultiplexesConcurrentStreamsOverSingleConnection()
@@ -1534,6 +1545,119 @@ void persistsDurableCheckpointsWithAcknowledgement()
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(file.size(), qint64(8192));
         QCOMPARE(file.readAll(), expectedPayload(8192));
+    }
+
+    void dnsValidationPinsResolvedIpViaCurlOptResolve()
+    {
+        // 1. Verify that isPrivateOrLoopbackHost populates resolvedPublicIp for a public domain
+        QString publicIp;
+        const bool isPriv = qtidm::CurlEpollDownloader::isPrivateOrLoopbackHost(QStringLiteral("example.com"), &publicIp);
+        QVERIFY(!isPriv);
+        QVERIFY(!publicIp.isEmpty());
+        struct in_addr in4;
+        struct in6_addr in6;
+        const auto ipBytes = publicIp.toUtf8();
+        QVERIFY(::inet_aton(ipBytes.constData(), &in4) == 1 || ::inet_pton(AF_INET6, ipBytes.constData(), &in6) == 1);
+        QVERIFY(publicIp != QStringLiteral("127.0.0.1"));
+
+        // 2. Address Pinning via CURLOPT_RESOLVE in Downloader:
+        // Enqueue a request to a simulated non-existent domain "rebinding-test.invalid",
+        // but pin its IP to 127.0.0.1 via request.pinnedIp.
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("http://rebinding-test.invalid:%1/range.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/pinned_resolve_test.bin");
+        request.segments = 1;
+        request.pinnedIp = QStringLiteral("127.0.0.1"); // Pin directly to test server loopback IP
+        request.allowPrivateNetworkRedirects = true;
+
+        const auto id = downloader.enqueue(request);
+        // If CURLOPT_RESOLVE pins the IP, libcurl connects to 127.0.0.1 without querying DNS
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 5000));
+        downloader.stop();
+
+        QFile file(request.targetPath);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.size(), fixtureSize);
+    }
+
+    void http2HttpsAlpnMultiplexesConcurrentStreamsOverSingleTlsConnection()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const auto statsPath = dir.path() + QStringLiteral("/h2_alpn_stats.json");
+
+        QProcess h2Server;
+        h2Server.setProgram(QStringLiteral("python3"));
+        h2Server.setArguments({
+            QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/tests/fixtures/http2_mock_server.py"),
+            QStringLiteral("https_alpn"),
+            statsPath
+        });
+        h2Server.setProcessChannelMode(QProcess::SeparateChannels);
+        h2Server.start();
+        QVERIFY(h2Server.waitForStarted());
+        QVERIFY(h2Server.waitForReadyRead(5000));
+        const int h2Port = QString::fromUtf8(h2Server.readLine()).trimmed().toInt();
+        QVERIFY(h2Port > 0);
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        // Enqueue two concurrent transfers to the same HTTPS HTTP/2 host with ALPN
+        qtidm::DownloadRequest r1;
+        r1.url = QUrl(QStringLiteral("https://127.0.0.1:%1/stream1.bin").arg(h2Port));
+        r1.targetPath = dir.path() + QStringLiteral("/alpn_stream1.bin");
+        r1.segments = 1;
+        r1.insecureSkipSslVerification = true;
+        r1.allowPrivateNetworkRedirects = true;
+
+        qtidm::DownloadRequest r2;
+        r2.url = QUrl(QStringLiteral("https://127.0.0.1:%1/stream2.bin").arg(h2Port));
+        r2.targetPath = dir.path() + QStringLiteral("/alpn_stream2.bin");
+        r2.segments = 1;
+        r2.insecureSkipSslVerification = true;
+        r2.allowPrivateNetworkRedirects = true;
+
+        const auto id1 = downloader.enqueue(r1);
+        const auto id2 = downloader.enqueue(r2);
+        QVERIFY(waitForStatus(statusSpy, id1, qtidm::DownloadStatus::Completed, 6000));
+        QVERIFY(waitForStatus(statusSpy, id2, qtidm::DownloadStatus::Completed, 6000));
+        downloader.stop();
+
+        h2Server.terminate();
+        h2Server.waitForFinished(3000);
+
+        // Verify payload integrity for both streams
+        QFile f1(r1.targetPath);
+        QVERIFY(f1.open(QIODevice::ReadOnly));
+        QCOMPARE(f1.size(), qint64(8192));
+
+        QFile f2(r2.targetPath);
+        QVERIFY(f2.open(QIODevice::ReadOnly));
+        QCOMPARE(f2.size(), qint64(8192));
+
+        // Verify that TLS ALPN negotiated 'h2' and served multiple concurrent streams over a SINGLE TLS connection
+        QFile statsFile(statsPath);
+        QVERIFY(statsFile.open(QIODevice::ReadOnly));
+        const auto statsDoc = QJsonDocument::fromJson(statsFile.readAll());
+        QVERIFY(!statsDoc.isNull());
+        const auto statsObj = statsDoc.object();
+
+        const auto alpn = statsObj.value(QStringLiteral("alpn")).toString();
+        const int maxStreams = statsObj.value(QStringLiteral("max_streams_on_single_connection")).toInt();
+        const auto streamIds = statsObj.value(QStringLiteral("multiplexed_stream_ids")).toArray();
+
+        QCOMPARE(alpn, QStringLiteral("h2"));
+        QVERIFY(maxStreams >= 2);
+        QVERIFY(streamIds.size() >= 2);
     }
 
 
