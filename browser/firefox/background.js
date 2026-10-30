@@ -713,6 +713,17 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
     await sendToHost(message.url, tab, tab.url);
     return { ok: true };
   }
+  if (message.type === "extractSocialMedia") {
+    try {
+      const tab = sender.tab || (await browser.tabs.get(message.tabId));
+      const targetUrl = message.url || tab?.url || "";
+      const response = await nativeRequest({ type: "extractSocialMedia", url: targetUrl });
+      return { ok: !!response?.ok, message: response?.message };
+    } catch (error) {
+      showError(error.message);
+      return { ok: false, message: error.message };
+    }
+  }
   const key = mediaKey(message.tabId);
   if (message.type === "listMedia") {
     const pending = mediaWriteQueues.get(message.tabId);

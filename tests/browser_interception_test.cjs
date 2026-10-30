@@ -345,6 +345,18 @@ async function testVariant(relativePath, rootName) {
       {},
       (res) => { responseResult = res; }
     );
+    mock.calls.length = 0;
+    mock.nativeMessages.length = 0;
+    await new Promise((resolve) => {
+      listener(
+        { type: "extractSocialMedia", tabId: 101, url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
+        {},
+        (res) => { responseResult = res; resolve(); }
+      );
+    });
+    assert.equal(responseResult?.ok, true);
+    assert.equal(mock.nativeMessages.at(-1)?.type, "extractSocialMedia");
+    assert.equal(mock.nativeMessages.at(-1)?.url, "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
   }
 }
 

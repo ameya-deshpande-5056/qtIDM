@@ -17,6 +17,7 @@ public:
     void setUrlHandler(std::function<bool(QString, QVariantMap)> handler);
     void setUrlsHandler(std::function<bool(QStringList, QVariantMap)> handler);
     void setDownloadsHandler(std::function<bool(QVariantList)> handler);
+    void setSocialMediaHandler(std::function<bool(QString)> handler);
 
 public slots:
     Q_SCRIPTABLE void Activate();
@@ -24,6 +25,7 @@ public slots:
     Q_SCRIPTABLE bool AddUrls(const QStringList& urls, const QVariantMap& headers);
     Q_SCRIPTABLE bool AddDownloads(const QVariantList& downloads);
     Q_SCRIPTABLE bool AddDownloadsJson(const QString& downloadsJson);
+    Q_SCRIPTABLE bool ExtractSocialMedia(const QString& url);
 
 signals:
     void activateRequested();
@@ -34,6 +36,7 @@ private:
     std::function<bool(QString, QVariantMap)> urlHandler_;
     std::function<bool(QStringList, QVariantMap)> urlsHandler_;
     std::function<bool(QVariantList)> downloadsHandler_;
+    std::function<bool(QString)> socialMediaHandler_;
 };
 
 }

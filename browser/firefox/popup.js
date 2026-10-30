@@ -26,6 +26,24 @@ function displayName(value) {
   try { return decodeURIComponent(tail); } catch (_) { return tail; }
 }
 
+const SOCIAL_HOSTS = [
+  "youtube.com", "youtu.be",
+  "bilibili.com", "b23.tv", "bili2233.cn",
+  "instagram.com", "facebook.com", "fb.watch",
+  "twitter.com", "x.com", "tiktok.com",
+  "reddit.com", "redd.it", "vimeo.com",
+  "dailymotion.com", "twitch.tv", "soundcloud.com"
+];
+
+function isSocialHost(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return SOCIAL_HOSTS.some((domain) => host === domain || host.endsWith("." + domain));
+  } catch (_) {
+    return false;
+  }
+}
+
 async function refresh() {
   tab ||= await activeTab();
   $("#pageTitle").textContent = tab.title || tab.url || "Current tab";
@@ -34,8 +52,22 @@ async function refresh() {
   $("#items").replaceChildren();
   $("#count").textContent = String(items.length);
   $("#status").textContent = `${items.length} captured item${items.length === 1 ? "" : "s"}`;
-  $("#empty").hidden = items.length > 0;
-  $("#empty").style.display = items.length > 0 ? "none" : "";
+  const isSocial = isSocialHost(tab?.url);
+  const socialCard = $("#socialPlatform");
+  if (socialCard) {
+    socialCard.hidden = !isSocial;
+    socialCard.style.display = isSocial ? "flex" : "none";
+    if (isSocial) {
+      try {
+        const host = new URL(tab.url).hostname.replace(/^www\./, "");
+        const siteNameEl = $("#socialSiteName");
+        if (siteNameEl) siteNameEl.textContent = host;
+      } catch (_) {}
+    }
+  }
+  const showEmpty = items.length === 0 && !isSocial;
+  $("#empty").hidden = !showEmpty;
+  $("#empty").style.display = showEmpty ? "" : "none";
   items.forEach((item, index) => {
     const row = document.createElement("article");
     row.className = "item";
@@ -96,6 +128,20 @@ async function saveSettings() {
 }
 
 document.querySelectorAll(".tab").forEach((item) => item.addEventListener("click", () => showPanel(item.dataset.panel)));
+$("#extractSocialBtn")?.addEventListener("click", async () => {
+  tab ||= await activeTab();
+  if (!tab?.url) return notice("No active tab URL found.", true);
+  const btn = $("#extractSocialBtn");
+  btn.disabled = true;
+  notice("Sending extraction request to qtIDM...");
+  const result = await api.runtime.sendMessage({
+    type: "extractSocialMedia",
+    tabId: tab.id,
+    url: tab.url
+  });
+  btn.disabled = false;
+  notice(result?.ok ? "Extraction started in qtIDM." : (result?.message || "Could not contact qtIDM."), !result?.ok);
+});
 $("#clear").addEventListener("click", async () => {
   await api.runtime.sendMessage({ type: "clearMedia", tabId: tab.id });
   notice("Captured items cleared.");

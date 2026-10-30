@@ -380,6 +380,17 @@ bool MainWindow::addUrl(QString url, QVariantMap headers)
         return false;
     }
 
+    if (SocialMediaExtractor::supports(parsed)) {
+        const auto choice = QMessageBox::question(this, QStringLiteral("Social Media Stream"),
+            QStringLiteral("This link is from a supported video streaming platform (%1).\n\n"
+                           "Would you like to extract video and audio streams using yt-dlp?")
+                .arg(parsed.host()),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+        if (choice == QMessageBox::Yes) {
+            return extractSocialMediaUrl(parsed);
+        }
+    }
+
     const auto mediaTypeHint = takeHeader(&headers, u"_qtidmMediaType").trimmed().toUpper();
     const auto suggestedFilename = safeSuggestedFilename(takeHeader(&headers, u"_qtidmSuggestedFilename"));
     const auto httpMethod = takeHeader(&headers, u"_qtidmHttpMethod").trimmed().toUpper();
@@ -670,6 +681,22 @@ bool MainWindow::addBrowserDownloads(QVariantList downloads)
         return false;
     }
     QScopedValueRollback requestGuard(browserRequestActive_, true);
+
+    if (downloads.size() == 1) {
+        const auto item = downloads.first().toMap();
+        const auto urlText = item.value(QStringLiteral("url")).toString().trimmed();
+        const QUrl parsed = QUrl::fromUserInput(urlText);
+        if (parsed.isValid() && SocialMediaExtractor::supports(parsed)) {
+            const auto choice = QMessageBox::question(this, QStringLiteral("Social Media Stream"),
+                QStringLiteral("This link is from a supported video streaming platform (%1).\n\n"
+                               "Would you like to extract video and audio streams using yt-dlp?")
+                    .arg(parsed.host()),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+            if (choice == QMessageBox::Yes) {
+                return extractSocialMediaUrl(parsed);
+            }
+        }
+    }
 
     QStringList urls;
     urls.reserve(downloads.size());
@@ -1540,23 +1567,32 @@ void MainWindow::grabSite()
 
 void MainWindow::extractSocialMedia()
 {
-    bool ok = false;
-    const auto value = QInputDialog::getText(this, QStringLiteral("Social Media"),
-        QStringLiteral("Post or media URL:"), QLineEdit::Normal, {}, &ok).trimmed();
-    if (!ok || value.isEmpty()) {
-        return;
+    extractSocialMediaUrl();
+}
+
+bool MainWindow::extractSocialMediaUrl(const QUrl& initialUrl)
+{
+    raiseAndActivate();
+    QUrl url = initialUrl;
+    if (!url.isValid() || !SocialMediaExtractor::supports(url)) {
+        bool ok = false;
+        const auto value = QInputDialog::getText(this, QStringLiteral("Social Media"),
+            QStringLiteral("Post or media URL:"), QLineEdit::Normal, initialUrl.isValid() ? initialUrl.toString() : QString {}, &ok).trimmed();
+        if (!ok || value.isEmpty()) {
+            return false;
+        }
+        url = QUrl::fromUserInput(value);
     }
-    const auto url = QUrl::fromUserInput(value);
     if (!SocialMediaExtractor::supports(url)) {
         QMessageBox::warning(this, QStringLiteral("Social Media"),
             QStringLiteral("Supported sites include YouTube, Bilibili, Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, "
                            "Dailymotion, Twitch, and SoundCloud."));
-        return;
+        return false;
     }
     if (!socialMediaExtractor_.isAvailable()) {
         QMessageBox::warning(this, QStringLiteral("Social Media"),
             QStringLiteral("Install yt-dlp to enable maintained site-specific extraction."));
-        return;
+        return false;
     }
 
     const QStringList cookieChoices {
@@ -1565,10 +1601,11 @@ void MainWindow::extractSocialMedia()
         QStringLiteral("Chrome"),
         QStringLiteral("Chromium")
     };
+    bool ok = false;
     const auto cookieChoice = QInputDialog::getItem(this, QStringLiteral("Social Media"),
         QStringLiteral("Use logged-in browser cookies for private posts:"), cookieChoices, 0, false, &ok);
     if (!ok) {
-        return;
+        return false;
     }
     const auto browserCookies = cookieChoice == cookieChoices[0] ? QString {} : cookieChoice.toLower();
     QApplication::setOverrideCursor(Qt::WaitCursor);
@@ -1577,7 +1614,7 @@ void MainWindow::extractSocialMedia()
     QApplication::restoreOverrideCursor();
     if (!error.isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("Social Media"), error);
-        return;
+        return false;
     }
 
     QStringList labels;
@@ -1587,11 +1624,11 @@ void MainWindow::extractSocialMedia()
     const auto selected = QInputDialog::getItem(this, QStringLiteral("Social Media"),
         QStringLiteral("%1\nChoose a format:").arg(extraction.title), labels, 0, false, &ok);
     if (!ok) {
-        return;
+        return false;
     }
     const int formatIndex = labels.indexOf(selected);
     if (formatIndex < 0) {
-        return;
+        return false;
     }
     const auto& format = extraction.formats[formatIndex];
     auto safeTitle = safeSuggestedFilename(extraction.title);
@@ -1603,7 +1640,7 @@ void MainWindow::extractSocialMedia()
                                      + (format.extension.isEmpty() ? QStringLiteral("mp4") : format.extension));
     const auto target = QFileDialog::getSaveFileName(this, QStringLiteral("Save Social Media"), defaultPath);
     if (target.isEmpty()) {
-        return;
+        return false;
     }
     DownloadRequest request;
     request.url = format.url;
@@ -1617,6 +1654,7 @@ void MainWindow::extractSocialMedia()
     } else {
         scheduler_.schedule(std::move(request));
     }
+    return true;
 }
 
 void MainWindow::showQueue()

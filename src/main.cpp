@@ -72,6 +72,7 @@ int main(int argc, char** argv)
     singleInstance.setUrlHandler([&window](QString url, QVariantMap headers) { return window.addUrl(std::move(url), std::move(headers)); });
     singleInstance.setUrlsHandler([&window](QStringList urls, QVariantMap headers) { return window.addUrls(std::move(urls), std::move(headers)); });
     singleInstance.setDownloadsHandler([&window](QVariantList downloads) { return window.addBrowserDownloads(std::move(downloads)); });
+    singleInstance.setSocialMediaHandler([&window](QString url) { return window.extractSocialMediaUrl(QUrl::fromUserInput(url)); });
 
     downloader.start();
     window.show();

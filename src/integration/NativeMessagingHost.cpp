@@ -60,6 +60,27 @@ QJsonObject handle(const QJsonObject& object)
 {
     if (object.value(QStringLiteral("type")).toString() == QStringLiteral("status"))
         return { { QStringLiteral("ok"), true }, { QStringLiteral("status"), QStringLiteral("ready") }, { QStringLiteral("persistent"), true } };
+    if (object.value(QStringLiteral("type")).toString() == QStringLiteral("extractSocialMedia")) {
+        const auto url = object.value(QStringLiteral("url")).toString().trimmed();
+        if (!validUrl(url)) return errorReply(QStringLiteral("invalid-url"), QStringLiteral("qtIDM can extract only valid HTTP or HTTPS URLs."));
+        QString lastError;
+        bool launched = false;
+        for (int attempt = 0; attempt < 50; ++attempt) {
+            QDBusInterface iface(QStringLiteral("io.qtidm.Qtidm"), QStringLiteral("/io/qtidm/Qtidm/Application"), QStringLiteral("io.qtidm.Qtidm.Application"), QDBusConnection::sessionBus());
+            if (iface.isValid()) {
+                const auto reply = iface.call(QStringLiteral("ExtractSocialMedia"), url);
+                if (reply.type() != QDBusMessage::ErrorMessage) return { { QStringLiteral("ok"), true }, { QStringLiteral("accepted"), reply.arguments().value(0).toBool() } };
+                lastError = reply.errorMessage();
+            } else lastError = QStringLiteral("qtIDM D-Bus service is not available yet.");
+            if (!launched) {
+                launched = true;
+                const auto executable = executablePath();
+                if (executable.isEmpty() || !QProcess::startDetached(executable)) return errorReply(QStringLiteral("launch-failed"), QStringLiteral("Could not start qtIDM. Reinstall the qtIDM package and try again."));
+            }
+            QThread::msleep(100);
+        }
+        return errorReply(QStringLiteral("application-unavailable"), QStringLiteral("qtIDM started but did not accept the extraction request: %1").arg(lastError));
+    }
     QVariantList downloads;
     QStringList urls;
     QString downloadsJson;

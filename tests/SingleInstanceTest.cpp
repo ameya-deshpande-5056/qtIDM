@@ -39,6 +39,18 @@ private slots:
         QVERIFY(!instance.AddDownloadsJson(QStringLiteral("{}")));
         QVERIFY(!instance.AddDownloadsJson(QStringLiteral("not json")));
     }
+
+    void dispatchesSocialMediaExtraction()
+    {
+        SingleInstance instance;
+        QString receivedUrl;
+        instance.setSocialMediaHandler([&receivedUrl](QString url) {
+            receivedUrl = url;
+            return true;
+        });
+        QVERIFY(instance.ExtractSocialMedia(QStringLiteral("https://www.youtube.com/watch?v=example")));
+        QCOMPARE(receivedUrl, QStringLiteral("https://www.youtube.com/watch?v=example"));
+    }
 };
 
 QTEST_GUILESS_MAIN(SingleInstanceTest)

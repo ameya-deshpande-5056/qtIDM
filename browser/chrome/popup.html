@@ -18,6 +18,11 @@
   <section id="captures" class="panel active">
     <div class="section-head"><span id="status">Scanning this tab...</span><button id="clear" class="text-button">Clear</button></div>
     <main id="items"></main>
+    <div id="socialPlatform" class="social-card" hidden>
+      <div class="social-title">Streaming Platform Detected</div>
+      <p class="social-desc">This site streams media in chunked buffers (<span id="socialSiteName">YouTube/Bilibili</span>) without raw playlist files. Extract available video and audio streams directly with qtIDM.</p>
+      <button id="extractSocialBtn" class="primary">DOWNLOAD WITH qtIDM (yt-dlp)</button>
+    </div>
     <div id="empty" class="empty" hidden><b>No downloadable media yet</b><span>Start playback on the page, then reopen this panel.</span></div>
   </section>
   <section id="add" class="panel">

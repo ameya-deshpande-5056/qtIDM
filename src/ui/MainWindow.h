@@ -39,6 +39,8 @@ public slots:
     bool addUrl(QString url = {}, QVariantMap headers = {});
     bool addUrls(QStringList urls, QVariantMap headers = {});
     bool addBrowserDownloads(QVariantList downloads);
+    bool extractSocialMediaUrl(const QUrl& initialUrl = {});
+    void extractSocialMedia();
     void raiseAndActivate();
 
 protected:
@@ -56,7 +58,6 @@ private slots:
     void exportLinks();
     void previewZip();
     void grabSite();
-    void extractSocialMedia();
     void showQueue();
     void showOptions();
     void showAbout();

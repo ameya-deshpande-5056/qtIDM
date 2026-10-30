@@ -61,6 +61,11 @@ void SingleInstance::setDownloadsHandler(std::function<bool(QVariantList)> handl
     downloadsHandler_ = std::move(handler);
 }
 
+void SingleInstance::setSocialMediaHandler(std::function<bool(QString)> handler)
+{
+    socialMediaHandler_ = std::move(handler);
+}
+
 void SingleInstance::Activate()
 {
     emit activateRequested();
@@ -97,6 +102,11 @@ bool SingleInstance::AddDownloadsJson(const QString& downloadsJson)
         return false;
     }
     return AddDownloads(document.array().toVariantList());
+}
+
+bool SingleInstance::ExtractSocialMedia(const QString& url)
+{
+    return socialMediaHandler_ ? socialMediaHandler_(url) : false;
 }
 
 }

@@ -763,6 +763,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: true });
       return;
     }
+    if (message.type === "extractSocialMedia") {
+      try {
+        const tab = sender.tab || (await chrome.tabs.get(message.tabId));
+        const targetUrl = message.url || tab?.url || "";
+        const response = await nativeRequest({ type: "extractSocialMedia", url: targetUrl });
+        sendResponse({ ok: !!response?.ok, message: response?.message });
+      } catch (error) {
+        showError(error.message);
+        sendResponse({ ok: false, message: error.message });
+      }
+      return;
+    }
     const key = mediaKey(message.tabId);
     if (message.type === "listMedia") {
       const pending = mediaWriteQueues.get(message.tabId);
