@@ -20,6 +20,7 @@ qtIDM is an original, clean-room implementation developed independently from ope
 - Sparse `.part` files using `mmap` windows with a `pwrite` fallback.
 - Atomic promotion from `.part` to the final destination after successful completion.
 - Pause, cancel, and range-based resume with remote-size validation.
+- Automated fallback to clean single-stream `GET` requests when servers return corrupted byte-range responses (e.g. Cloudflare Content-Range compression mismatches).
 - Exponential retries for temporary transfer failures.
 - Per-download speed limits, proxy configuration, HTTP headers, and username/password authentication.
 - Shared HTTP/HTTPS/FTP session data quota with live usage and reset controls.
@@ -33,10 +34,12 @@ qtIDM is an original, clean-room implementation developed independently from ope
 ### Streaming Media
 
 - Non-DRM HLS and MPEG-DASH downloading through FFmpeg.
+- Dedicated loopback HTTP/2 stream proxy (`MediaStreamProxy`) negotiating ALPN `h2` with browser header forwarding, unblocking HLS/DASH streams on HTTP/2-only CDNs and Cloudflare endpoints that reject FFmpeg's HTTP/1.1 client.
+- Virtual playlist rewriting in `MediaStreamProxy` normalizing disguised media extensions (e.g. `.jpg` segment files) to virtual `.ts` paths.
 - Explicit Widevine, PlayReady, FairPlay, and SAMPLE-AES detection with a clear refusal instead of attempting DRM circumvention.
-- Separate adaptive audio and video track downloading and muxing.
-- Maintained social-site extraction through `yt-dlp` for supported YouTube, Bilibili, Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, Dailymotion, Twitch, and SoundCloud links.
-- Browser detection of HLS, DASH, direct audio/video, and common subtitle responses.
+- Separate adaptive and progressive audio and video track downloading and remuxing into unified `.mp4` or `.webm` containers via FFmpeg without quality loss (`-c copy`).
+- Maintained social-site extraction through `yt-dlp` for supported YouTube, Bilibili, Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, Dailymotion, Twitch, and SoundCloud links, with automatic combined audio+video pairing and user-local executable discovery (`~/.local/bin`, `~/.pyenv/shims`).
+- Browser detection of HLS, DASH, direct audio/video, and common subtitle responses, with YouTube/Bilibili extension popup awareness and smart URL routing.
 - Accurate stream title preservation capturing complete names and numbers (e.g. `Ep. 7`) without truncation at periods before the file extension.
 - Pause, resume, cancel, progress reporting, and persisted history for media downloads.
 
@@ -93,10 +96,10 @@ them when available:
 
 | Integration | Enables |
 | --- | --- |
-| FFmpeg | Non-DRM HLS/DASH downloading and adaptive-track muxing |
+| FFmpeg | Non-DRM HLS/DASH downloading, HTTP/2 proxy streaming, and adaptive/combined track remuxing |
 | 7-Zip (`7zz` or `7z`) | Automatic archive extraction |
 | `secret-tool` from libsecret | Desktop Secret Service credential storage |
-| `yt-dlp` | Maintained social-site format extraction |
+| `yt-dlp` | Maintained social-site format extraction (supports Python `secretstorage` for Chromium cookie decryption) |
 | Chrome or Chromium | JavaScript-rendered site grabbing and Chrome extension testing |
 | NetworkManager | Automatic metered-network state detection |
 
@@ -201,7 +204,7 @@ Build and test the Debian package:
 
 ```bash
 sh packaging/build-deb.sh
-sudo apt-get install -y ./dist/qtidm_0.2.5-1_amd64.deb
+sudo apt-get install -y ./dist/qtidm_0.2.6-1_amd64.deb
 qtIDM --version
 ```
 
@@ -223,7 +226,7 @@ chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
 sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
 sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
 APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.2.5-x86_64.AppImage --version
+APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.2.6-x86_64.AppImage --version
 ```
 
 The script writes exactly one versioned AppImage to `dist/`. The checksums pin
@@ -236,7 +239,7 @@ Build and test the Flatpak bundle:
 ```bash
 sh packaging/release/version-info.sh
 sh packaging/release/build-flatpak-bundle.sh
-flatpak install --user -y dist/qtIDM-0.2.5.flatpak
+flatpak install --user -y dist/qtIDM-0.2.6.flatpak
 flatpak run io.qtidm.Qtidm --version
 ```
 
@@ -290,7 +293,7 @@ The application and browser integrations have independent version tracks:
 
 | Component | Current version | Authoritative files |
 | --- | --- | --- |
-| qtIDM application and release tag | `0.2.5` / `v0.2.5` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
+| qtIDM application and release tag | `0.2.6` / `v0.2.6` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
 | Chrome and Firefox extensions | `0.4.0` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
 
 The two checked-in browser manifest versions must always match each other, but
