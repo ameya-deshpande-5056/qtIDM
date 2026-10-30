@@ -20,6 +20,7 @@ public:
 
     static bool supports(const QUrl& url, const QString& mediaTypeHint = {});
     static bool declaresUnsupportedDrm(const QByteArray& manifest);
+    static QString protocolWhitelist(const QUrl& url);
     static QStringList httpInputArguments(const QVariantMap& headers);
     QString enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId = {});
     bool contains(const QString& id) const;

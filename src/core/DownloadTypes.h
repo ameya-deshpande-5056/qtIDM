@@ -33,7 +33,32 @@ struct SegmentInfo {
     std::int64_t start = 0;
     std::int64_t end = 0;
     std::int64_t written = 0;
+    std::int64_t durableWritten = 0;
     DownloadStatus status = DownloadStatus::Queued;
+
+    SegmentInfo() = default;
+    SegmentInfo(int idx, std::int64_t st, std::int64_t en, std::int64_t wr, DownloadStatus stt)
+        : index(idx), start(st), end(en), written(wr), durableWritten(wr), status(stt) {}
+    SegmentInfo(int idx, std::int64_t st, std::int64_t en, std::int64_t wr, std::int64_t dwr, DownloadStatus stt)
+        : index(idx), start(st), end(en), written(wr), durableWritten(dwr), status(stt) {}
+};
+
+struct CookieRecord {
+    QString name;
+    QString value;
+    QString domain;
+    bool hostOnly = false;
+    QString path = QStringLiteral("/");
+    bool secure = false;
+    bool httpOnly = false;
+    bool session = false;
+    qint64 expirationDate = 0; // 0 denotes session cookie or no expiration
+
+    CookieRecord() = default;
+    CookieRecord(QString n, QString v, QString d, bool ho = false, QString p = QStringLiteral("/"),
+                 bool sec = false, bool ho_only = false, bool sess = false, qint64 exp = 0)
+        : name(std::move(n)), value(std::move(v)), domain(std::move(d)), hostOnly(ho),
+          path(std::move(p)), secure(sec), httpOnly(ho_only), session(sess), expirationDate(exp) {}
 };
 
 struct DownloadRequest {
@@ -74,6 +99,7 @@ struct DownloadRequest {
     int connectTimeoutSeconds = 15;
     int lowSpeedTimeoutSeconds = 60;
     int maximumRedirects = 20;
+    bool allowPrivateNetworkRedirects = false;
     int priority = 0;
     int repeatIntervalSeconds = 0;
     FileConflictPolicy fileConflictPolicy = FileConflictPolicy::AutoRename;
@@ -82,6 +108,8 @@ struct DownloadRequest {
     qint64 expectedTotalBytes = -1;
     QString entityTag;
     QString lastModified;
+    QStringList serverCookies;
+    QVector<CookieRecord> cookies;
     QVector<SegmentInfo> resumeSegments;
 };
 
@@ -115,3 +143,5 @@ Q_DECLARE_METATYPE(qtidm::DownloadRequest)
 Q_DECLARE_METATYPE(qtidm::DownloadRecord)
 Q_DECLARE_METATYPE(qtidm::SegmentInfo)
 Q_DECLARE_METATYPE(QVector<qtidm::SegmentInfo>)
+Q_DECLARE_METATYPE(qtidm::CookieRecord)
+Q_DECLARE_METATYPE(QVector<qtidm::CookieRecord>)

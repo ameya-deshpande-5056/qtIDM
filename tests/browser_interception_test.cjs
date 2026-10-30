@@ -65,7 +65,23 @@ function browserApi(rootName) {
       }
     },
     cookies: {
-      async getAll() { return []; }
+      mockJar: [],
+      async getAll(options = {}) {
+        const url = options.url;
+        if (!url || !api.cookies.mockJar.length) return api.cookies.mockJar || [];
+        try {
+          const target = new URL(url);
+          const host = target.hostname.toLowerCase();
+          return api.cookies.mockJar.filter((c) => {
+            let domain = (c.domain || "").toLowerCase();
+            if (domain.startsWith(".")) domain = domain.slice(1);
+            if (c.hostOnly) return host === domain;
+            return host === domain || host.endsWith("." + domain);
+          });
+        } catch (_) {
+          return [];
+        }
+      }
     },
     tabs: {
       onRemoved: event(),
@@ -239,6 +255,48 @@ async function testVariant(relativePath, rootName) {
     ["pause", "native", "cancel", "removeFile", "erase", "native", "download"],
     `${rootName} must restore a rejected browser download without intercepting the restoration`
   );
+
+  // Phase B: Verify RFC 6265 scoped cookie forwarding across redirect & expiry filtering
+  mock.calls.length = 0;
+  mock.failNativeAfterPrepare(null);
+  mock.api.cookies.mockJar = [
+    { name: "shared_session", value: "s123", domain: ".example.test", hostOnly: false },
+    { name: "auth_private", value: "secret456", domain: "auth.example.test", hostOnly: true },
+    { name: "cdn_specific", value: "c789", domain: "cdn.example.test", hostOnly: true },
+    { name: "expired_token", value: "dead", domain: ".example.test", hostOnly: false, expirationDate: Math.floor(Date.now() / 1000) - 3600 }
+  ];
+  await context.redirectBrowserDownload(
+    { id: 88, url: "https://auth.example.test/download", finalUrl: "https://cdn.example.test/file.bin", referrer: "https://example.test/" },
+    "https://cdn.example.test/file.bin"
+  );
+  const redirectedSent = mock.nativeMessages.at(-1).downloads[0];
+  const cookieHeader = redirectedSent.headers.Cookie || "";
+  assert.ok(cookieHeader.includes("shared_session=s123"), "Shared domain cookie must be forwarded across redirect");
+  assert.ok(cookieHeader.includes("cdn_specific=c789"), "Destination host cookie must be forwarded");
+  assert.ok(!cookieHeader.includes("auth_private"), "Host-only pre-redirect cookie must NOT leak to different host");
+  assert.ok(!cookieHeader.includes("expired_token"), "Expired cookie must be rejected");
+
+  assert.ok(Array.isArray(redirectedSent.cookies), "downloads must contain structured cookies array");
+  assert.ok(redirectedSent.cookies.some((c) => c.name === "shared_session" && c.value === "s123" && c.domain === ".example.test" && c.hostOnly === false), "Structured shared cookie must be preserved");
+  assert.ok(redirectedSent.cookies.some((c) => c.name === "cdn_specific" && c.value === "c789" && c.hostOnly === true), "Structured host-only cookie must be preserved");
+  assert.ok(!redirectedSent.cookies.some((c) => c.name === "auth_private"), "Host-only pre-redirect cookie must NOT leak to different host in structured cookies");
+  assert.ok(!redirectedSent.cookies.some((c) => c.name === "expired_token"), "Expired cookie must NOT be present in structured cookies");
+
+  // Phase D: In-Page Media Bridge (discoveredMedia message handling & scheme validation)
+  for (const listener of mock.api.runtime.onMessage.listeners) {
+    let responseResult = null;
+    await listener(
+      { type: "discoveredMedia", url: "https://video.example.test/live/stream.m3u8", mediaType: "HLS" },
+      { tab: { id: 101 } },
+      (res) => { responseResult = res; }
+    );
+    // Invalid schemes must be dropped cleanly without error
+    await listener(
+      { type: "discoveredMedia", url: "javascript:alert(1)", mediaType: "HLS" },
+      { tab: { id: 101 } },
+      (res) => { responseResult = res; }
+    );
+  }
 }
 
 Promise.all([

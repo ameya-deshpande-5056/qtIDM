@@ -269,6 +269,10 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
     applyTheme();
     configureClipboardMonitor();
 
+    downloader_.setPersistenceHandler([this](const QString& id, const QVector<SegmentInfo>& segments) {
+        return repository_.checkpoint(id, segments);
+    });
+
     connect(&downloader_, &CurlEpollDownloader::downloadAdded, this, &MainWindow::onDownloadAdded);
     connect(&downloader_, &CurlEpollDownloader::progressChanged, this, &MainWindow::onProgressChanged);
     connect(&downloader_, &CurlEpollDownloader::segmentsChanged, this, &MainWindow::onSegmentsChanged);
@@ -330,6 +334,8 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
         });
     connect(&scheduler_, &DownloadScheduler::historyRemovalRequested, this, [this](const QString& id) {
         repository_.removeDownload(id);
+        uncommittedSegmentErrors_.remove(id);
+        latestSegments_.remove(id);
         const int row = rowForId(id);
         if (row >= 0) {
             downloads_->removeRow(row);
@@ -867,6 +873,23 @@ bool MainWindow::addUrls(QStringList urls, QVariantMap headers)
         const auto httpMethod = takeHeader(&requestHeaders, u"_qtidmHttpMethod").trimmed().toUpper();
         const auto requestBody = QByteArray::fromBase64(takeHeader(&requestHeaders, u"_qtidmRequestBody").toLatin1());
         request.headers = std::move(requestHeaders);
+        const auto rawCookies = browserDownload.value(QStringLiteral("cookies")).toList();
+        for (const auto& rawCookie : rawCookies) {
+            const auto cMap = rawCookie.toMap();
+            CookieRecord record;
+            record.name = cMap.value(QStringLiteral("name")).toString();
+            record.value = cMap.value(QStringLiteral("value")).toString();
+            record.domain = cMap.value(QStringLiteral("domain")).toString();
+            record.hostOnly = cMap.value(QStringLiteral("hostOnly")).toBool();
+            record.path = cMap.value(QStringLiteral("path"), QStringLiteral("/")).toString();
+            record.secure = cMap.value(QStringLiteral("secure")).toBool();
+            record.httpOnly = cMap.value(QStringLiteral("httpOnly")).toBool();
+            record.session = cMap.value(QStringLiteral("session")).toBool();
+            record.expirationDate = cMap.value(QStringLiteral("expirationDate")).toLongLong();
+            if (!record.name.isEmpty()) {
+                request.cookies.append(record);
+            }
+        }
         request.httpMethod = httpMethod == QStringLiteral("POST") ? httpMethod : QString {};
         request.requestBody = request.httpMethod == QStringLiteral("POST") ? requestBody : QByteArray {};
         if (request.httpMethod == QStringLiteral("POST")) {
@@ -1005,25 +1028,52 @@ void MainWindow::onProgressChanged(const QString& id, qint64 received, qint64 to
 
 void MainWindow::onSegmentsChanged(const QString& id, QVector<SegmentInfo> segments)
 {
+    latestSegments_.insert(id, segments);
     const int row = rowForId(id);
-    if (row < 0) {
-        return;
+    if (row >= 0) {
+        auto* grid = qobject_cast<SegmentGrid*>(downloads_->cellWidget(row, 8));
+        if (grid) {
+            grid->setSegments(segments);
+        }
     }
-    auto* grid = qobject_cast<SegmentGrid*>(downloads_->cellWidget(row, 8));
-    if (grid) {
-        grid->setSegments(segments);
+    if (!repository_.checkpoint(id, segments)) {
+        uncommittedSegmentErrors_.insert(id);
+        qWarning("Failed to persist updated segments for download %s: %s",
+                 qPrintable(id), qPrintable(repository_.lastError()));
+    } else {
+        downloader_.acknowledgeCheckpoint(id, segments);
+        uncommittedSegmentErrors_.remove(id);
     }
-    repository_.updateSegments(id, segments);
-    refreshDownloadDetailsFor(id);
+    if (row >= 0) {
+        refreshDownloadDetailsFor(id);
+    }
 }
 
 void MainWindow::onStatusChanged(const QString& id, DownloadStatus status, const QString& message)
 {
-    repository_.updateStatus(id, status);
-    if (message.isEmpty()) {
+    auto effectiveStatus = status;
+    auto effectiveMessage = message;
+
+    if (effectiveStatus == DownloadStatus::Paused) {
+        if (uncommittedSegmentErrors_.contains(id)) {
+            if (latestSegments_.contains(id) && repository_.checkpoint(id, latestSegments_.value(id))) {
+                uncommittedSegmentErrors_.remove(id);
+            } else {
+                effectiveStatus = DownloadStatus::Failed;
+                effectiveMessage = QStringLiteral("Failed to persist download resume state: %1")
+                                       .arg(repository_.lastError());
+            }
+        }
+    } else if (!isActiveStatus(effectiveStatus)) {
+        uncommittedSegmentErrors_.remove(id);
+        latestSegments_.remove(id);
+    }
+
+    repository_.updateStatus(id, effectiveStatus);
+    if (effectiveMessage.isEmpty()) {
         statusMessages_.remove(id);
     } else {
-        statusMessages_.insert(id, message);
+        statusMessages_.insert(id, effectiveMessage);
     }
     const int row = rowForId(id);
     QString targetName;
@@ -1031,9 +1081,9 @@ void MainWindow::onStatusChanged(const QString& id, DownloadStatus status, const
         const bool sortingEnabled = downloads_->isSortingEnabled();
         downloads_->setSortingEnabled(false);
         targetName = QFileInfo(downloads_->item(row, 2)->text()).fileName();
-        downloads_->item(row, 3)->setText(statusText(status));
-        downloads_->item(row, 0)->setData(Qt::UserRole + 1, statusText(status));
-        if (!isActiveStatus(status)) {
+        downloads_->item(row, 3)->setText(statusText(effectiveStatus));
+        downloads_->item(row, 0)->setData(Qt::UserRole + 1, statusText(effectiveStatus));
+        if (!isActiveStatus(effectiveStatus)) {
             downloads_->item(row, 6)->setText(QStringLiteral("0 B/s"));
             downloads_->item(row, 7)->setText(QStringLiteral("—"));
         }
@@ -1042,7 +1092,7 @@ void MainWindow::onStatusChanged(const QString& id, DownloadStatus status, const
         refreshDownloadDetailsFor(id);
         updateDownloadActionStates();
     }
-    if (isActiveStatus(status)) {
+    if (isActiveStatus(effectiveStatus)) {
         activeTransfers_.insert(id);
     } else {
         activeTransfers_.remove(id);
@@ -1052,20 +1102,20 @@ void MainWindow::onStatusChanged(const QString& id, DownloadStatus status, const
         }
     }
     updateSessionStatus();
-    if (!message.isEmpty()) {
-        statusBar()->showMessage(message, 5000);
+    if (!effectiveMessage.isEmpty()) {
+        statusBar()->showMessage(effectiveMessage, 5000);
     }
-    if (status == DownloadStatus::Failed) {
+    if (effectiveStatus == DownloadStatus::Failed) {
         Logger::error(QStringLiteral("Download %1").arg(id),
-                      message.isEmpty() ? QStringLiteral("Download failed without a reported cause") : message);
+                      effectiveMessage.isEmpty() ? QStringLiteral("Download failed without a reported cause") : effectiveMessage);
     }
     if (tray_ && QSettings().value(QStringLiteral("notifications/enabled"), true).toBool()
-        && (status == DownloadStatus::Completed || status == DownloadStatus::Failed)) {
+        && (effectiveStatus == DownloadStatus::Completed || effectiveStatus == DownloadStatus::Failed)) {
         const auto name = targetName.isEmpty() ? id : targetName;
-        tray_->showMessage(status == DownloadStatus::Completed
+        tray_->showMessage(effectiveStatus == DownloadStatus::Completed
                 ? QStringLiteral("Download complete") : QStringLiteral("Download failed"),
-            message.isEmpty() ? name : QStringLiteral("%1\n%2").arg(name, message),
-            status == DownloadStatus::Completed ? QSystemTrayIcon::Information : QSystemTrayIcon::Warning,
+            effectiveMessage.isEmpty() ? name : QStringLiteral("%1\n%2").arg(name, effectiveMessage),
+            effectiveStatus == DownloadStatus::Completed ? QSystemTrayIcon::Information : QSystemTrayIcon::Warning,
             5000);
     }
 }
@@ -1992,6 +2042,8 @@ void MainWindow::deleteSelected()
             downloader_.cancel(id);
         }
         repository_.removeDownload(id);
+        uncommittedSegmentErrors_.remove(id);
+        latestSegments_.remove(id);
         if (deleteFiles->isChecked()) {
             QFile::remove(path);
             QFile::remove(path + QStringLiteral(".part"));

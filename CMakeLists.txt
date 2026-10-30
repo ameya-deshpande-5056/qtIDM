@@ -277,11 +277,12 @@ add_executable(qtIDM_downloader_integration_tests
     src/core/CurlEpollDownloader.cpp
     src/core/DownloadTypes.cpp
     src/core/SparseFileWriter.cpp
+    src/storage/DownloadRepository.cpp
 )
 
 target_include_directories(qtIDM_downloader_integration_tests PRIVATE src)
 target_compile_definitions(qtIDM_downloader_integration_tests PRIVATE QTIDM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-target_link_libraries(qtIDM_downloader_integration_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl Threads::Threads)
+target_link_libraries(qtIDM_downloader_integration_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl Threads::Threads SQLite::SQLite3)
 add_test(NAME qtIDM_downloader_integration_tests COMMAND qtIDM_downloader_integration_tests)
 
 add_executable(qtIDM_media_downloader_tests
@@ -323,6 +324,21 @@ add_executable(qtIDM_zip_preview_tests
 target_include_directories(qtIDM_zip_preview_tests PRIVATE src)
 target_link_libraries(qtIDM_zip_preview_tests PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME qtIDM_zip_preview_tests COMMAND qtIDM_zip_preview_tests)
+
+add_executable(qtIDM_crash_worker
+    tests/crash_worker.cpp
+    src/core/CurlEpollDownloader.cpp
+    src/core/DownloadTypes.cpp
+    src/core/SparseFileWriter.cpp
+    src/storage/DownloadRepository.cpp
+)
+target_include_directories(qtIDM_crash_worker PRIVATE src)
+target_link_libraries(qtIDM_crash_worker PRIVATE Qt6::Core CURL::libcurl SQLite::SQLite3 Threads::Threads)
+
+add_test(NAME qtIDM_crash_injection_tests
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/crash_injection_test.py
+)
+set_tests_properties(qtIDM_crash_injection_tests PROPERTIES TIMEOUT 60)
 endif()
 
 install(TARGETS qtIDM qtIDM-native-host RUNTIME DESTINATION bin)

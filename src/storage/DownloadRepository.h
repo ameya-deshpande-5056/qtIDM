@@ -3,6 +3,7 @@
 #include "core/DownloadTypes.h"
 
 #include <QList>
+#include <QRecursiveMutex>
 #include <QString>
 #include <sqlite3.h>
 
@@ -19,6 +20,7 @@ public:
     bool updateStatus(const QString& id, DownloadStatus status);
     bool updateProgress(const QString& id, qint64 completedBytes, qint64 totalBytes, DownloadStatus status);
     bool updateSegments(const QString& id, const QVector<SegmentInfo>& segments);
+    bool checkpoint(const QString& id, const QVector<SegmentInfo>& segments);
     bool removeDownload(const QString& id);
     QList<DownloadRecord> listDownloads() const;
     QString lastError() const;
@@ -26,6 +28,7 @@ public:
 private:
     sqlite3* db_ = nullptr;
     mutable QString lastError_;
+    mutable QRecursiveMutex dbMutex_;
 };
 
 }

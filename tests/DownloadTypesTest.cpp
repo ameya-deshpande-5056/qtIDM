@@ -58,6 +58,7 @@ private slots:
         request.connectTimeoutSeconds = 45;
         request.lowSpeedTimeoutSeconds = 90;
         request.maximumRedirects = 12;
+        request.allowPrivateNetworkRedirects = true;
         request.priority = 42;
         request.repeatIntervalSeconds = 3600;
         request.fileConflictPolicy = qtidm::FileConflictPolicy::Skip;
@@ -66,6 +67,10 @@ private slots:
         request.expectedTotalBytes = 123456;
         request.entityTag = QStringLiteral("\"fixture-etag\"");
         request.lastModified = QStringLiteral("Sun, 20 Jul 2026 12:00:00 GMT");
+        request.cookies.append(qtidm::CookieRecord(
+            QStringLiteral("session_token"), QStringLiteral("xyz123"),
+            QStringLiteral(".example.com"), false, QStringLiteral("/app"),
+            true, true, false, 1893456000));
 
         request.url = QUrl(QStringLiteral(
             "https://example.com/file.bin?"
@@ -98,6 +103,16 @@ private slots:
         QCOMPARE(copy.allowedWeekdays, 0x1f);
         QCOMPARE(copy.headers.value(QStringLiteral("Cookie")).toString(), QStringLiteral("a=b"));
         QCOMPARE(copy.headers.value(QStringLiteral("User-Agent")).toString(), QStringLiteral("qtIDM-test"));
+        QCOMPARE(copy.cookies.size(), 1);
+        QCOMPARE(copy.cookies[0].name, QStringLiteral("session_token"));
+        QCOMPARE(copy.cookies[0].value, QStringLiteral("xyz123"));
+        QCOMPARE(copy.cookies[0].domain, QStringLiteral(".example.com"));
+        QCOMPARE(copy.cookies[0].hostOnly, false);
+        QCOMPARE(copy.cookies[0].path, QStringLiteral("/app"));
+        QCOMPARE(copy.cookies[0].secure, true);
+        QCOMPARE(copy.cookies[0].httpOnly, true);
+        QCOMPARE(copy.cookies[0].session, false);
+        QCOMPARE(copy.cookies[0].expirationDate, 1893456000);
         QCOMPARE(copy.segments, 32);
         QCOMPARE(copy.perHostConnectionLimit, 9);
         QCOMPARE(copy.dynamicSegmentation, false);
@@ -109,6 +124,7 @@ private slots:
         QCOMPARE(copy.connectTimeoutSeconds, 45);
         QCOMPARE(copy.lowSpeedTimeoutSeconds, 90);
         QCOMPARE(copy.maximumRedirects, 12);
+        QCOMPARE(copy.allowPrivateNetworkRedirects, true);
         QCOMPARE(copy.priority, 42);
         QCOMPARE(copy.repeatIntervalSeconds, 3600);
         QCOMPARE(static_cast<int>(copy.fileConflictPolicy), static_cast<int>(qtidm::FileConflictPolicy::Skip));

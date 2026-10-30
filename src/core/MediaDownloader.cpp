@@ -83,6 +83,29 @@ MediaDownloader::~MediaDownloader()
 
 bool MediaDownloader::supports(const QUrl& url, const QString& mediaTypeHint)
 {
+    if (!url.isValid()) {
+        return false;
+    }
+    const auto scheme = url.scheme().toLower();
+    if (scheme != QStringLiteral("http") && scheme != QStringLiteral("https") && scheme != QStringLiteral("file")) {
+        return false;
+    }
+    if (!url.userName().isEmpty() || !url.password().isEmpty()) {
+        return false;
+    }
+    if (url.host() == QStringLiteral("169.254.169.254")) {
+        return false;
+    }
+    if (scheme == QStringLiteral("file") || url.isLocalFile()) {
+        const auto localPath = url.toLocalFile();
+        if (localPath.isEmpty()) {
+            return false;
+        }
+        const QFileInfo fileInfo(localPath);
+        if (!fileInfo.exists() || !fileInfo.isFile()) {
+            return false;
+        }
+    }
     const auto normalizedHint = mediaTypeHint.trimmed().toUpper();
     if (normalizedHint == QStringLiteral("HLS") || normalizedHint == QStringLiteral("DASH")) {
         return true;
@@ -98,6 +121,18 @@ bool MediaDownloader::declaresUnsupportedDrm(const QByteArray& manifest)
         || lower.contains("urn:uuid:9a04f079-9840-4286-ab92-e65be0885f95") // PlayReady
         || lower.contains("com.apple.streamingkeydelivery") // FairPlay
         || lower.contains("method=sample-aes");
+}
+
+QString MediaDownloader::protocolWhitelist(const QUrl& url)
+{
+    const auto scheme = url.scheme().toLower();
+    if (scheme == QStringLiteral("http") || scheme == QStringLiteral("https")) {
+        return QStringLiteral("http,https,tcp,tls,crypto");
+    }
+    if (scheme == QStringLiteral("file") || url.isLocalFile()) {
+        return QStringLiteral("file,crypto");
+    }
+    return {};
 }
 
 QStringList MediaDownloader::httpInputArguments(const QVariantMap& headers)
@@ -142,6 +177,14 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
     record.request.headers = headers;
     emit downloadAdded(record);
 
+    const auto hint = headers.value(QStringLiteral("_qtidmMediaType")).toString();
+    if (!supports(url, hint)) {
+        const auto message = QStringLiteral("Unsupported, inaccessible, or invalid media URL.");
+        emit statusChanged(id, DownloadStatus::Failed, message);
+        Logger::error(QStringLiteral("Media download %1").arg(id), message);
+        return id;
+    }
+
     if (url.isLocalFile()) {
         QFile manifest(url.toLocalFile());
         if (manifest.open(QIODevice::ReadOnly)
@@ -178,6 +221,10 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
         QStringLiteral("pipe:1"),
         QStringLiteral("-nostats")
     };
+    const auto whitelist = protocolWhitelist(url);
+    if (!whitelist.isEmpty()) {
+        arguments << QStringLiteral("-protocol_whitelist") << whitelist;
+    }
     arguments << httpInputArguments(headers);
     if (url.scheme() == QStringLiteral("http") || url.scheme() == QStringLiteral("https")) {
         arguments << QStringLiteral("-reconnect") << QStringLiteral("1")

@@ -42,6 +42,19 @@ private slots:
         QCOMPARE(writer.lastError(), QStringLiteral("write exceeds target size"));
     }
 
+    void rejectsOverflowWrites()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::SparseFileWriter writer;
+        QVERIFY(writer.open(dir.path() + QStringLiteral("/overflow.bin"), 1024));
+        const char buf[4] = "abc";
+        // offset + size overflows int64
+        QVERIFY(!writer.writeAt(std::numeric_limits<std::int64_t>::max() - 2, buf, 4));
+        QCOMPARE(writer.lastError(), QStringLiteral("invalid write parameters"));
+    }
+
     void rejectsWritesBeforeOpen()
     {
         qtidm::SparseFileWriter writer;
@@ -91,6 +104,27 @@ private slots:
 
         QVERIFY(existing.open(QIODevice::ReadOnly));
         QCOMPARE(existing.readAll(), QByteArray("prefix-suffix"));
+    }
+
+    void syncFlushesDataAndHandlesUnopenedWriter()
+    {
+        qtidm::SparseFileWriter unopenWriter;
+        QVERIFY(!unopenWriter.sync());
+        QCOMPARE(unopenWriter.lastError(), QStringLiteral("writer is not open"));
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const auto path = dir.path() + QStringLiteral("/sync_test.bin");
+        qtidm::SparseFileWriter writer;
+        QVERIFY(writer.open(path, 4096));
+        const QByteArray chunk("durable_data_payload");
+        QVERIFY(writer.writeAt(0, chunk.constData(), chunk.size()));
+        QVERIFY(writer.sync());
+        writer.close();
+
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.read(chunk.size()), chunk);
     }
 };
 

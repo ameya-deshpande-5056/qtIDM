@@ -325,7 +325,7 @@ function mediaType(url, contentType = "") {
 }
 
 async function storeMedia(details, value) {
-  if (details.tabId < 0 || !details.url || isExcluded(details.url, value)) {
+  if (details.tabId < 0 || !details.url || !/^https?:\/\//i.test(details.url) || isExcluded(details.url, value)) {
     return;
   }
   const key = mediaKey(details.tabId);
@@ -368,17 +368,104 @@ function rememberMedia(details, value) {
   });
 }
 
-async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "") {
+function matchesRfc6265(cookie, targetUrlStr) {
+  try {
+    const targetUrl = new URL(targetUrlStr);
+    const targetHost = targetUrl.hostname.toLowerCase();
+    const targetPath = targetUrl.pathname || "/";
+    const isSecure = targetUrl.protocol === "https:";
+
+    if (cookie.secure && !isSecure) {
+      return false;
+    }
+
+    if (cookie.expirationDate && cookie.expirationDate * 1000 < Date.now()) {
+      return false;
+    }
+
+    let cookieDomain = (cookie.domain || "").toLowerCase();
+    if (cookieDomain.startsWith(".")) {
+      cookieDomain = cookieDomain.slice(1);
+    }
+    if (!cookieDomain) return false;
+
+    if (cookie.hostOnly) {
+      if (targetHost !== cookieDomain) {
+        return false;
+      }
+    } else {
+      if (targetHost !== cookieDomain && !targetHost.endsWith("." + cookieDomain)) {
+        return false;
+      }
+    }
+
+    const cookiePath = cookie.path || "/";
+    if (cookiePath !== "/" && targetPath !== cookiePath) {
+      if (!targetPath.startsWith(cookiePath.endsWith("/") ? cookiePath : cookiePath + "/")) {
+        return false;
+      }
+    }
+
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function formatCookieRecord(c) {
+  return {
+    name: c.name || "",
+    value: c.value || "",
+    domain: c.domain || "",
+    hostOnly: !!c.hostOnly,
+    path: c.path || "/",
+    secure: !!c.secure,
+    httpOnly: !!c.httpOnly,
+    session: !!c.session,
+    expirationDate: typeof c.expirationDate === "number" ? Math.floor(c.expirationDate) : 0
+  };
+}
+
+async function getScopedCookies(targetUrl, initialUrl = "") {
+  try {
+    const rawTargetCookies = await browser.cookies.getAll({ url: targetUrl }).catch(() => []);
+    const targetCookies = rawTargetCookies.filter((c) => matchesRfc6265(c, targetUrl));
+    let initialCookies = [];
+    if (initialUrl && initialUrl !== targetUrl) {
+      const candidates = await browser.cookies.getAll({ url: initialUrl }).catch(() => []);
+      initialCookies = candidates.filter((c) => matchesRfc6265(c, targetUrl));
+    }
+    const cookieMap = new Map();
+    const structuredList = [];
+    for (const c of initialCookies) {
+      if (c && c.name && !cookieMap.has(c.name)) {
+        cookieMap.set(c.name, c.value || "");
+        structuredList.push(formatCookieRecord(c));
+      }
+    }
+    for (const c of targetCookies) {
+      if (c && c.name) {
+        cookieMap.set(c.name, c.value || "");
+        const existingIdx = structuredList.findIndex((item) => item.name === c.name);
+        if (existingIdx >= 0) {
+          structuredList[existingIdx] = formatCookieRecord(c);
+        } else {
+          structuredList.push(formatCookieRecord(c));
+        }
+      }
+    }
+    const cookieHeader = Array.from(cookieMap.entries()).map(([name, val]) => `${name}=${val}`).join("; ");
+    return { cookieHeader, structuredCookies: structuredList };
+  } catch (_) {
+    return { cookieHeader: "", structuredCookies: [] };
+  }
+}
+
+async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "") {
   if (!/^(?:https?|ftp):/i.test(url)) {
     throw new Error("Only HTTP, HTTPS, and FTP downloads can be redirected to qtIDM.");
   }
-  let cookies = [];
-  try {
-    cookies = await browser.cookies.getAll({ url });
-  } catch (_) {
-    cookies = [];
-  }
-  const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+  const { cookieHeader, structuredCookies } = await getScopedCookies(url, initialUrl);
   const request = recentRequestInfo(url);
   const headers = { ...request.headers, ...capturedHeaders };
   const pageReferrer = referrer || (tab && tab.url ? tab.url : "");
@@ -389,11 +476,11 @@ async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, 
   }
   setHeaderDefault(headers, "User-Agent", navigator.userAgent);
   if (mediaTypeHint === "HLS" || mediaTypeHint === "DASH") headers._qtidmMediaType = mediaTypeHint;
-  return { url, headers, method: method === "POST" || request.method === "POST" ? "POST" : "", body: body ? textToBase64(body) : (request.bodyBase64 || textToBase64(request.body)), suggestedFilename: leafFilename(suggestedFilename) };
+  return { url, headers, cookies: structuredCookies, method: method === "POST" || request.method === "POST" ? "POST" : "", body: body ? textToBase64(body) : (request.bodyBase64 || textToBase64(request.body)), suggestedFilename: leafFilename(suggestedFilename) };
 }
 
-async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "") {
-  const response = await nativeRequest({ downloads: [await makeDownloadEntry(url, tab, referrer, capturedHeaders, mediaTypeHint, suggestedFilename, method, body)] });
+async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "") {
+  const response = await nativeRequest({ downloads: [await makeDownloadEntry(url, tab, referrer, capturedHeaders, mediaTypeHint, suggestedFilename, method, body, initialUrl)] });
   if (!response || !response.ok || response.accepted !== true) {
     throw new Error(response && response.message ? response.message : "The qtIDM native host did not acknowledge the request.");
   }
@@ -434,6 +521,7 @@ async function redirectBrowserDownload(item, url) {
   let paused = false;
   let removed = false;
   const request = recentRequestInfo(url);
+  const initialUrl = (item.url && item.url !== url) ? item.url : "";
   try {
     await browser.downloads.pause(item.id);
     paused = true;
@@ -450,7 +538,7 @@ async function redirectBrowserDownload(item, url) {
       removed = true;
     }
     await sendToHost(
-      url, null, item.referrer || "", {}, "", browserSuggestedFilename(item.filename, url), request.method, request.body
+      url, null, item.referrer || "", {}, "", browserSuggestedFilename(item.filename, url), request.method, request.body, initialUrl
     );
     if (!prepared) {
       await browser.downloads.cancel(item.id).catch(() => {});
@@ -531,6 +619,31 @@ browser.webRequest.onHeadersReceived.addListener(
 browser.runtime.onMessage.addListener(async (message, sender) => {
   if (message.type === "modifierState") {
     if (sender.tab?.id >= 0) modifierByTab.set(sender.tab.id, !!message.active);
+    return { ok: true };
+  }
+  if (message.type === "discoveredMedia") {
+    const tab = sender.tab;
+    if (tab?.id >= 0 && typeof message.url === "string") {
+      try {
+        const parsed = new URL(message.url);
+        if ((parsed.protocol === "http:" || parsed.protocol === "https:")
+            && !parsed.username && !parsed.password && parsed.hostname !== "169.254.169.254") {
+          settings().then((value) => {
+            if (value.captureMedia) {
+              rememberMedia({
+                tabId: tab.id,
+                url: parsed.href,
+                type: "media",
+                method: "GET",
+                responseHeaders: [
+                  { name: "Content-Type", value: message.mediaType === "DASH" ? "application/dash+xml" : "application/vnd.apple.mpegurl" }
+                ]
+              }, value);
+            }
+          }).catch((err) => showError(err.message));
+        }
+      } catch (_) {}
+    }
     return { ok: true };
   }
   if (message.type === "qtidmScheme") {

@@ -19,6 +19,8 @@ private slots:
             QUrl(QStringLiteral("https://uwu.m3u8vault-10.example.test/extensionless-manifest"))));
         QVERIFY(qtidm::MediaDownloader::supports(
             QUrl(QStringLiteral("https://cdn.example.test/extensionless-manifest")), QStringLiteral("HLS")));
+        QVERIFY(!qtidm::MediaDownloader::supports(QUrl(QStringLiteral("javascript:alert(1);//master.m3u8"))));
+        QVERIFY(!qtidm::MediaDownloader::supports(QUrl(QStringLiteral("data:text/plain;base64,x.m3u8"))));
     }
 
     void detectsUnsupportedDrmDeclarations()
@@ -123,6 +125,57 @@ private slots:
         const auto streams = probe.readAllStandardOutput();
         QVERIFY(streams.contains("video"));
         QVERIFY(streams.contains("audio"));
+    }
+
+    void rejectsLocalFileBoundaryViolationsAndEmbeddedCredentials()
+    {
+        // Non-existent local file must be rejected by supports()
+        const QUrl nonExistentLocal(QStringLiteral("file:///nonexistent/path/stream.m3u8"));
+        QVERIFY(!qtidm::MediaDownloader::supports(nonExistentLocal));
+
+        // Embedded credentials must be rejected by supports()
+        const QUrl userPassUrl(QStringLiteral("https://user:pass@example.com/stream.m3u8"));
+        QVERIFY(!qtidm::MediaDownloader::supports(userPassUrl));
+
+        // Cloud metadata IP SSRF target must be rejected
+        const QUrl metadataUrl(QStringLiteral("http://169.254.169.254/latest/meta-data/stream.m3u8"));
+        QVERIFY(!qtidm::MediaDownloader::supports(metadataUrl));
+
+        // Existing local file is supported
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const auto realFile = dir.path() + QStringLiteral("/real.m3u8");
+        {
+            QFile file(realFile);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("#EXTM3U\n#EXT-X-VERSION:3\n");
+        }
+        const auto localUrl = QUrl::fromLocalFile(realFile);
+        QVERIFY(qtidm::MediaDownloader::supports(localUrl));
+
+        // Protocol whitelisting enforcement
+        QCOMPARE(qtidm::MediaDownloader::protocolWhitelist(QUrl(QStringLiteral("https://example.com/playlist.m3u8"))),
+                 QStringLiteral("http,https,tcp,tls,crypto"));
+        QCOMPARE(qtidm::MediaDownloader::protocolWhitelist(localUrl),
+                 QStringLiteral("file,crypto"));
+        QVERIFY(qtidm::MediaDownloader::protocolWhitelist(QUrl(QStringLiteral("ftp://example.com/media.mpd"))).isEmpty());
+
+        // Enqueueing an invalid/inaccessible URL fails immediately with status Failed
+        qRegisterMetaType<qtidm::DownloadStatus>("qtidm::DownloadStatus");
+        qtidm::MediaDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::MediaDownloader::statusChanged);
+        const auto failedId = downloader.enqueue(nonExistentLocal, dir.path() + QStringLiteral("/out.mp4"), {});
+        QVERIFY(!failedId.isEmpty());
+
+        bool failed = false;
+        for (const auto& event : statusSpy) {
+            if (event.at(0).toString() == failedId
+                && event.at(1).value<qtidm::DownloadStatus>() == qtidm::DownloadStatus::Failed) {
+                failed = true;
+                break;
+            }
+        }
+        QVERIFY(failed);
     }
 };
 

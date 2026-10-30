@@ -53,6 +53,20 @@ QJsonObject requestToJson(const DownloadRequest& request)
     for (auto it = request.headers.cbegin(); it != request.headers.cend(); ++it) {
         headers.insert(it.key(), QJsonValue::fromVariant(it.value()));
     }
+    QJsonArray cookiesJson;
+    for (const auto& c : request.cookies) {
+        cookiesJson.append(QJsonObject {
+            { QStringLiteral("name"), c.name },
+            { QStringLiteral("value"), c.value },
+            { QStringLiteral("domain"), c.domain },
+            { QStringLiteral("hostOnly"), c.hostOnly },
+            { QStringLiteral("path"), c.path },
+            { QStringLiteral("secure"), c.secure },
+            { QStringLiteral("httpOnly"), c.httpOnly },
+            { QStringLiteral("session"), c.session },
+            { QStringLiteral("expirationDate"), QString::number(c.expirationDate) }
+        });
+    }
     return {
         { QStringLiteral("url"), request.url.toString(QUrl::FullyEncoded) },
         { QStringLiteral("scheduleId"), request.scheduleId },
@@ -87,6 +101,7 @@ QJsonObject requestToJson(const DownloadRequest& request)
         { QStringLiteral("connectTimeoutSeconds"), request.connectTimeoutSeconds },
         { QStringLiteral("lowSpeedTimeoutSeconds"), request.lowSpeedTimeoutSeconds },
         { QStringLiteral("maximumRedirects"), request.maximumRedirects },
+        { QStringLiteral("allowPrivateNetworkRedirects"), request.allowPrivateNetworkRedirects },
         { QStringLiteral("priority"), request.priority },
         { QStringLiteral("repeatIntervalSeconds"), request.repeatIntervalSeconds },
         { QStringLiteral("fileConflictPolicy"), toStorageValue(request.fileConflictPolicy) },
@@ -95,6 +110,8 @@ QJsonObject requestToJson(const DownloadRequest& request)
         { QStringLiteral("expectedTotalBytes"), QString::number(request.expectedTotalBytes) },
         { QStringLiteral("entityTag"), request.entityTag },
         { QStringLiteral("lastModified"), request.lastModified },
+        { QStringLiteral("serverCookies"), QJsonArray::fromStringList(request.serverCookies) },
+        { QStringLiteral("cookies"), cookiesJson },
         { QStringLiteral("headers"), headers }
     };
 }
@@ -146,6 +163,7 @@ DownloadRequest requestFromJson(const QJsonObject& object)
     request.connectTimeoutSeconds = qBound(1, object.value(QStringLiteral("connectTimeoutSeconds")).toInt(15), 3600);
     request.lowSpeedTimeoutSeconds = qBound(1, object.value(QStringLiteral("lowSpeedTimeoutSeconds")).toInt(60), 3600);
     request.maximumRedirects = qBound(0, object.value(QStringLiteral("maximumRedirects")).toInt(20), 100);
+    request.allowPrivateNetworkRedirects = object.value(QStringLiteral("allowPrivateNetworkRedirects")).toBool(false);
     request.priority = object.value(QStringLiteral("priority")).toInt(0);
     request.repeatIntervalSeconds = qMax(0, object.value(QStringLiteral("repeatIntervalSeconds")).toInt(0));
     request.fileConflictPolicy = fileConflictPolicyFromStorage(
@@ -158,6 +176,27 @@ DownloadRequest requestFromJson(const QJsonObject& object)
         : -1;
     request.entityTag = object.value(QStringLiteral("entityTag")).toString().trimmed();
     request.lastModified = object.value(QStringLiteral("lastModified")).toString().trimmed();
+    const auto serverCookiesArr = object.value(QStringLiteral("serverCookies")).toArray();
+    for (const auto& val : serverCookiesArr) {
+        request.serverCookies.append(val.toString());
+    }
+    const auto cookiesArr = object.value(QStringLiteral("cookies")).toArray();
+    for (const auto& val : cookiesArr) {
+        const auto cObj = val.toObject();
+        CookieRecord record;
+        record.name = cObj.value(QStringLiteral("name")).toString();
+        record.value = cObj.value(QStringLiteral("value")).toString();
+        record.domain = cObj.value(QStringLiteral("domain")).toString();
+        record.hostOnly = cObj.value(QStringLiteral("hostOnly")).toBool();
+        record.path = cObj.value(QStringLiteral("path")).toString(QStringLiteral("/"));
+        record.secure = cObj.value(QStringLiteral("secure")).toBool();
+        record.httpOnly = cObj.value(QStringLiteral("httpOnly")).toBool();
+        record.session = cObj.value(QStringLiteral("session")).toBool();
+        record.expirationDate = cObj.value(QStringLiteral("expirationDate")).toString().toLongLong();
+        if (!record.name.isEmpty()) {
+            request.cookies.append(record);
+        }
+    }
     const auto headers = object.value(QStringLiteral("headers")).toObject();
     for (auto it = headers.begin(); it != headers.end(); ++it) {
         request.headers.insert(it.key(), it.value().toVariant());
@@ -174,6 +213,7 @@ QJsonObject recordToJson(const DownloadRecord& record)
             { QStringLiteral("start"), QString::number(segment.start) },
             { QStringLiteral("end"), QString::number(segment.end) },
             { QStringLiteral("written"), QString::number(segment.written) },
+            { QStringLiteral("durableWritten"), QString::number(segment.durableWritten) },
             { QStringLiteral("status"), toStorageValue(segment.status) }
         });
     }
@@ -218,6 +258,9 @@ DownloadRecord recordFromJson(const QJsonObject& object)
         segment.start = item.value(QStringLiteral("start")).toString().toLongLong();
         segment.end = item.value(QStringLiteral("end")).toString().toLongLong();
         segment.written = item.value(QStringLiteral("written")).toString().toLongLong();
+        segment.durableWritten = item.contains(QStringLiteral("durableWritten"))
+            ? item.value(QStringLiteral("durableWritten")).toString().toLongLong()
+            : segment.written;
         segment.status = downloadStatusFromStorage(item.value(QStringLiteral("status")).toString());
         record.segments.append(segment);
     }

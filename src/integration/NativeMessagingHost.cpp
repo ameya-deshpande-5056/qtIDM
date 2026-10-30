@@ -84,7 +84,29 @@ QJsonObject handle(const QJsonObject& object)
             const auto decodedBody = QByteArray::fromBase64(body);
             if (body.size() > 6 * 1024 * 1024 || decodedBody.size() > 4 * 1024 * 1024
                 || (!body.isEmpty() && decodedBody.isEmpty())) return errorReply(QStringLiteral("invalid-body"), QStringLiteral("Browser sent an invalid or oversized POST body."));
-            downloads.append(QVariantMap { { QStringLiteral("url"), url }, { QStringLiteral("headers"), headers }, { QStringLiteral("method"), method }, { QStringLiteral("body"), QString::fromLatin1(body) }, { QStringLiteral("suggestedFilename"), item.value(QStringLiteral("suggestedFilename")).toString().trimmed() } });
+            QVariantList cookies;
+            const auto cookieArray = item.value(QStringLiteral("cookies")).toArray();
+            for (const auto& cVal : cookieArray) {
+                const auto cObj = cVal.toObject();
+                const auto cName = cObj.value(QStringLiteral("name")).toString();
+                const auto cValStr = cObj.value(QStringLiteral("value")).toString();
+                if (cName.contains(QLatin1Char('\n')) || cName.contains(QLatin1Char('\r'))
+                    || cValStr.contains(QLatin1Char('\n')) || cValStr.contains(QLatin1Char('\r'))) {
+                    return errorReply(QStringLiteral("invalid-cookies"), QStringLiteral("Browser sent unsafe cookie data."));
+                }
+                QVariantMap cMap;
+                cMap.insert(QStringLiteral("name"), cName);
+                cMap.insert(QStringLiteral("value"), cValStr);
+                cMap.insert(QStringLiteral("domain"), cObj.value(QStringLiteral("domain")).toString());
+                cMap.insert(QStringLiteral("hostOnly"), cObj.value(QStringLiteral("hostOnly")).toBool());
+                cMap.insert(QStringLiteral("path"), cObj.value(QStringLiteral("path")).toString(QStringLiteral("/")));
+                cMap.insert(QStringLiteral("secure"), cObj.value(QStringLiteral("secure")).toBool());
+                cMap.insert(QStringLiteral("httpOnly"), cObj.value(QStringLiteral("httpOnly")).toBool());
+                cMap.insert(QStringLiteral("session"), cObj.value(QStringLiteral("session")).toBool());
+                cMap.insert(QStringLiteral("expirationDate"), static_cast<qint64>(cObj.value(QStringLiteral("expirationDate")).toDouble()));
+                cookies.append(cMap);
+            }
+            downloads.append(QVariantMap { { QStringLiteral("url"), url }, { QStringLiteral("headers"), headers }, { QStringLiteral("cookies"), cookies }, { QStringLiteral("method"), method }, { QStringLiteral("body"), QString::fromLatin1(body) }, { QStringLiteral("suggestedFilename"), item.value(QStringLiteral("suggestedFilename")).toString().trimmed() } });
         }
         // Nested QVariant maps can arrive from D-Bus as opaque QDBusArgument
         // wrappers. JSON uses an unambiguous string signature and preserves

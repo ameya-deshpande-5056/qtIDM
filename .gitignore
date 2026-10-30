@@ -43,3 +43,7 @@ Thumbs.db
 .flatpak-builder/
 repo/
 AppDir/
+
+# Research extracts and benchmark data
+research/extracted/
+research/*.json

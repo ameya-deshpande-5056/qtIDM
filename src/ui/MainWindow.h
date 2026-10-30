@@ -131,6 +131,8 @@ private:
     };
     QHash<QString, TransferMetric> transferMetrics_;
     QSet<QString> activeTransfers_;
+    QSet<QString> uncommittedSegmentErrors_;
+    QHash<QString, QVector<SegmentInfo>> latestSegments_;
     QElapsedTimer transferClock_;
     qint64 sessionDownloadedBytes_ = 0;
     QMetaObject::Connection clipboardConnection_;
