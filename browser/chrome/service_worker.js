@@ -416,10 +416,10 @@ async function storeMedia(details, value) {
     : (details.requestId ? requestHeadersById.get(details.requestId)?.headers : null)
       || recentRequestHeaders(details.url)
       || {};
+  const observedReferer = Object.entries(observedHeaders).find(([name]) => name.toLowerCase() === "referer")?.[1];
   const item = {
     url: details.url,
-    referrer: details.documentUrl || details.initiator
-      || Object.entries(observedHeaders).find(([name]) => name.toLowerCase() === "referer")?.[1]
+    referrer: observedReferer || details.initiator || details.documentUrl
       || previous?.referrer || "",
     detectedAt: Date.now(),
     type: mediaType(details.url, contentType),
