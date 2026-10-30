@@ -6,11 +6,14 @@
 #include <QHash>
 #include <QObject>
 #include <QStringList>
+#include <memory>
 
 class QProcess;
 class QUrl;
 
 namespace qtidm {
+
+class MediaStreamProxy;
 
 class MediaDownloader final : public QObject {
     Q_OBJECT
@@ -38,6 +41,7 @@ signals:
 private:
     struct Job {
         QProcess* process = nullptr;
+        std::shared_ptr<MediaStreamProxy> proxy;
         QString targetPath;
         QString stagingPath;
         QByteArray diagnostics;

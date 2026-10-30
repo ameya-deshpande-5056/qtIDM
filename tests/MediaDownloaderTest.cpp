@@ -1,4 +1,5 @@
 #include "core/MediaDownloader.h"
+#include "core/MediaStreamProxy.h"
 
 #include <QFile>
 #include <QProcess>
@@ -219,6 +220,27 @@ private slots:
         QCOMPARE(qtidm::MediaDownloader::mediaStagingPath(
             QStringLiteral("/downloads/Steel Ball Run - JoJo's Bizarre Adventure Ep. 7.mkv")),
             QStringLiteral("/downloads/Steel Ball Run - JoJo's Bizarre Adventure Ep. 7.part.mkv"));
+    }
+
+    void proxiesAndRewritesHlsStreamsForHttp2()
+    {
+        qtidm::MediaStreamProxy proxy;
+        const QUrl root(QStringLiteral("https://vault-14.example.test/stream/uwu.m3u8"));
+        QVariantMap headers;
+        headers.insert(QStringLiteral("Referer"), QStringLiteral("https://kwik.cx/"));
+        headers.insert(QStringLiteral("User-Agent"), QStringLiteral("TestBrowser/1.0"));
+
+        QVERIFY(proxy.start(root, headers));
+        QVERIFY(proxy.isRunning());
+        QVERIFY(proxy.port() > 0);
+        const auto proxyUrl = proxy.proxyUrl();
+        QCOMPARE(proxyUrl.scheme(), QStringLiteral("http"));
+        QCOMPARE(proxyUrl.host(), QStringLiteral("127.0.0.1"));
+        QCOMPARE(proxyUrl.port(), proxy.port());
+        QCOMPARE(proxyUrl.path(), QStringLiteral("/start.m3u8"));
+
+        proxy.stop();
+        QVERIFY(!proxy.isRunning());
     }
 };
 

@@ -1,4 +1,5 @@
 #include "core/MediaDownloader.h"
+#include "core/MediaStreamProxy.h"
 
 #include "app/Logger.h"
 
@@ -120,6 +121,9 @@ MediaDownloader::~MediaDownloader()
         if (!job.process->waitForFinished(2000)) {
             job.process->kill();
             job.process->waitForFinished(1000);
+        }
+        if (job.proxy) {
+            job.proxy->stop();
         }
     }
 }
@@ -247,6 +251,19 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
         return id;
     }
 
+    std::shared_ptr<MediaStreamProxy> proxy;
+    QUrl inputUrl = url;
+    if (url.scheme() == QStringLiteral("http") || url.scheme() == QStringLiteral("https")) {
+        proxy = std::make_shared<MediaStreamProxy>();
+        if (!proxy->start(url, headers)) {
+            const auto message = QStringLiteral("Could not initialize local HTTP/2 stream proxy.");
+            emit statusChanged(id, DownloadStatus::Failed, message);
+            Logger::error(QStringLiteral("Media download %1").arg(id), message);
+            return id;
+        }
+        inputUrl = proxy->proxyUrl();
+    }
+
     auto* process = new QProcess(this);
     process->setProgram(ffmpeg);
     process->setProcessChannelMode(QProcess::SeparateChannels);
@@ -268,7 +285,11 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
     if (!whitelist.isEmpty()) {
         arguments << QStringLiteral("-protocol_whitelist") << whitelist;
     }
-    arguments << httpInputArguments(headers);
+    arguments << QStringLiteral("-analyzeduration") << QStringLiteral("10000000")
+              << QStringLiteral("-probesize") << QStringLiteral("10000000");
+    if (!proxy) {
+        arguments << httpInputArguments(headers);
+    }
     if (url.scheme() == QStringLiteral("http") || url.scheme() == QStringLiteral("https")) {
         arguments << QStringLiteral("-reconnect") << QStringLiteral("1")
                   << QStringLiteral("-reconnect_streamed") << QStringLiteral("1")
@@ -276,7 +297,7 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
                   << QStringLiteral("-reconnect_on_http_error") << QStringLiteral("408,429,5xx")
                   << QStringLiteral("-reconnect_delay_max") << QStringLiteral("30");
     }
-    arguments << QStringLiteral("-i") << url.toString(QUrl::FullyEncoded)
+    arguments << QStringLiteral("-i") << inputUrl.toString(QUrl::FullyEncoded)
               << QStringLiteral("-map") << QStringLiteral("0:v?")
               << QStringLiteral("-map") << QStringLiteral("0:a?")
               << QStringLiteral("-map") << QStringLiteral("0:s?")
@@ -290,7 +311,7 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
     arguments << stagingPath;
     process->setArguments(arguments);
 
-    jobs_.insert(id, Job { process, targetPath, stagingPath, {}, 0, QDateTime::currentMSecsSinceEpoch(), false, false });
+    jobs_.insert(id, Job { process, proxy, targetPath, stagingPath, {}, 0, QDateTime::currentMSecsSinceEpoch(), false, false });
 
     connect(process, &QProcess::started, this, [this, id] {
         emit statusChanged(id, DownloadStatus::Downloading, QStringLiteral("Downloading and muxing adaptive media"));

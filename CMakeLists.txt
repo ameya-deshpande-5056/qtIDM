@@ -92,6 +92,7 @@ set(QTIDM_SOURCES
     src/core/ArchiveExtractor.cpp
     src/core/SiteGrabber.cpp
     src/core/MediaDownloader.cpp
+    src/core/MediaStreamProxy.cpp
     src/core/SparseFileWriter.cpp
     src/core/ZipPreview.cpp
     src/integration/ImportExportService.cpp
@@ -291,10 +292,11 @@ add_executable(qtIDM_media_downloader_tests
     src/app/Paths.cpp
     src/core/DownloadTypes.cpp
     src/core/MediaDownloader.cpp
+    src/core/MediaStreamProxy.cpp
 )
 
 target_include_directories(qtIDM_media_downloader_tests PRIVATE src)
-target_link_libraries(qtIDM_media_downloader_tests PRIVATE Qt6::Core Qt6::Test)
+target_link_libraries(qtIDM_media_downloader_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl)
 add_test(NAME qtIDM_media_downloader_tests COMMAND qtIDM_media_downloader_tests)
 
 add_executable(qtIDM_performance_smoke_tests
