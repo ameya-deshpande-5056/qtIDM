@@ -101,6 +101,50 @@ private slots:
         QCOMPARE(result.formats.size(), 1);
         QCOMPARE(result.formats[0].id, QStringLiteral("clear"));
     }
+
+    void parsesSeparateVideoAndAudioFormatsAndFiltersStoryboards()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QFile tool(dir.path() + QStringLiteral("/yt-dlp"));
+        QVERIFY(tool.open(QIODevice::WriteOnly));
+        tool.write(
+            "#!/bin/sh\n"
+            "for arg in \"$@\"; do\n"
+            "  if [ \"$arg\" = \"--format\" ]; then\n"
+            "    seen_format=1\n"
+            "  elif [ \"$seen_format\" = \"1\" ]; then\n"
+            "    format_val=\"$arg\"\n"
+            "    seen_format=0\n"
+            "  fi\n"
+            "done\n"
+            "if [ \"$format_val\" != \"all\" ]; then\n"
+            "  printf 'Expected --format all, got %s\\n' \"$format_val\" >&2\n"
+            "  exit 1\n"
+            "fi\n"
+            "printf '%s' '{\"title\":\"Bilibili Video\",\"extractor_key\":\"BiliBili\","
+            "\"http_headers\":{\"Referer\":\"https://www.bilibili.com/\"},"
+            "\"formats\":["
+            "{\"format_id\":\"30280\",\"ext\":\"m4a\",\"vcodec\":\"none\",\"acodec\":\"mp4a.40.2\","
+            "\"url\":\"https://cdn.example.test/audio.m4a\"},"
+            "{\"format_id\":\"30032\",\"height\":480,\"ext\":\"mp4\",\"vcodec\":\"avc1\",\"acodec\":\"none\","
+            "\"url\":\"https://cdn.example.test/video.mp4\"},"
+            "{\"format_id\":\"sb0\",\"format_note\":\"storyboard\",\"ext\":\"mhtml\",\"vcodec\":\"none\",\"acodec\":\"none\","
+            "\"url\":\"https://cdn.example.test/storyboard.mhtml\"}]}'\n");
+        tool.close();
+        QVERIFY(tool.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+
+        qtidm::SocialMediaExtractor extractor(tool.fileName());
+        QString error;
+        const auto result = extractor.extract(
+            QUrl(QStringLiteral("https://www.bilibili.com/video/BV1qNnY66EUY")), {}, &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(result.formats.size(), 2);
+        QCOMPARE(result.formats[0].id, QStringLiteral("30280"));
+        QCOMPARE(result.formats[0].label, QStringLiteral("M4A · audio only"));
+        QCOMPARE(result.formats[1].id, QStringLiteral("30032"));
+        QCOMPARE(result.formats[1].label, QStringLiteral("480p · MP4 · video only"));
+    }
 };
 
 QTEST_MAIN(SocialMediaExtractorTest)

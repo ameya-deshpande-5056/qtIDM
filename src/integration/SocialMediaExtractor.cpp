@@ -31,10 +31,16 @@ QString formatLabel(const QJsonObject& format)
     if (height > 0) parts.append(QStringLiteral("%1p").arg(height));
     const auto extension = format.value(QStringLiteral("ext")).toString();
     if (!extension.isEmpty()) parts.append(extension.toUpper());
-    const bool video = format.value(QStringLiteral("vcodec")).toString(QStringLiteral("none")) != QStringLiteral("none");
+    const bool video = format.value(QStringLiteral("vcodec")).toString(QStringLiteral("none")) != QStringLiteral("none")
+        || height > 0;
     const bool audio = format.value(QStringLiteral("acodec")).toString(QStringLiteral("none")) != QStringLiteral("none");
-    parts.append(video && audio ? QStringLiteral("video + audio")
-                               : video ? QStringLiteral("video only") : QStringLiteral("audio only"));
+    if (video && audio) {
+        parts.append(QStringLiteral("video + audio"));
+    } else if (video) {
+        parts.append(QStringLiteral("video only"));
+    } else if (audio) {
+        parts.append(QStringLiteral("audio only"));
+    }
     return parts.join(QStringLiteral(" · "));
 }
 
@@ -109,7 +115,7 @@ SocialMediaExtraction SocialMediaExtractor::extract(
         QStringLiteral("--no-warnings"),
         QStringLiteral("--no-playlist"),
         QStringLiteral("--skip-download"),
-        QStringLiteral("--format"), QStringLiteral("best")
+        QStringLiteral("--format"), QStringLiteral("all")
     };
     if (!browserCookies.trimmed().isEmpty()) {
         arguments << QStringLiteral("--cookies-from-browser") << browserCookies.trimmed();
@@ -172,6 +178,14 @@ SocialMediaExtraction SocialMediaExtractor::extract(
         if (jsonValueMeansDrm(format.value(QStringLiteral("has_drm")))
             || jsonValueMeansDrm(format.value(QStringLiteral("is_drm")))) {
             rejectedDrmFormat = true;
+            continue;
+        }
+        const auto ext = format.value(QStringLiteral("ext")).toString().toLower();
+        const auto note = format.value(QStringLiteral("format_note")).toString().toLower();
+        const bool video = format.value(QStringLiteral("vcodec")).toString(QStringLiteral("none")) != QStringLiteral("none")
+            || format.value(QStringLiteral("height")).toInt() > 0;
+        const bool audio = format.value(QStringLiteral("acodec")).toString(QStringLiteral("none")) != QStringLiteral("none");
+        if ((!video && !audio) || ext == QStringLiteral("mhtml") || note.contains(QStringLiteral("storyboard"))) {
             continue;
         }
         const QUrl mediaUrl(format.value(QStringLiteral("url")).toString());
