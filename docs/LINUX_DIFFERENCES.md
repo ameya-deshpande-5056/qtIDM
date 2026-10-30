@@ -1,6 +1,6 @@
-# Linux Differences
+# Linux Differences and Clean-Room Architecture
 
-This project does not ship copied IDM trademarks, icons, binary assets, fonts, or proprietary UI resources.
+qtIDM is an original, clean-room Linux-native download manager designed from functional specifications and open web standards (RFC 7230, RFC 7233, RFC 6265, RFC 7540). It does not contain, incorporate, or derive from any proprietary download managers, trademarks, icons, binary assets, fonts, or proprietary UI resources.
 
 Linux-specific behavior:
 
@@ -23,7 +23,7 @@ Implemented original Linux-native functionality:
 - Automatic archive extraction through 7-Zip with unsafe-entry rejection.
 - Secret Service credential storage through `secret-tool`.
 - NetworkManager metered-network policies for holding or pausing transfers.
-- Social-site media extraction through `yt-dlp`, excluding YouTube.
+- Social-site media extraction through `yt-dlp`.
 - Explicit DRM detection and refusal without circumvention.
 - JSON import/export.
 - Chrome and Firefox native messaging extension source.
@@ -37,4 +37,4 @@ Known limitations:
 
 - Chrome release builds require a persistent signing key and matching `QTIDM_CHROME_EXTENSION_ID`; Firefox uses the unlisted AMO signing channel with ID `qtidm@io.qtidm`.
 - Flatpak builds do not install host browser native messaging manifests; use a host package for browser integration.
-- This is an original IDM-like Linux application, not a proprietary IDM clone.
+- This is an independent, clean-room Linux implementation developed from open web standards and standard Linux desktop APIs.

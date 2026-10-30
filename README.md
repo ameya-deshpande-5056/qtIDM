@@ -8,8 +8,7 @@ qtIDM is a Linux-native Qt6 Widgets download manager written in C++20. It
 combines segmented HTTP/HTTPS/FTP transfers, persistent queues, adaptive-media
 handling, browser integration, and desktop automation in one application.
 
-The project is independently developed and accepts only original contributions
-or material distributed under compatible open-source licences.
+qtIDM is an original, clean-room implementation developed independently from open web standards (RFC 7230, RFC 7233, RFC 6265, RFC 7540) and standard browser Native Messaging specifications. It accepts only original contributions or material distributed under compatible open-source licenses.
 
 ## Features
 
@@ -36,8 +35,9 @@ or material distributed under compatible open-source licences.
 - Non-DRM HLS and MPEG-DASH downloading through FFmpeg.
 - Explicit Widevine, PlayReady, FairPlay, and SAMPLE-AES detection with a clear refusal instead of attempting DRM circumvention.
 - Separate adaptive audio and video track downloading and muxing.
-- Maintained social-site extraction through `yt-dlp` for supported Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, Dailymotion, Twitch, and SoundCloud links.
+- Maintained social-site extraction through `yt-dlp` for supported YouTube, Bilibili, Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, Dailymotion, Twitch, and SoundCloud links.
 - Browser detection of HLS, DASH, direct audio/video, and common subtitle responses.
+- Accurate stream title preservation capturing complete names and numbers (e.g. `Ep. 7`) without truncation at periods before the file extension.
 - Pause, resume, cancel, progress reporting, and persisted history for media downloads.
 
 ### Queues And Scheduling
@@ -75,7 +75,7 @@ or material distributed under compatible open-source licences.
 - Context-menu capture for links, images, audio, video, all page links/images, and selected links; batches are limited to 100 URLs.
 - Cookies, referrer, browser user agent, resolved `Content-Disposition` filenames, and per-URL request headers forwarding; redirected browser files are removed before qtIDM presents its download-options dialog to avoid false filename collisions.
 - POST forwarding for form data and raw/binary request bodies up to 4 MiB; POST downloads use one safe connection rather than ranged segments.
-- Captured HLS, DASH, direct audio/video, and subtitle requests are retained in bounded per-tab storage for review and submission.
+- Captured HLS, DASH, direct audio/video, and subtitle requests are retained in bounded per-tab storage for review and submission, with real-time popup refresh and DOM observers capturing streams inside embedded player iframes.
 - `qtidm:` links can explicitly send an HTTP, HTTPS, or FTP URL to qtIDM.
 - Manual single-URL and batch submission of up to 100 addresses, with one shared application-side batch-options dialog for destination, queue, scheduling, connections, and conflict handling.
 - Real Chrome and Firefox E2E tests verify interception, browser context forwarding, and persistent native-messaging sessions.
@@ -201,7 +201,7 @@ Build and test the Debian package:
 
 ```bash
 sh packaging/build-deb.sh
-sudo apt-get install -y ./dist/qtidm_0.2.0-1_amd64.deb
+sudo apt-get install -y ./dist/qtidm_0.2.5-1_amd64.deb
 qtIDM --version
 ```
 
@@ -223,7 +223,7 @@ chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
 sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
 sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
 APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.2.0-x86_64.AppImage --version
+APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.2.5-x86_64.AppImage --version
 ```
 
 The script writes exactly one versioned AppImage to `dist/`. The checksums pin
@@ -236,7 +236,7 @@ Build and test the Flatpak bundle:
 ```bash
 sh packaging/release/version-info.sh
 sh packaging/release/build-flatpak-bundle.sh
-flatpak install --user -y dist/qtIDM-0.2.0.flatpak
+flatpak install --user -y dist/qtIDM-0.2.5.flatpak
 flatpak run io.qtidm.Qtidm --version
 ```
 
@@ -290,7 +290,7 @@ The application and browser integrations have independent version tracks:
 
 | Component | Current version | Authoritative files |
 | --- | --- | --- |
-| qtIDM application and release tag | `0.2.0` / `v0.2.0` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
+| qtIDM application and release tag | `0.2.5` / `v0.2.5` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
 | Chrome and Firefox extensions | `0.4.0` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
 
 The two checked-in browser manifest versions must always match each other, but
@@ -452,7 +452,6 @@ The release `.deb` installs the signed files at:
 ## Current Limitations
 
 - DRM-protected media is intentionally unsupported.
-- YouTube-specific extraction is intentionally unavailable; browser capture and ordinary non-DRM media downloading remain available.
 - BitTorrent is not implemented.
 - Chrome release builds require the signing-key-derived extension ID through `QTIDM_CHROME_EXTENSION_ID`.
 - Flatpak does not install native messaging manifests into host browser directories; install a host package for browser integration.

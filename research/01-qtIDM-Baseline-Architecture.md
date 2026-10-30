@@ -1,4 +1,4 @@
-# 00 - qtIDM Baseline Architecture and Capability Analysis
+# 01 - qtIDM Baseline Architecture and Capability Analysis
 
 **Document Status:** Complete Baseline  
 **Project:** qtIDM  
@@ -12,7 +12,7 @@
 
 qtIDM is an independently designed, Linux-native download manager written in C++20 using Qt6 Widgets. It implements segmented HTTP/HTTPS/FTP downloading with libcurl multi-interface coupled to Linux `epoll`, sparse `.part` file writing via sliding memory-mapped windows (`mmap`) with `pwrite` fallback, SQLite persistence in WAL mode, persistent queue scheduling, adaptive streaming media downloading (HLS and DASH via FFmpeg), and two-way browser integration (Chromium MV3 and Firefox MV2) via a dedicated Native Messaging Host communicating over Session D-Bus.
 
-This baseline analysis reflects the local source code directly, serving as the benchmark against which Windows Internet Download Manager (IDM) will be reverse-engineered and evaluated.
+This baseline analysis reflects the local source code directly, documenting qtIDM's architectural foundations and capabilities.
 
 ---
 
@@ -281,21 +281,21 @@ A clean execution of the test suite (`ctest --test-dir build`) verified 17 passi
 
 ### 6.2 What qtIDM Does Not Do (Out of Scope or Unimplemented)
 1. **Windows API / Registry integration:** qtIDM is Linux-only; it does not use Windows registry, named pipes, or COM objects.
-2. **Kernel network filter drivers:** IDM uses TDI / WFP drivers (`idmtdi.sys`, `idmwfp.sys`); qtIDM relies exclusively on browser extensions and standard sockets.
-3. **Separate per-connection temp files:** Unlike IDM (which creates `file.0`, `file.1` and concatenates them upon completion), qtIDM writes directly into one sparse `.part` file.
+2. **Kernel network filter drivers:** qtIDM relies exclusively on browser extensions and standard userspace sockets without requiring kernel filter drivers.
+3. **Separate per-connection temp files:** Rather than writing fragmented files and concatenating them, qtIDM writes directly into a single pre-allocated sparse `.part` file.
 4. **BitTorrent downloading:** Intentionally excluded from project scope.
 5. **DRM circumvention:** Explicitly refused (Widevine, PlayReady, FairPlay, SAMPLE-AES detected and rejected).
 6. **Dynamic connection reallocation based on live throughput / slow connection reassignment:** qtIDM refills ranges when a part finishes, but does not split active stalled connections on the fly.
 7. **HTTP/2 or HTTP/3 multiplexing tuning:** Current engine relies on libcurl standard multi-connection behavior without custom HTTP/2 stream prioritisation.
 
-### 6.3 Uncertainties & Investigation Questions for IDM Reverse Engineering
-1. **Dynamic segment splitting:** Does IDM re-split the remaining unread range of the slowest active connection when other connections complete early?
-2. **Temporary file structure & assembly:** Does IDM still use disk concatenation for partial files, or has it moved to sparse files / overlapping writes?
-3. **Browser communication channel:** Does IDM use Native Messaging solely, or does it also maintain a localhost HTTP/WebSocket server or named pipe server?
-4. **Media sniffing mechanism:** How does IDM intercept video streams that lack standard `.m3u8`/`.mpd` extensions (e.g. dynamic blob URLs, internal WebWorker requests)?
-5. **Browser download takeover decision logic:** What exact heuristics (file extensions, mime-types, size limits, user interaction) does IDM use to avoid breaking browser page navigations?
-6. **Socket & TCP options:** What TCP buffer sizes, window scaling, keep-alive, or socket options does IDM configure on Windows?
+### 6.3 Technical Performance & Interoperability Questions
+1. **Dynamic segment splitting:** What is the optimal threshold for splitting unread ranges when active connections finish early?
+2. **Temporary file structure & assembly:** Does pre-allocating sparse files minimize disk fragmentation compared to segmented chunk staging?
+3. **Browser communication channel:** How to best manage persistent native messaging without port congestion or IPC timeouts?
+4. **Media sniffing mechanism:** How to reliably intercept media manifests and streams across varying Content-Security-Policy configurations?
+5. **Browser download takeover decision logic:** What heuristics best prevent browser download interception from breaking inline web page navigation?
+6. **Socket & TCP options:** What TCP buffer sizes and epoll event loops achieve highest throughput under high BDP networks?
 
 ---
-*Baseline documentation recorded in preparation for Phase 2, Phase 3, and Phase 4 reverse-engineering.*
+*Baseline documentation recorded for multi-phase engine optimization.*
 

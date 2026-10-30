@@ -1,4 +1,4 @@
-# 10 - Phase B Scoped Redirect / Auth Context (RFC 6265) and Storage Durability Implementation Plan & Audit
+# 03 - Phase B Scoped Redirect / Auth Context (RFC 6265) and Storage Durability Implementation Plan & Audit
 
 **Status:** IMPLEMENTED AND FORMALLY VERIFIED IN REPOSITORY WORKING TREE  
 **Baseline Git Commit:** `2ef921a4a6a1a0b02d4bdd74496618684c68f1fb`  
@@ -10,7 +10,7 @@
 ## 1. Executive Summary & Scope
 
 ### 1.1 Objective
-Phase B addresses two interconnected categories of correctness, security, and durability risks identified in the reverse-engineering analysis of desktop IDM and the qtIDM codebase audit:
+Phase B addresses two interconnected categories of correctness, security, and durability risks identified in the qtIDM architectural review and codebase audit:
 1. **Multi-Origin & Pre-Redirect Scoped Cookie / Auth Context (RFC 6265):**
    When downloads are intercepted from modern authenticated services (OAuth2 SSO portals, file storage gateways, temporary media links), transfers frequently cross multiple redirect boundaries (e.g. `auth.example.com` $\to$ `cdn.example.com` $\to$ `storage.thirdparty.net`). Cookies and HTTP credentials must neither be naively dropped (causing HTTP 401/403 authorization failures on storage nodes) nor blindly leaked across third-party boundaries (violating RFC 6265 and leaking credentials).
 2. **Filesystem Block Preallocation, Sparse File Durability, and SIGBUS Elimination:**

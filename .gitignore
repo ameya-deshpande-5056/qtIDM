@@ -44,6 +44,5 @@ Thumbs.db
 repo/
 AppDir/
 
-# Research extracts and benchmark data
-research/extracted/
+# Benchmark data and temporary logs
 research/*.json

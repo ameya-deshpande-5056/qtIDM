@@ -1,4 +1,4 @@
-# 09 - Phase A Dynamic Active-Segment Reallocation Implementation Plan (Audited & Amended)
+# 02 - Phase A Dynamic Active-Segment Reallocation Implementation Plan (Audited & Amended)
 
 **Document Status:** Approved Engineering Specification & Technical Implementation Plan  
 **Author:** Antigravity Engineering (Senior C++ Systems Engineer / Linux Networking)  

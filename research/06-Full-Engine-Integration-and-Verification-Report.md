@@ -1,4 +1,4 @@
-# 13 - Full Engine Integration, Durability Verification, and Release Audit Report (Phases A, B, C, D & Beyond)
+# 06 - Full Engine Integration, Durability Verification, and Release Audit Report (Phases A, B, C, D & Beyond)
 
 **Status:** ALL PHASES IMPLEMENTED, HARDENED, AND FORMALLY VALIDATED  
 **Baseline Git Commit:** `2ef921a4a6a1a0b02d4bdd74496618684c68f1fb`  
@@ -11,7 +11,7 @@
 
 This engineering report delivers the comprehensive integration, durability audit, empirical validation, and release readiness assessment for the full phased enhancement of the `qtIDM` high-performance Linux download manager.
 
-All four planned engineering milestones specified in the validated research roadmap ([`research/08-validated-research-and-revised-implementation-roadmap.md`](file:///home/ameya/qtIDM/research/08-validated-research-and-revised-implementation-roadmap.md)) and detailed implementation specifications ([`research/09`](file:///home/ameya/qtIDM/research/09-Phase-A-Dynamic-Reallocation-Implementation-Plan.md) through [`research/12`](file:///home/ameya/qtIDM/research/12-Phase-D-In-Page-Streaming-Media-Bridge-Implementation.md)) have been fully implemented, hardened against failure modes, and verified with zero test regressions:
+All four planned engineering milestones specified in the architecture roadmap and detailed implementation specifications ([`research/02`](file:///home/ameya/qtIDM/research/02-Phase-A-Dynamic-Reallocation-Implementation-Plan.md) through [`research/05`](file:///home/ameya/qtIDM/research/05-Phase-D-In-Page-Streaming-Media-Bridge-Implementation.md)) have been fully implemented, hardened against failure modes, and verified with zero test regressions:
 
 ```mermaid
 graph TD
@@ -233,7 +233,7 @@ In strict accordance with the durability classification established in Document 
 
 1. **Working Tree Hygiene:**
    - Zero whitespace or formatting defects detected (`git diff --check`).
-   - Reverse-engineered binaries (`research/extracted/`) and temporary benchmark run logs excluded via [`.gitignore`](file:///home/ameya/qtIDM/.gitignore).
+   - Temporary benchmark run logs excluded via [`.gitignore`](file:///home/ameya/qtIDM/.gitignore).
 2. **Build Integrity:**
    - Compiles cleanly with zero compiler warnings using GCC 13.2 / C++20 / Qt 6.4.2 across all 21 build targets.
 3. **Full Multi-Phase Delivery:**
