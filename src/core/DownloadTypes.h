@@ -101,6 +101,7 @@ struct DownloadRequest {
     int maximumRedirects = 20;
     bool allowPrivateNetworkRedirects = false;
     bool insecureSkipSslVerification = false;
+    QString caCertificatePath;
     QString pinnedIp;
     int priority = 0;
     int repeatIntervalSeconds = 0;

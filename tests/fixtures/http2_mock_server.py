@@ -38,7 +38,7 @@ class MockServer:
         self.lock = threading.Lock()
         self.running = True
         self.ssl_ctx = None
-        if self.mode == "https_alpn":
+        if self.mode.startswith("https_alpn"):
             import os
             import subprocess
             import ssl
@@ -49,11 +49,14 @@ class MockServer:
             subprocess.run([
                 "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
                 "-keyout", self.key_file, "-out", self.cert_file, "-days", "1",
-                "-subj", "/CN=127.0.0.1"
+                "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1"
             ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             self.ssl_ctx.load_cert_chain(self.cert_file, self.key_file)
-            self.ssl_ctx.set_alpn_protocols(["h2", "http/1.1"])
+            if self.mode == "https_alpn_http1":
+                self.ssl_ctx.set_alpn_protocols(["http/1.1"])
+            else:
+                self.ssl_ctx.set_alpn_protocols(["h2", "http/1.1"])
 
     def save_stats(self, extra=None):
         if self.stats_file:
@@ -85,9 +88,27 @@ class MockServer:
 
     def handle_client(self, conn, attempt):
         try:
-            if self.mode == "https_alpn":
+            if self.mode.startswith("https_alpn"):
                 tls_conn = self.ssl_ctx.wrap_socket(conn, server_side=True)
                 proto = tls_conn.selected_alpn_protocol()
+                if proto == "http/1.1" or self.mode == "https_alpn_http1":
+                    with self.lock:
+                        self.connections += 1
+                    tls_conn.settimeout(5.0)
+                    try:
+                        req_chunk = tls_conn.recv(4096)
+                    except Exception:
+                        req_chunk = b""
+                    resp = (
+                        f"HTTP/1.1 200 OK\r\n"
+                        f"Content-Length: {len(TEST_PAYLOAD)}\r\n"
+                        f"Connection: close\r\n\r\n"
+                    ).encode("ascii") + TEST_PAYLOAD
+                    tls_conn.sendall(resp)
+                    tls_conn.close()
+                    self.save_stats({"alpn": "http/1.1", "connections": self.connections})
+                    return
+
                 with self.lock:
                     self.connections += 1
 
@@ -310,4 +331,6 @@ if __name__ == "__main__":
     stats_file = sys.argv[2] if len(sys.argv) > 2 else None
     server = MockServer(mode, stats_file)
     print(server.port, flush=True)
+    if server.mode.startswith("https_alpn") and hasattr(server, "cert_file"):
+        print(server.cert_file, flush=True)
     server.run()

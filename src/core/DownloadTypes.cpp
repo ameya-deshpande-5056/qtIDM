@@ -103,7 +103,7 @@ QJsonObject requestToJson(const DownloadRequest& request)
         { QStringLiteral("maximumRedirects"), request.maximumRedirects },
         { QStringLiteral("allowPrivateNetworkRedirects"), request.allowPrivateNetworkRedirects },
         { QStringLiteral("insecureSkipSslVerification"), request.insecureSkipSslVerification },
-        { QStringLiteral("pinnedIp"), request.pinnedIp },
+        { QStringLiteral("caCertificatePath"), request.caCertificatePath },
         { QStringLiteral("priority"), request.priority },
         { QStringLiteral("repeatIntervalSeconds"), request.repeatIntervalSeconds },
         { QStringLiteral("fileConflictPolicy"), toStorageValue(request.fileConflictPolicy) },
@@ -167,7 +167,8 @@ DownloadRequest requestFromJson(const QJsonObject& object)
     request.maximumRedirects = qBound(0, object.value(QStringLiteral("maximumRedirects")).toInt(20), 100);
     request.allowPrivateNetworkRedirects = object.value(QStringLiteral("allowPrivateNetworkRedirects")).toBool(false);
     request.insecureSkipSslVerification = object.value(QStringLiteral("insecureSkipSslVerification")).toBool(false);
-    request.pinnedIp = object.value(QStringLiteral("pinnedIp")).toString();
+    request.caCertificatePath = object.value(QStringLiteral("caCertificatePath")).toString();
+    request.pinnedIp.clear(); // Pinned IP is strictly an internal runtime resolution artifact
     request.priority = object.value(QStringLiteral("priority")).toInt(0);
     request.repeatIntervalSeconds = qMax(0, object.value(QStringLiteral("repeatIntervalSeconds")).toInt(0));
     request.fileConflictPolicy = fileConflictPolicyFromStorage(

@@ -169,7 +169,7 @@ An objective engineering assessment requires distinguishing process crashes from
   - Verified in `DownloaderIntegrationTest::cookieStandardsScopingAndHttpOnly` and `DownloaderIntegrationTest::structuredCookiesRfc6265Scoping`.
 
 ### 4.2 Explicit Cookie, Authorization Handling, SSRF Filtering, and TOCTOU DNS Rebinding Pinning
-- **Audit:** Explicit custom headers passed to `CURLOPT_HTTPHEADER` leak credentials across third-party redirect hops. Furthermore, redirect destination validation must strictly defend against IPv6 loopback, alternative IPv4 integer/octal/hex notations, cloud metadata services, and time-of-check-to-time-of-use (TOCTOU) DNS rebinding races where DNS answers change between validation and libcurl connection.
+- **Audit:** Explicit custom headers passed to `CURLOPT_HTTPHEADER` leak credentials across third-party redirect hops. Furthermore, redirect destination validation must strictly defend against IPv6 loopback, alternative IPv4 integer/octal/hex notations, cloud metadata services, and time-of-check-to-time-of-use (TOCTOU) DNS rebinding races where DNS answers change between validation and libcurl connection. Untrusted request JSON must not be able to inject arbitrary pinned IPs, and destination resolution failures must fail closed.
 - **Resolution:**
   - `validateRedirectUrl()` validates every hop against supported protocols (`http`, `https`, `ftp`) and rejects embedded credentials.
   - Comprehensive Private IP / Loopback / Metadata Containment (`isPrivateOrLoopbackHost`):
@@ -178,10 +178,14 @@ An objective engineering assessment requires distinguishing process crashes from
     - IPv6 literal parsing via `inet_pton` with square bracket stripping (`[::1]`, `[fe80::1]`, `[fd00:ec2::254]`, `[::ffff:127.0.0.1]`).
     - Explicit cloud metadata blocking: AWS IMDS IPv4 (`169.254.169.254`) and IPv6 (`fd00:ec2::254`), Alibaba Cloud metadata (`100.100.100.200`), GCP metadata (`metadata.google.internal`, `metadata`), and single-label hostnames (`instance-data`).
     - Synchronous DNS address resolution inspection: uses `getaddrinfo()` to verify that resolved destination IP addresses do not map to private, loopback, carrier-grade NAT (`100.64.0.0/10`), or link-local subnets.
-  - **TOCTOU DNS Rebinding Pinning via `CURLOPT_RESOLVE`:**
+  - **TOCTOU DNS Rebinding Pinning via `CURLOPT_RESOLVE` & Fail-Closed Enforcement:**
     - To eliminate the time-of-check-to-time-of-use DNS rebinding gap (where a domain returns public IPs during validation, but re-resolves to `127.0.0.1` when libcurl connects), qtIDM binds the validated public IP address directly to `request.pinnedIp`.
     - In `applyRequestOptions()`, `CURLOPT_RESOLVE` pins the host, port, and validated IP address (`HOST:PORT:PINNED_IP`). Libcurl bypasses subsequent DNS resolution and connects exclusively to the pre-validated IP.
+    - Untrusted request JSON protection: `requestFromJson()` explicitly does not deserialize `pinnedIp`, and `addTransfer()` overwrites `pinnedIp` exclusively from DNS validation.
+    - Fail-closed behavior: in `addTransfer()`, if a domain name resolves to loopback/private addresses, or if DNS resolution fails, the transfer immediately transitions to `DownloadStatus::Failed` without initiating connections.
     - On redirects, because `CURLOPT_FOLLOWLOCATION = 0L`, each hop is intercepted; the redirect destination is resolved and validated; and its IP address is pinned for the redirected transfer.
+  - **Proxy Interaction Characteristic:**
+    - When an explicit HTTP/HTTPS proxy (`request.proxyUrl`) is configured, hostname resolution is delegated to the remote proxy server (standard HTTP proxy semantics), bypassing client-side destination IP filtering unless the proxy itself enforces destination policy.
   - **Reactor Thread Execution Characteristic:**
     - Synchronous DNS resolution runs during transfer initiation (`addTransfer()`) and probe execution (`probeSize()`), outside the epoll `epoll_wait` reactor loop. Active socket events are not blocked by destination DNS filtering.
   - On cross-origin redirects (scheme, host, or port mismatch), `applyCrossOriginHeaderPolicy()` purges `Authorization`, `Proxy-Authorization`, `Cookie`, `X-Api-Key`, `X-Auth-Token`, and `X-Custom-*` headers, and clears HTTP Basic credentials.
@@ -202,17 +206,20 @@ An objective engineering assessment requires distinguishing process crashes from
   - Reactor loop unpacks event token: if `sockets_.find(fd)` generation differs or FD is absent, event is immediately discarded.
 
 ### 4.5 HTTP/2 Multiplexing Across Cleartext and TLS ALPN
-- **Audit:** Conflating transport errors with HTTP/2 protocol errors could cause unnecessary downgrades to HTTP/1.1. In addition, actual concurrent stream multiplexing over a single connection required empirical proof under both cleartext HTTP/2 (`h2c`) and encrypted HTTPS with TLS ALPN (`h2`).
+- **Audit:** Conflating transport errors with HTTP/2 protocol errors could cause unnecessary downgrades to HTTP/1.1. In addition, actual concurrent stream multiplexing over a single connection required empirical proof under both cleartext HTTP/2 (`h2c`) and encrypted HTTPS with TLS ALPN (`h2`), with trusted local CA verification and explicit insecure option testing.
 - **Resolution:**
   - Refined error downgrade policy in `CurlEpollDownloader.cpp`: `forceHttp1 = true` is strictly restricted to `errCode == CURLE_HTTP2 || errCode == CURLE_HTTP2_STREAM`. Generic transport failures like `CURLE_RECV_ERROR` or timeouts trigger standard retries without corrupting the protocol negotiation state.
   - Dedicated binary HTTP/2 frame test fixture in `tests/fixtures/http2_mock_server.py` supporting:
     - Cleartext `h2c` upgrade and multiplexing.
-    - HTTPS TLS with ALPN protocol negotiation (`h2`) via Python `ssl.SSLContext.set_alpn_protocols(["h2", "http/1.1"])`.
+    - HTTPS TLS with ALPN protocol negotiation (`h2`) via Python `ssl.SSLContext.set_alpn_protocols(["h2", "http/1.1"])` and on-the-fly CA/server certificate generation with Subject Alternative Name (`IP:127.0.0.1`).
+    - Mode `https_alpn_http1` for server-side ALPN selection of HTTP/1.1.
     - GOAWAY framing error injection and transparent HTTP/1.1 fallback.
   - **Empirical Multiplexing Verification:**
     - Cleartext: `DownloaderIntegrationTest::http2MultiplexesConcurrentStreamsOverSingleConnection` concurrently dispatches two independent streams (`stream 1` and `stream 3`) to the server, verifying that both streams complete over a single TCP connection (`connections == 1`, `streams >= 2`) with byte-exact payload validation.
-    - HTTPS TLS ALPN: `DownloaderIntegrationTest::http2HttpsAlpnMultiplexesConcurrentStreamsOverSingleTlsConnection` concurrently dispatches two independent streams to `https://127.0.0.1:{port}` over TLS, verifying that `ALPN == "h2"` was negotiated, both streams multiplexed over a single TLS connection (`connections == 1`, `streams >= 2`), and both payloads match byte-for-byte.
-    - Graceful Fallback: `DownloaderIntegrationTest::http2FailureTriggersAutomaticFallbackToHttp1` verifies that on genuine HTTP/2 framing faults, the transfer transparently falls back to HTTP/1.1 and completes successfully.
+    - HTTPS TLS ALPN with Trusted Local CA: `DownloaderIntegrationTest::http2HttpsAlpnMultiplexesConcurrentStreamsOverSingleTlsConnection` concurrently dispatches two independent streams to `https://127.0.0.1:{port}` with `insecureSkipSslVerification = false` and `caCertificatePath` pointing to the trusted test CA. Verifies that `ALPN == "h2"` was negotiated, both streams multiplexed over a single TLS connection (`connections == 1`, `streams >= 2`), and both payloads match byte-for-byte under strict certificate/hostname verification.
+    - Insecure Option Test: Verified separately with `insecureSkipSslVerification = true` against self-signed certs.
+    - ALPN HTTP/1.1 Fallback: `DownloaderIntegrationTest::http2HttpsAlpnFallbackWhenServerSelectsHttp1` verifies that when ALPN negotiates `http/1.1`, the engine transparently transfers the resource over HTTP/1.1.
+    - Framing Fault Fallback: `DownloaderIntegrationTest::http2FailureTriggersAutomaticFallbackToHttp1` verifies that on genuine HTTP/2 framing faults, the transfer transparently falls back to HTTP/1.1 and completes successfully.
 
 ### 4.6 `window.postMessage()` Validation and Media Boundary
 - **Audit:** Untrusted frames injecting arbitrary media URLs or malicious manifests referencing local files (`file:///etc/passwd`).
@@ -258,7 +265,7 @@ Executed via `ctest --test-dir build --output-on-failure`:
 | 21 | `qtIDM_crash_injection_tests` | 1.63 s | **PASSED** |
 
 ### 5.2 Standalone Downloader Integration Suite Breakdown
-Target: `tests/DownloaderIntegrationTest.cpp` — **40 passed, 0 failed, 0 skipped** (38 test methods + 2 QtTest lifecycle execution slots `initTestCase` and `cleanupTestCase`):
+Target: `tests/DownloaderIntegrationTest.cpp` — **41 passed, 0 failed, 0 skipped** (39 test methods + 2 QtTest lifecycle execution slots `initTestCase` and `cleanupTestCase`):
 - `initTestCase()` (QtTest lifecycle fixture setup: launches Python HTTP test server on dynamic loopback port)
 1. `downloadsSegmentedHttpRange`
 2. `alternateLimitCapsTheWholeSegmentedDownload`
@@ -298,8 +305,9 @@ Target: `tests/DownloaderIntegrationTest.cpp` — **40 passed, 0 failed, 0 skipp
 36. `http2ServerNoUpgradeStaysOnHttp1`
 37. `dnsValidationPinsResolvedIpViaCurlOptResolve`
 38. `http2HttpsAlpnMultiplexesConcurrentStreamsOverSingleTlsConnection`
+39. `http2HttpsAlpnFallbackWhenServerSelectsHttp1`
 - `cleanupTestCase()` (QtTest lifecycle fixture teardown: terminates Python HTTP test server)
-- **QtTest Summary:** `Totals: 40 passed, 0 failed, 0 skipped, 0 blacklisted` (11,542 ms).
+- **QtTest Summary:** `Totals: 41 passed, 0 failed, 0 skipped, 0 blacklisted` (10,768 ms).
 
 ### 5.3 Classification of Crash Tests: Out-of-Process vs In-Process
 - **Out-of-Process Crash Testing:**

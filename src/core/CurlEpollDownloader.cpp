@@ -58,6 +58,7 @@ struct CurlEpollDownloader::SegmentTransfer {
     QByteArray userPwdBytes;
     QByteArray proxyBytes;
     QByteArray requestBody;
+    QByteArray caCertBytes;
     curl_slist* headers = nullptr;
     curl_slist* resolveList = nullptr;
     bool requiresHttpPartialResponse = false;
@@ -330,6 +331,10 @@ void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDo
         const auto entry = QStringLiteral("%1:%2:%3").arg(request.url.host()).arg(port).arg(request.pinnedIp).toUtf8();
         transfer->resolveList = curl_slist_append(transfer->resolveList, entry.constData());
         curl_easy_setopt(easy, CURLOPT_RESOLVE, transfer->resolveList);
+    }
+    if (!request.caCertificatePath.isEmpty() && transfer) {
+        transfer->caCertBytes = request.caCertificatePath.toUtf8();
+        curl_easy_setopt(easy, CURLOPT_CAINFO, transfer->caCertBytes.constData());
     }
     if (request.insecureSkipSslVerification) {
         curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 0L);
@@ -1144,8 +1149,42 @@ void CurlEpollDownloader::addTransfer(QueuedRequest queued)
             queued.request.targetPath = renamed;
         }
     }
-    if (queued.request.pinnedIp.isEmpty() && !queued.request.allowPrivateNetworkRedirects) {
-        isPrivateOrLoopbackHost(queued.request.url.host(), &queued.request.pinnedIp);
+    const QString host = queued.request.url.host().trimmed();
+    if (!host.isEmpty()) {
+        const auto hostBytes = host.toUtf8();
+        struct in_addr in4;
+        struct in6_addr in6;
+        const bool isIpLiteral = (::inet_aton(hostBytes.constData(), &in4) == 1)
+                              || (::inet_pton(AF_INET6, hostBytes.constData(), &in6) == 1);
+        if (isIpLiteral) {
+            queued.request.pinnedIp.clear();
+            if (!queued.request.allowPrivateNetworkRedirects) {
+                if (host == QStringLiteral("169.254.169.254") || host == QStringLiteral("100.100.100.200")
+                    || host == QStringLiteral("[fd00:ec2::254]") || host == QStringLiteral("fd00:ec2::254")) {
+                    emit statusChanged(queued.id, DownloadStatus::Failed,
+                                       QStringLiteral("destination resolves to a blocked cloud metadata address"));
+                    return;
+                }
+            }
+        } else {
+            QString validatedPublicIp;
+            const bool isPrivateOrBlocked = isPrivateOrLoopbackHost(host, &validatedPublicIp);
+            if (!queued.request.allowPrivateNetworkRedirects && isPrivateOrBlocked) {
+                emit statusChanged(queued.id, DownloadStatus::Failed,
+                                   QStringLiteral("destination resolves to a private or loopback address"));
+                return;
+            }
+            if (validatedPublicIp.isEmpty() && !queued.request.allowPrivateNetworkRedirects) {
+                emit statusChanged(queued.id, DownloadStatus::Failed,
+                                   QStringLiteral("could not resolve destination host to a public IP address"));
+                return;
+            }
+            if (!validatedPublicIp.isEmpty()) {
+                queued.request.pinnedIp = validatedPublicIp;
+            } else if (!queued.request.allowPrivateNetworkRedirects) {
+                queued.request.pinnedIp.clear();
+            }
+        }
     }
     bool rangeSupported = false;
     QString probedEntityTag;

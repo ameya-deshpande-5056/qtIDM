@@ -1437,6 +1437,18 @@ void persistsDurableCheckpointsWithAcknowledgement()
         QVERIFY(dom1Line.contains(QStringLiteral(".sub1.example.com")));
         QVERIFY(dom2Line.contains(QStringLiteral(".sub2.example.com")));
         QVERIFY(dom1Line != dom2Line);
+
+        // 7. Secure cookie serialization: secure field must be TRUE
+        qtidm::CookieRecord secCookie(QStringLiteral("sec_cookie"), QStringLiteral("sec_val"), QStringLiteral("example.com"),
+                                      true, QStringLiteral("/"), true /*secure*/);
+        const auto secLine = qtidm::CurlEpollDownloader::toNetscapeCookieLine(secCookie);
+        QVERIFY(secLine.contains(QStringLiteral("\tTRUE\t")));
+
+        // 8. Expired cookie: expiration timestamp in the past
+        qtidm::CookieRecord expiredCookie(QStringLiteral("old_cookie"), QStringLiteral("old_val"), QStringLiteral("example.com"),
+                                          true, QStringLiteral("/"), false, false, false /*session*/, 1000);
+        const auto expiredLine = qtidm::CurlEpollDownloader::toNetscapeCookieLine(expiredCookie);
+        QVERIFY(expiredLine.contains(QStringLiteral("\t1000\told_cookie\told_val")));
     }
 
     void http2MultiplexesConcurrentStreamsOverSingleConnection()
@@ -1549,7 +1561,14 @@ void persistsDurableCheckpointsWithAcknowledgement()
 
     void dnsValidationPinsResolvedIpViaCurlOptResolve()
     {
-        // 1. Verify that isPrivateOrLoopbackHost populates resolvedPublicIp for a public domain
+        // 1. Verify that untrusted request JSON cannot inject arbitrary pinnedIp
+        QJsonObject untrustedJson;
+        untrustedJson[QStringLiteral("url")] = QStringLiteral("http://example.com/test.bin");
+        untrustedJson[QStringLiteral("pinnedIp")] = QStringLiteral("127.0.0.1");
+        const auto reqFromUntrusted = qtidm::requestFromJson(untrustedJson);
+        QVERIFY(reqFromUntrusted.pinnedIp.isEmpty());
+
+        // 2. Verify that isPrivateOrLoopbackHost populates resolvedPublicIp for a public domain
         QString publicIp;
         const bool isPriv = qtidm::CurlEpollDownloader::isPrivateOrLoopbackHost(QStringLiteral("example.com"), &publicIp);
         QVERIFY(!isPriv);
@@ -1560,9 +1579,7 @@ void persistsDurableCheckpointsWithAcknowledgement()
         QVERIFY(::inet_aton(ipBytes.constData(), &in4) == 1 || ::inet_pton(AF_INET6, ipBytes.constData(), &in6) == 1);
         QVERIFY(publicIp != QStringLiteral("127.0.0.1"));
 
-        // 2. Address Pinning via CURLOPT_RESOLVE in Downloader:
-        // Enqueue a request to a simulated non-existent domain "rebinding-test.invalid",
-        // but pin its IP to 127.0.0.1 via request.pinnedIp.
+        // 3. Verify that resolution failures and loopback domains fail closed in addTransfer
         QTemporaryDir dir;
         QVERIFY(dir.isValid());
 
@@ -1570,6 +1587,23 @@ void persistsDurableCheckpointsWithAcknowledgement()
         QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
         downloader.start();
 
+        // 3a. Domain that resolves to loopback (DNS rebinding) fails closed
+        qtidm::DownloadRequest rebindReq;
+        rebindReq.url = QUrl(QStringLiteral("http://localhost:%1/range.bin").arg(port_));
+        rebindReq.targetPath = dir.path() + QStringLiteral("/rebind_test.bin");
+        rebindReq.allowPrivateNetworkRedirects = false; // default secure policy
+        const auto rebindId = downloader.enqueue(rebindReq);
+        QVERIFY(waitForStatus(statusSpy, rebindId, qtidm::DownloadStatus::Failed, 5000));
+
+        // 3b. Unresolvable domain fails closed
+        qtidm::DownloadRequest unresolvableReq;
+        unresolvableReq.url = QUrl(QStringLiteral("http://nonexistent-rebinding-test.invalid:%1/range.bin").arg(port_));
+        unresolvableReq.targetPath = dir.path() + QStringLiteral("/unresolvable_test.bin");
+        unresolvableReq.allowPrivateNetworkRedirects = false;
+        const auto unresId = downloader.enqueue(unresolvableReq);
+        QVERIFY(waitForStatus(statusSpy, unresId, qtidm::DownloadStatus::Failed, 5000));
+
+        // 4. Pinning via CURLOPT_RESOLVE in Downloader with explicit private allowance for fixture:
         qtidm::DownloadRequest request;
         request.url = QUrl(QStringLiteral("http://rebinding-test.invalid:%1/range.bin").arg(port_));
         request.targetPath = dir.path() + QStringLiteral("/pinned_resolve_test.bin");
@@ -1605,35 +1639,35 @@ void persistsDurableCheckpointsWithAcknowledgement()
         QVERIFY(h2Server.waitForStarted());
         QVERIFY(h2Server.waitForReadyRead(5000));
         const int h2Port = QString::fromUtf8(h2Server.readLine()).trimmed().toInt();
+        const QString caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
         QVERIFY(h2Port > 0);
+        QVERIFY(QFileInfo::exists(caCertPath));
 
         qtidm::CurlEpollDownloader downloader;
         QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
         downloader.start();
 
-        // Enqueue two concurrent transfers to the same HTTPS HTTP/2 host with ALPN
+        // 1. Strict Verification against Trusted Local CA (insecureSkipSslVerification = false)
         qtidm::DownloadRequest r1;
         r1.url = QUrl(QStringLiteral("https://127.0.0.1:%1/stream1.bin").arg(h2Port));
         r1.targetPath = dir.path() + QStringLiteral("/alpn_stream1.bin");
         r1.segments = 1;
-        r1.insecureSkipSslVerification = true;
+        r1.insecureSkipSslVerification = false;
+        r1.caCertificatePath = caCertPath;
         r1.allowPrivateNetworkRedirects = true;
 
         qtidm::DownloadRequest r2;
         r2.url = QUrl(QStringLiteral("https://127.0.0.1:%1/stream2.bin").arg(h2Port));
         r2.targetPath = dir.path() + QStringLiteral("/alpn_stream2.bin");
         r2.segments = 1;
-        r2.insecureSkipSslVerification = true;
+        r2.insecureSkipSslVerification = false;
+        r2.caCertificatePath = caCertPath;
         r2.allowPrivateNetworkRedirects = true;
 
         const auto id1 = downloader.enqueue(r1);
         const auto id2 = downloader.enqueue(r2);
         QVERIFY(waitForStatus(statusSpy, id1, qtidm::DownloadStatus::Completed, 6000));
         QVERIFY(waitForStatus(statusSpy, id2, qtidm::DownloadStatus::Completed, 6000));
-        downloader.stop();
-
-        h2Server.terminate();
-        h2Server.waitForFinished(3000);
 
         // Verify payload integrity for both streams
         QFile f1(r1.targetPath);
@@ -1643,6 +1677,25 @@ void persistsDurableCheckpointsWithAcknowledgement()
         QFile f2(r2.targetPath);
         QVERIFY(f2.open(QIODevice::ReadOnly));
         QCOMPARE(f2.size(), qint64(8192));
+
+        // 2. Separate test of explicit insecure-verification option with self-signed certificate
+        qtidm::DownloadRequest rInsecure;
+        rInsecure.url = QUrl(QStringLiteral("https://127.0.0.1:%1/stream1.bin").arg(h2Port));
+        rInsecure.targetPath = dir.path() + QStringLiteral("/insecure_stream.bin");
+        rInsecure.segments = 1;
+        rInsecure.insecureSkipSslVerification = true;
+        rInsecure.caCertificatePath.clear(); // No trusted CA provided
+        rInsecure.allowPrivateNetworkRedirects = true;
+
+        const auto idInsec = downloader.enqueue(rInsecure);
+        QVERIFY(waitForStatus(statusSpy, idInsec, qtidm::DownloadStatus::Completed, 6000));
+        QFile fInsec(rInsecure.targetPath);
+        QVERIFY(fInsec.open(QIODevice::ReadOnly));
+        QCOMPARE(fInsec.size(), qint64(8192));
+
+        downloader.stop();
+        h2Server.terminate();
+        h2Server.waitForFinished(3000);
 
         // Verify that TLS ALPN negotiated 'h2' and served multiple concurrent streams over a SINGLE TLS connection
         QFile statsFile(statsPath);
@@ -1658,6 +1711,51 @@ void persistsDurableCheckpointsWithAcknowledgement()
         QCOMPARE(alpn, QStringLiteral("h2"));
         QVERIFY(maxStreams >= 2);
         QVERIFY(streamIds.size() >= 2);
+    }
+
+    void http2HttpsAlpnFallbackWhenServerSelectsHttp1()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        QProcess h2Server;
+        h2Server.setProgram(QStringLiteral("python3"));
+        h2Server.setArguments({
+            QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/tests/fixtures/http2_mock_server.py"),
+            QStringLiteral("https_alpn_http1")
+        });
+        h2Server.setProcessChannelMode(QProcess::SeparateChannels);
+        h2Server.start();
+        QVERIFY(h2Server.waitForStarted());
+        QVERIFY(h2Server.waitForReadyRead(5000));
+        const int h2Port = QString::fromUtf8(h2Server.readLine()).trimmed().toInt();
+        const QString caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
+        QVERIFY(h2Port > 0);
+        QVERIFY(QFileInfo::exists(caCertPath));
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest r;
+        r.url = QUrl(QStringLiteral("https://127.0.0.1:%1/data.bin").arg(h2Port));
+        r.targetPath = dir.path() + QStringLiteral("/alpn_fallback_http1.bin");
+        r.segments = 1;
+        r.insecureSkipSslVerification = false;
+        r.caCertificatePath = caCertPath;
+        r.allowPrivateNetworkRedirects = true;
+
+        const auto id = downloader.enqueue(r);
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 6000));
+        downloader.stop();
+
+        h2Server.terminate();
+        h2Server.waitForFinished(3000);
+
+        QFile f(r.targetPath);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        QCOMPARE(f.size(), qint64(8192));
+        QCOMPARE(f.readAll(), expectedPayload(8192));
     }
 
 
