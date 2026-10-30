@@ -179,6 +179,23 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_range(SIZE, head_only, accept_range=True)
             return
+        if self.path.startswith("/corrupt-content-range.bin"):
+            range_header = self.headers.get("Range")
+            if range_header and range_header.startswith("bytes="):
+                parts = range_header[6:].split("-", 1)
+                start = int(parts[0] or "0")
+                end = int(parts[1] or str(SIZE - 1))
+                if end - start > 1:
+                    self.send_response(206)
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.send_header("Content-Range", f"bytes {start}-{start + 50}/{SIZE}")
+                    self.send_header("Content-Length", "101")
+                    self.end_headers()
+                    if not head_only:
+                        self.wfile.write(payload(start, start + 100))
+                    return
+            self.send_range(SIZE, head_only, accept_range=True)
+            return
         if self.path.startswith("/retry-split.bin"):
             global retry_split_failures
             range_header = self.headers.get("Range")

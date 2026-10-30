@@ -37,6 +37,7 @@ struct CurlEpollDownloader::DownloadBatch {
     bool failed = false;
     bool quotaExceeded = false;
     bool failureReported = false;
+    bool rangeFallbackAttempted = false;
 };
 
 struct CurlEpollDownloader::SegmentTransfer {
@@ -2140,6 +2141,72 @@ void CurlEpollDownloader::checkCompleted()
                 emit statusChanged(batch->id, DownloadStatus::Failed, transfer->validationError);
             }
         } else {
+            const bool isRangeCorruption = (transfer->validationError == QStringLiteral("response exceeds its declared Content-Range")
+                || (transfer->validationError == QStringLiteral("server returned an invalid Content-Range")
+                    && transfer->initialWritten == 0));
+            const bool canFallbackToSingleStream = isRangeCorruption
+                && !batch->rangeFallbackAttempted
+                && batch->request.resumeSegments.isEmpty()
+                && transfer->initialWritten == 0
+                && batch->request.httpMethod != QStringLiteral("POST")
+                && (batch->segments.size() > 1 || batch->connectionLimit > 1 || batch->request.dynamicSegmentation);
+
+            if (canFallbackToSingleStream) {
+                batch->rangeFallbackAttempted = true;
+                const auto batchHost = hostKey(batch->request.url);
+
+                for (auto it = transfers_.begin(); it != transfers_.end();) {
+                    if (it->second->batch == batch) {
+                        auto* otherEasy = it->first;
+                        curl_multi_remove_handle(multi_, otherEasy);
+                        curl_easy_cleanup(otherEasy);
+                        it = transfers_.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
+                emit hostConnectionCountChanged(batchHost, activeConnectionsForHost(batchHost));
+
+                for (int i = retries_.size() - 1; i >= 0; --i) {
+                    if (retries_[i].batch == batch) {
+                        retries_.removeAt(i);
+                    }
+                }
+
+                batch->writer->close();
+                batch->writer->open(batch->stagingPath, -1, false);
+
+                batch->total = -1;
+                batch->lastReceived = 0;
+                batch->failed = false;
+                batch->failureReported = false;
+                batch->connectionLimit = 1;
+                batch->request.segments = 1;
+                batch->request.dynamicSegmentation = false;
+                batch->segments.clear();
+
+                SegmentInfo singleSeg;
+                singleSeg.index = 0;
+                singleSeg.start = 0;
+                singleSeg.end = -1;
+                singleSeg.written = 0;
+                singleSeg.durableWritten = 0;
+                singleSeg.status = DownloadStatus::Downloading;
+                batch->segments.append(singleSeg);
+                batch->activeSegments = 1;
+
+                if (persistenceHandler_) {
+                    persistenceHandler_(batch->id, batch->segments);
+                }
+
+                emit segmentsChanged(batch->id, batch->segments);
+                emit statusChanged(batch->id, DownloadStatus::Downloading,
+                    QStringLiteral("Server byte-range response corrupted; falling back to single-stream download"));
+
+                addSegmentTransfer(batch, 0, 0, false);
+                continue;
+            }
+
             const bool firstFailure = !batch->failed;
             batch->failed = true;
             segment.status = DownloadStatus::Failed;

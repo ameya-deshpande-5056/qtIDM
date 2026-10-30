@@ -1758,6 +1758,32 @@ void persistsDurableCheckpointsWithAcknowledgement()
         QCOMPARE(f.readAll(), expectedPayload(8192));
     }
 
+    void fallsBackToSingleStreamOnCorruptedContentRange()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest request;
+        request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/corrupt-content-range.bin").arg(port_));
+        request.targetPath = dir.path() + QStringLiteral("/corrupt-content-range.bin");
+        request.category = QStringLiteral("General");
+        request.segments = 4;
+        const auto id = downloader.enqueue(request);
+
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 15000));
+        downloader.stop();
+
+        QFile file(request.targetPath);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.size(), fixtureSize);
+        QCOMPARE(file.readAll(), expectedPayload(fixtureSize));
+        QVERIFY(!QFileInfo::exists(request.targetPath + QStringLiteral(".part")));
+    }
+
 
 private:
     QProcess server_;
