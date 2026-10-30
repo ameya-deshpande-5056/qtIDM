@@ -7,14 +7,22 @@
 class SocialMediaExtractorTest final : public QObject {
     Q_OBJECT
 private slots:
-    void recognizesSupportedSitesButNotYouTube()
+    void recognizesSupportedSites()
     {
         QVERIFY(qtidm::SocialMediaExtractor::supports(
             QUrl(QStringLiteral("https://www.instagram.com/reel/example/"))));
         QVERIFY(qtidm::SocialMediaExtractor::supports(
             QUrl(QStringLiteral("https://mobile.twitter.com/user/status/1"))));
-        QVERIFY(!qtidm::SocialMediaExtractor::supports(
+        QVERIFY(qtidm::SocialMediaExtractor::supports(
             QUrl(QStringLiteral("https://www.youtube.com/watch?v=example"))));
+        QVERIFY(qtidm::SocialMediaExtractor::supports(
+            QUrl(QStringLiteral("https://youtu.be/example"))));
+        QVERIFY(qtidm::SocialMediaExtractor::supports(
+            QUrl(QStringLiteral("https://www.bilibili.com/video/BV1xx411c7mD"))));
+        QVERIFY(qtidm::SocialMediaExtractor::supports(
+            QUrl(QStringLiteral("https://b23.tv/example"))));
+        QVERIFY(!qtidm::SocialMediaExtractor::supports(
+            QUrl(QStringLiteral("https://unsupported.example.test/watch"))));
     }
 
     void parsesFormatsAndHeaders()

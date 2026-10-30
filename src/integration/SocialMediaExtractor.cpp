@@ -74,6 +74,8 @@ bool SocialMediaExtractor::supports(const QUrl& url)
 {
     const auto host = url.host().toLower();
     static const QStringList supportedHosts {
+        QStringLiteral("youtube.com"), QStringLiteral("youtu.be"),
+        QStringLiteral("bilibili.com"), QStringLiteral("b23.tv"), QStringLiteral("bili2233.cn"),
         QStringLiteral("instagram.com"), QStringLiteral("facebook.com"), QStringLiteral("fb.watch"),
         QStringLiteral("twitter.com"), QStringLiteral("x.com"), QStringLiteral("tiktok.com"),
         QStringLiteral("reddit.com"), QStringLiteral("redd.it"), QStringLiteral("vimeo.com"),

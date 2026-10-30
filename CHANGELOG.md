@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.5
+
+- Fixed an issue where adaptive stream (`.m3u8`, `.mpd`) suggested filenames were truncated at periods/full-stops (`.`) in titles (such as `Steel Ball Run: JoJo's Bizarre Adventure Ep. 7` becoming `Ep.mkv`) by replacing `QFileInfo::completeBaseName()` with extension-targeted stripping (`MediaDownloader::suggestedFilename`), fully preserving periods in title numbers, abbreviations, and names across single and batch download dialogs.
+- Improved media title filename sanitization across browser extensions and native application dialogs, converting unsupported filesystem characters (`/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`) to safe readable equivalents (` - `, `'`, `_`) while preserving full Unicode titles and preventing truncation at path or title separators.
+- Corrected file collision deduplication in the downloader reactor, download scheduler, and batch dialogs to extract suffixes using the final dot rather than the first period, preventing title corruption for files containing periods.
+- Unblocked YouTube and Bilibili in site-specific social media extraction, removing the hardcoded prohibition in the Social Media dialog and adding `youtube.com`, `youtu.be`, `bilibili.com`, `b23.tv`, and `bili2233.cn` to supported extraction hosts.
+- Fixed a CSS specificity defect in the browser extension popup where `.empty { display: flex; }` overrode the HTML `hidden` attribute, causing the "No downloadable media yet" empty placeholder box to render simultaneously underneath captured media cards.
+- Added `"all_frames": true` to Chrome and Firefox content script definitions so streaming media is detected inside embedded player iframes (e.g. Kwik, RapidCloud, MegaCloud).
+- Added direct DOM media element observers (`play`, `playing`, `loadedmetadata`, `canplay` and a `MutationObserver` on `<video>`, `<audio>`, and `<source>` tags) in the content bridge to reliably capture media streams even when site Content Security Policy (CSP) blocks inline script injection.
+- Added decoupled request and Service Worker tab resolution (`resolveTabId`) in the extension service worker and background script, correlating non-tab media buffering requests (`tabId: -1`) to active tabs matching the request's initiator origin.
+- Extended direct media detection (`isDirectMediaResponse`) to recognize video and audio content returned from `fetch()` and `XMLHttpRequest` requests while ignoring transport stream segments (`.ts`, `.m4s`, `.key`, `.vtt`).
+- Added real-time captures list refresh in the extension popup using storage change listeners and runtime broadcast events (`mediaCaptured`), updating the panel dynamically as playback begins without requiring the user to close and reopen the panel.
+- Filtered out internal metadata headers starting with `_` (such as `_qtidmMediaType`) from being forwarded in outbound HTTP requests by FFmpeg (`MediaDownloader`) and `CurlEpollDownloader`, preventing CDN and Cloudflare WAF 403 Forbidden errors.
+
+## 0.2.4
+
+- Hardened DNS rebinding and TOCTOU protection by pinning validated public IP addresses via `CURLOPT_RESOLVE`, rejecting untrusted JSON `pinnedIp` injection, and enforcing fail-closed handling for private, loopback, or unresolvable domains.
+- Verified single-connection HTTP/2 multiplexing across concurrent streams over TLS ALPN (`h2`), adding trusted local CA certificate configuration alongside optional self-signed test overrides.
+- Implemented strict RFC 6265 cookie scoping, enforcing host-only versus domain cookie separation, hierarchical path filtering, plaintext HTTP secure cookie suppression, and expired cookie rejection.
+- Updated continuous release CI workflows with refreshed `linuxdeploy` continuous SHA-256 checksums, and raised the Firefox extension `strict_min_version` to 142.0 for AMO compliance with `data_collection_permissions`.
+- Hardened engine durability by switching SQLite to WAL mode with `synchronous=FULL`, enforcing durable checkpoint flushes before persisting segment layout changes, and verifying byte-exact recovery from out-of-process `SIGKILL` termination.
+
 ## 0.2.3
 
 - Improved protected HLS/DASH downloads by restoring a missing browser `Origin` header and giving FFmpeg additional time and data to detect sparse codec metadata.

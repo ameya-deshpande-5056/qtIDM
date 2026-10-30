@@ -131,7 +131,7 @@ QString availableTargetPath(const QString& requestedPath)
         return requestedPath;
     }
     const QFileInfo info(requestedPath);
-    const auto suffix = info.completeSuffix();
+    const auto suffix = info.suffix();
     const auto baseName = info.completeBaseName();
     for (int copy = 1; copy < 100000; ++copy) {
         const auto fileName = suffix.isEmpty()
@@ -358,6 +358,9 @@ void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDo
     }
     for (auto it = request.headers.cbegin(); it != request.headers.cend(); ++it) {
         const auto key = it.key();
+        if (key.startsWith(QLatin1Char('_'))) {
+            continue;
+        }
         if (key.compare(QStringLiteral("Cookie"), Qt::CaseInsensitive) == 0) {
             // If request.cookies is empty, parse fallback raw cookies as host-only records
             if (request.cookies.isEmpty()) {

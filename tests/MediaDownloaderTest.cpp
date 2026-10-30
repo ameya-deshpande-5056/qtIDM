@@ -177,6 +177,49 @@ private slots:
         }
         QVERIFY(failed);
     }
+
+    void sanitizesSuggestedFilenamePreservingDotsAndFullTitle()
+    {
+        QCOMPARE(qtidm::MediaDownloader::suggestedFilename(
+            QStringLiteral("Steel Ball Run: JoJo's Bizarre Adventure Ep. 7")),
+            QStringLiteral("Steel Ball Run - JoJo's Bizarre Adventure Ep. 7.mkv"));
+
+        QCOMPARE(qtidm::MediaDownloader::suggestedFilename(
+            QStringLiteral("Dr. Stone Season 3 Ep. 12")),
+            QStringLiteral("Dr. Stone Season 3 Ep. 12.mkv"));
+
+        QCOMPARE(qtidm::MediaDownloader::suggestedFilename(
+            QStringLiteral("Fate/stay night [Unlimited Blade Works] - Ep. 01")),
+            QStringLiteral("Fate - stay night [Unlimited Blade Works] - Ep. 01.mkv"));
+
+        QCOMPARE(qtidm::MediaDownloader::suggestedFilename(
+            QStringLiteral("uwu.m3u8")),
+            QStringLiteral("uwu.mkv"));
+
+        QCOMPARE(qtidm::MediaDownloader::suggestedFilename(
+            QStringLiteral("ep.07.m3u8")),
+            QStringLiteral("ep.07.mkv"));
+
+        QCOMPARE(qtidm::MediaDownloader::suggestedFilename(
+            QStringLiteral("master.m3u8")),
+            QStringLiteral("master.mkv"));
+
+        QCOMPARE(qtidm::MediaDownloader::suggestedFilename(
+            QStringLiteral("video.mpd")),
+            QStringLiteral("video.mkv"));
+
+        QCOMPARE(qtidm::MediaDownloader::suggestedFilename(
+            QStringLiteral("Episode 1.")),
+            QStringLiteral("Episode 1.mkv"));
+
+        QCOMPARE(qtidm::MediaDownloader::suggestedFilename(
+            QStringLiteral("")),
+            QStringLiteral("stream.mkv"));
+
+        QCOMPARE(qtidm::MediaDownloader::mediaStagingPath(
+            QStringLiteral("/downloads/Steel Ball Run - JoJo's Bizarre Adventure Ep. 7.mkv")),
+            QStringLiteral("/downloads/Steel Ball Run - JoJo's Bizarre Adventure Ep. 7.part.mkv"));
+    }
 };
 
 QTEST_MAIN(MediaDownloaderTest)

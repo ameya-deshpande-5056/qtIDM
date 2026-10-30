@@ -260,10 +260,43 @@ function responseFilename(details) {
   return leafFilename((regular?.[1] || regular?.[2] || "").replace(/\\"/g, "\""));
 }
 
+function sanitizeMediaTitle(rawTitle) {
+  let title = String(rawTitle || "")
+    .replace(/\0/g, "")
+    .replace(/\s+::\s+[^:]+$/, "")
+    .trim();
+  if (!title) return "";
+  title = title
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .replace(/[/\\]+/g, " - ")
+    .replace(/:+/g, " - ")
+    .replace(/"/g, "'")
+    .replace(/\?/g, "")
+    .replace(/\*/g, "_")
+    .replace(/</g, "_")
+    .replace(/>/g, "_")
+    .replace(/\|/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/\s*-\s*-+/g, " - ")
+    .trim();
+  while (title.endsWith(".") || title.endsWith(" ") || title.endsWith("-")) {
+    title = title.slice(0, -1).trim();
+  }
+  return title;
+}
+
 function mediaSuggestedFilename(item, tab) {
   const captured = leafFilename(item?.suggestedFilename);
-  if (captured && !/\.(?:m3u8|mpd)$/i.test(captured)) return captured;
-  return leafFilename(String(tab?.title || "").replace(/\s+::\s+[^:]+$/, ""));
+  if (captured && !/\.(?:m3u8|mpd)$/i.test(captured)) return sanitizeMediaTitle(captured);
+  const fromTitle = sanitizeMediaTitle(tab?.title);
+  if (fromTitle) return fromTitle;
+  if (captured) {
+    const stem = captured.replace(/\.(?:m3u8|mpd)$/i, "").trim();
+    if (stem && !/^(?:index|master|playlist|manifest|uwu|stream|video|audio)$/i.test(stem)) {
+      return sanitizeMediaTitle(stem);
+    }
+  }
+  return "";
 }
 
 browser.contextMenus.create({
@@ -297,7 +330,7 @@ function isManifestResponse(details) {
 }
 
 function isDirectMediaResponse(details) {
-  if (details.type !== "media" || /\.(?:ts|m4s|aac)(?:$|[?#])/i.test(details.url || "")) return false;
+  if (/\.(?:ts|m4s|aac|key|vtt)(?:$|[?#])/i.test(details.url || "")) return false;
   return (details.responseHeaders || []).some((header) => {
     const value = String(header.value || "").toLowerCase();
     return header.name.toLowerCase() === "content-type"
@@ -324,11 +357,34 @@ function mediaType(url, contentType = "") {
   return "Media";
 }
 
+async function resolveTabId(details) {
+  if (typeof details?.tabId === "number" && details.tabId >= 0) return details.tabId;
+  const initiator = details?.originUrl || details?.documentUrl || "";
+  if (initiator && browser.tabs?.query) {
+    try {
+      const initOrigin = new URL(initiator).origin.toLowerCase();
+      const tabs = await browser.tabs.query({}).catch(() => []);
+      const activeMatch = tabs.find((t) => t.active && t.url && new URL(t.url).origin.toLowerCase() === initOrigin);
+      if (activeMatch?.id >= 0) return activeMatch.id;
+      const anyMatch = tabs.find((t) => t.url && new URL(t.url).origin.toLowerCase() === initOrigin);
+      if (anyMatch?.id >= 0) return anyMatch.id;
+    } catch (_) {}
+  }
+  if (browser.tabs?.query) {
+    try {
+      const activeTabs = await browser.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+      if (activeTabs?.[0]?.id >= 0) return activeTabs[0].id;
+    } catch (_) {}
+  }
+  return -1;
+}
+
 async function storeMedia(details, value) {
-  if (details.tabId < 0 || !details.url || !/^https?:\/\//i.test(details.url) || isExcluded(details.url, value)) {
+  const tabId = await resolveTabId(details);
+  if (tabId < 0 || !details.url || !/^https?:\/\//i.test(details.url) || isExcluded(details.url, value)) {
     return;
   }
-  const key = mediaKey(details.tabId);
+  const key = mediaKey(tabId);
   const stored = (await captureStorage.get(key))[key];
   const items = Array.isArray(stored) ? stored : (stored && stored.url ? [stored] : []);
   const contentType = (details.responseHeaders || [])
@@ -337,7 +393,9 @@ async function storeMedia(details, value) {
   const previous = duplicate >= 0 ? items[duplicate] : null;
   const observedHeaders = details.requestHeaders
     ? forwardedRequestHeaders(details)
-    : requestHeadersById.get(details.requestId)?.headers || {};
+    : (details.requestId ? requestHeadersById.get(details.requestId)?.headers : null)
+      || recentRequestHeaders(details.url)
+      || {};
   const item = {
     url: details.url,
     referrer: details.documentUrl || details.originUrl
@@ -352,19 +410,21 @@ async function storeMedia(details, value) {
   items.unshift(item);
   items.splice(25);
   await captureStorage.set({ [key]: items });
-  await browser.browserAction.setBadgeText({ tabId: details.tabId, text: String(items.length) });
+  await browser.browserAction.setBadgeText({ tabId, text: String(items.length) });
   await browser.browserAction.setTitle({
-    tabId: details.tabId,
+    tabId,
     title: "Open captured downloads in qtIDM"
   });
+  browser.runtime.sendMessage({ type: "mediaCaptured", tabId }).catch(() => {});
 }
 
 function rememberMedia(details, value) {
-  const previous = mediaWriteQueues.get(details.tabId) || Promise.resolve();
+  const tabKey = (typeof details?.tabId === "number" && details.tabId >= 0) ? details.tabId : "global";
+  const previous = mediaWriteQueues.get(tabKey) || Promise.resolve();
   const operation = previous.catch(() => {}).then(() => storeMedia(details, value));
-  mediaWriteQueues.set(details.tabId, operation);
+  mediaWriteQueues.set(tabKey, operation);
   return operation.finally(() => {
-    if (mediaWriteQueues.get(details.tabId) === operation) mediaWriteQueues.delete(details.tabId);
+    if (mediaWriteQueues.get(tabKey) === operation) mediaWriteQueues.delete(tabKey);
   });
 }
 
@@ -476,7 +536,7 @@ async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, 
   }
   setHeaderDefault(headers, "User-Agent", navigator.userAgent);
   if (mediaTypeHint === "HLS" || mediaTypeHint === "DASH") headers._qtidmMediaType = mediaTypeHint;
-  return { url, headers, cookies: structuredCookies, method: method === "POST" || request.method === "POST" ? "POST" : "", body: body ? textToBase64(body) : (request.bodyBase64 || textToBase64(request.body)), suggestedFilename: leafFilename(suggestedFilename) };
+  return { url, headers, cookies: structuredCookies, method: method === "POST" || request.method === "POST" ? "POST" : "", body: body ? textToBase64(body) : (request.bodyBase64 || textToBase64(request.body)), suggestedFilename: suggestedFilename ? sanitizeMediaTitle(suggestedFilename) : "" };
 }
 
 async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "") {
@@ -622,25 +682,27 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
     return { ok: true };
   }
   if (message.type === "discoveredMedia") {
-    const tab = sender.tab;
+    const tab = sender.tab || (await browser.tabs?.query({ active: true, lastFocusedWindow: true }))?.[0];
     if (tab?.id >= 0 && typeof message.url === "string") {
       try {
         const parsed = new URL(message.url);
         if ((parsed.protocol === "http:" || parsed.protocol === "https:")
             && !parsed.username && !parsed.password && parsed.hostname !== "169.254.169.254") {
-          settings().then((value) => {
-            if (value.captureMedia) {
-              rememberMedia({
-                tabId: tab.id,
-                url: parsed.href,
-                type: "media",
-                method: "GET",
-                responseHeaders: [
-                  { name: "Content-Type", value: message.mediaType === "DASH" ? "application/dash+xml" : "application/vnd.apple.mpegurl" }
-                ]
-              }, value);
-            }
-          }).catch((err) => showError(err.message));
+          const value = await settings();
+          if (value.captureMedia) {
+            const ref = message.referrer || sender.url || tab?.url || "";
+            await rememberMedia({
+              tabId: tab.id,
+              url: parsed.href,
+              documentUrl: ref,
+              initiator: httpOrigin(ref),
+              type: "media",
+              method: "GET",
+              responseHeaders: [
+                { name: "Content-Type", value: message.mediaType === "DASH" ? "application/dash+xml" : message.mediaType === "HLS" ? "application/vnd.apple.mpegurl" : "video/mp4" }
+              ]
+            }, value);
+          }
         }
       } catch (_) {}
     }
@@ -653,6 +715,8 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
   }
   const key = mediaKey(message.tabId);
   if (message.type === "listMedia") {
+    const pending = mediaWriteQueues.get(message.tabId);
+    if (pending) await pending.catch(() => {});
     const stored = (await captureStorage.get(key))[key];
     return { ok: true, items: Array.isArray(stored) ? stored : (stored?.url ? [stored] : []) };
   }

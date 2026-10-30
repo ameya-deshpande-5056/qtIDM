@@ -23,7 +23,7 @@ QString availableCompletionPath(const QString& requested)
     }
     const QFileInfo info(requested);
     const auto base = info.completeBaseName();
-    const auto suffix = info.completeSuffix();
+    const auto suffix = info.suffix();
     for (int copy = 1; copy < 100000; ++copy) {
         const auto name = suffix.isEmpty()
             ? QStringLiteral("%1 (%2)").arg(base).arg(copy)

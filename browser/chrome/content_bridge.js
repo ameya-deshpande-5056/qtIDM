@@ -1,10 +1,12 @@
-// qtidm: URLs are an explicit opt-in path for pages and bookmarklets.  Alt
+// qtidm: URLs are an explicit opt-in path for pages and bookmarklets. Alt
 // temporarily bypasses automatic interception, matching desktop IDM behavior.
+const extApi = globalThis.browser || globalThis.chrome;
+
 let modifierActive = false;
 function updateModifier(active) {
   if (active === modifierActive) return;
   modifierActive = active;
-  chrome.runtime.sendMessage({ type: "modifierState", active }).catch(() => {});
+  extApi.runtime.sendMessage({ type: "modifierState", active }).catch(() => {});
 }
 addEventListener("keydown", (event) => updateModifier(event.altKey), true);
 addEventListener("keyup", (event) => updateModifier(event.altKey), true);
@@ -20,10 +22,72 @@ addEventListener("click", (event) => {
   if (!/^(?:https?|ftp):/i.test(value)) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  chrome.runtime.sendMessage({ type: "qtidmScheme", url: value }).catch(() => {});
+  extApi.runtime.sendMessage({ type: "qtidmScheme", url: value }).catch(() => {});
 }, true);
 
 // Phase D: In-Page Streaming Media Detection Bridge
+function dispatchDiscoveredMedia(rawUrl, hintType = "") {
+  try {
+    if (!rawUrl || typeof rawUrl !== "string" || rawUrl.startsWith("blob:") || rawUrl.startsWith("data:")) return;
+    const parsed = new URL(rawUrl, location.href);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
+    if (parsed.username || parsed.password) return;
+    if (parsed.hostname === "169.254.169.254") return;
+    let type = hintType;
+    if (!type) {
+      if (/\.mpd(?:$|[?#])/i.test(parsed.href)) type = "DASH";
+      else if (/\.m3u8(?:$|[?#])/i.test(parsed.href)) type = "HLS";
+      else if (/\.(?:mp3|m4a|aac|ogg|opus|flac|wav)(?:$|[?#])/i.test(parsed.href)) type = "Audio";
+      else if (/\.(?:vtt|srt|ass|ssa|ttml)(?:$|[?#])/i.test(parsed.href)) type = "Subtitle";
+      else if (/\.(?:mp4|webm|mkv|m4v|mov|avi|flv)(?:$|[?#])/i.test(parsed.href)) type = "Video";
+      else return;
+    }
+    extApi.runtime.sendMessage({
+      type: "discoveredMedia",
+      url: parsed.href,
+      mediaType: type,
+      referrer: location.href
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+function inspectMediaElement(element) {
+  if (!element) return;
+  const src = element.currentSrc || element.src;
+  if (src) dispatchDiscoveredMedia(src);
+  if (element.querySelectorAll) {
+    for (const source of element.querySelectorAll("source")) {
+      if (source.src) dispatchDiscoveredMedia(source.src);
+    }
+  }
+}
+
+for (const eventName of ["play", "playing", "loadedmetadata", "canplay"]) {
+  document.addEventListener(eventName, (event) => {
+    inspectMediaElement(event.target);
+  }, true);
+}
+
+try {
+  const observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType === 1) {
+          if (node.tagName === "VIDEO" || node.tagName === "AUDIO") inspectMediaElement(node);
+          else if (node.querySelectorAll) {
+            node.querySelectorAll("video, audio").forEach(inspectMediaElement);
+          }
+        }
+      }
+      if (mutation.type === "attributes" && mutation.attributeName === "src") {
+        inspectMediaElement(mutation.target);
+      }
+    }
+  });
+  const root = document.documentElement || document;
+  observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
+} catch (_) {}
+
 try {
   const script = document.createElement("script");
   script.textContent = `(${function() {
@@ -69,17 +133,6 @@ try {
 window.addEventListener("message", (event) => {
   if (event.source !== window || event.data?.source !== "qtidm-page-hook") return;
   if (event.data?.type === "discoveredMedia" && event.data?.url) {
-    try {
-      const parsed = new URL(String(event.data.url), location.href);
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
-      if (parsed.username || parsed.password) return;
-      if (parsed.hostname === "169.254.169.254") return;
-      chrome.runtime.sendMessage({
-        type: "discoveredMedia",
-        url: parsed.href,
-        mediaType: event.data.mediaType,
-        referrer: location.href
-      }).catch(() => {});
-    } catch (_) {}
+    dispatchDiscoveredMedia(event.data.url, event.data.mediaType);
   }
 });

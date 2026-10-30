@@ -41,7 +41,8 @@ QString ffmpegHeaders(const QVariantMap& headers, const QSet<QString>& excluded)
     QStringList lines;
     for (auto it = headers.cbegin(); it != headers.cend(); ++it) {
         const auto value = it.value().toString();
-        if (!excluded.contains(it.key().toLower()) && !value.isEmpty()
+        if (!excluded.contains(it.key().toLower()) && !it.key().startsWith(QLatin1Char('_'))
+            && !value.isEmpty()
             && !it.key().contains(QLatin1Char('\r')) && !it.key().contains(QLatin1Char('\n'))
             && !value.contains(QLatin1Char('\r')) && !value.contains(QLatin1Char('\n'))) {
             lines.append(it.key() + QStringLiteral(": ") + value);
@@ -50,16 +51,58 @@ QString ffmpegHeaders(const QVariantMap& headers, const QSet<QString>& excluded)
     return lines.isEmpty() ? QString {} : lines.join(QStringLiteral("\r\n")) + QStringLiteral("\r\n");
 }
 
-QString mediaStagingPath(const QString& targetPath)
+}
+
+QString MediaDownloader::mediaStagingPath(const QString& targetPath)
 {
     const QFileInfo info(targetPath);
-    const auto suffix = info.completeSuffix();
+    const auto suffix = info.suffix();
     const auto stagedName = suffix.isEmpty()
         ? info.fileName() + QStringLiteral(".part")
         : info.completeBaseName() + QStringLiteral(".part.") + suffix;
     return info.dir().filePath(stagedName);
 }
 
+QString MediaDownloader::suggestedFilename(const QString& inputName)
+{
+    QString name = inputName.trimmed();
+    if (name.isEmpty()) {
+        return QStringLiteral("stream.mkv");
+    }
+    static const QStringList mediaExtensions {
+        QStringLiteral(".m3u8"), QStringLiteral(".mpd"),
+        QStringLiteral(".mkv"), QStringLiteral(".mp4"),
+        QStringLiteral(".webm"), QStringLiteral(".ts"),
+        QStringLiteral(".m4v"), QStringLiteral(".mov"),
+        QStringLiteral(".avi"), QStringLiteral(".flv")
+    };
+    for (const auto& ext : mediaExtensions) {
+        if (name.endsWith(ext, Qt::CaseInsensitive)) {
+            name.chop(ext.length());
+            break;
+        }
+    }
+    name.remove(QRegularExpression(QStringLiteral("[\\x{0}-\\x{1f}\\x{7f}]")));
+    name.replace(QLatin1Char('/'), QStringLiteral(" - "));
+    name.replace(QLatin1Char('\\'), QStringLiteral(" - "));
+    name.replace(QLatin1Char(':'), QStringLiteral(" - "));
+    name.replace(QLatin1Char('"'), QLatin1Char('\''));
+    name.replace(QLatin1Char('?'), QString());
+    name.replace(QLatin1Char('*'), QLatin1Char('_'));
+    name.replace(QLatin1Char('<'), QLatin1Char('_'));
+    name.replace(QLatin1Char('>'), QLatin1Char('_'));
+    name.replace(QLatin1Char('|'), QLatin1Char('-'));
+    name.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+    name.replace(QRegularExpression(QStringLiteral("-\\s+-+")), QStringLiteral("-"));
+    while (name.endsWith(QLatin1Char('.')) || name.endsWith(QLatin1Char(' ')) || name.endsWith(QLatin1Char('-'))) {
+        name.chop(1);
+        name = name.trimmed();
+    }
+    name = name.trimmed();
+    if (name.isEmpty()) {
+        name = QStringLiteral("stream");
+    }
+    return name + QStringLiteral(".mkv");
 }
 
 MediaDownloader::MediaDownloader(QObject* parent)

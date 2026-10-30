@@ -149,12 +149,26 @@ QString takeHeader(QVariantMap* headers, QStringView name)
 QString safeSuggestedFilename(QString value)
 {
     value = value.trimmed();
-    value = value.section(QLatin1Char('/'), -1);
-    value.remove(QRegularExpression(QStringLiteral("[\\x{0}-\\x{1f}\\x{7f}]")));
-    if (value == QStringLiteral(".") || value == QStringLiteral("..")) {
+    if (value.isEmpty() || value == QStringLiteral(".") || value == QStringLiteral("..")) {
         return {};
     }
-    return value;
+    value.remove(QRegularExpression(QStringLiteral("[\\x{0}-\\x{1f}\\x{7f}]")));
+    value.replace(QLatin1Char('/'), QStringLiteral(" - "));
+    value.replace(QLatin1Char('\\'), QStringLiteral(" - "));
+    value.replace(QLatin1Char(':'), QStringLiteral(" - "));
+    value.replace(QLatin1Char('"'), QLatin1Char('\''));
+    value.replace(QLatin1Char('?'), QString());
+    value.replace(QLatin1Char('*'), QLatin1Char('_'));
+    value.replace(QLatin1Char('<'), QLatin1Char('_'));
+    value.replace(QLatin1Char('>'), QLatin1Char('_'));
+    value.replace(QLatin1Char('|'), QLatin1Char('-'));
+    value.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+    value.replace(QRegularExpression(QStringLiteral("-\\s+-+")), QStringLiteral("-"));
+    while (value.endsWith(QLatin1Char('.')) || value.endsWith(QLatin1Char(' ')) || value.endsWith(QLatin1Char('-'))) {
+        value.chop(1);
+        value = value.trimmed();
+    }
+    return value.trimmed();
 }
 
 bool mergeHeaderLines(const QString& text, QVariantMap* headers, QString* error)
@@ -377,8 +391,7 @@ bool MainWindow::addUrl(QString url, QVariantMap headers)
         name = parsed.fileName().isEmpty() ? QStringLiteral("download.bin") : parsed.fileName();
     }
     if (adaptiveMedia) {
-        const auto baseName = QFileInfo(name).completeBaseName();
-        name = (baseName.isEmpty() ? QStringLiteral("stream") : baseName) + QStringLiteral(".mkv");
+        name = MediaDownloader::suggestedFilename(name);
     }
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("Download Options"));
@@ -846,11 +859,11 @@ bool MainWindow::addUrls(QStringList urls, QVariantMap headers)
             name = QStringLiteral("download-%1.bin").arg(unnamed++);
         }
         if (adaptiveMedia) {
-            name = QFileInfo(name).completeBaseName() + QStringLiteral(".mkv");
+            name = MediaDownloader::suggestedFilename(name);
         }
-        const QFileInfo nameInfo(name);
-        const auto base = nameInfo.completeBaseName();
-        const auto suffix = nameInfo.completeSuffix();
+        const auto dotIndex = name.lastIndexOf(QLatin1Char('.'));
+        const auto base = dotIndex >= 0 ? name.left(dotIndex) : name;
+        const auto suffix = dotIndex >= 0 ? name.mid(dotIndex + 1) : QString();
         int copy = 1;
         while (names.contains(name.toLower())) {
             name = suffix.isEmpty()
@@ -1534,15 +1547,9 @@ void MainWindow::extractSocialMedia()
         return;
     }
     const auto url = QUrl::fromUserInput(value);
-    if (url.host().contains(QStringLiteral("youtube.com"), Qt::CaseInsensitive)
-        || url.host().contains(QStringLiteral("youtu.be"), Qt::CaseInsensitive)) {
-        QMessageBox::warning(this, QStringLiteral("Social Media"),
-            QStringLiteral("YouTube extraction is intentionally unavailable, matching the reference app's policy."));
-        return;
-    }
     if (!SocialMediaExtractor::supports(url)) {
         QMessageBox::warning(this, QStringLiteral("Social Media"),
-            QStringLiteral("Supported sites include Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, "
+            QStringLiteral("Supported sites include YouTube, Bilibili, Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, "
                            "Dailymotion, Twitch, and SoundCloud."));
         return;
     }
@@ -1587,9 +1594,7 @@ void MainWindow::extractSocialMedia()
         return;
     }
     const auto& format = extraction.formats[formatIndex];
-    auto safeTitle = extraction.title;
-    safeTitle.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._ -]")), QStringLiteral("_"));
-    safeTitle = safeTitle.simplified();
+    auto safeTitle = safeSuggestedFilename(extraction.title);
     if (safeTitle.isEmpty()) {
         safeTitle = QStringLiteral("social-media");
     }

@@ -125,6 +125,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
   color: var(--muted);
   text-align: center;
 }
+.empty[hidden], [hidden] {
+  display: none !important;
+}
 .empty b { margin-bottom: 6px; color: var(--ink); font-size: 15px; }
 label[for] { display: block; margin: 12px 0 7px; font-weight: bold; }
 textarea, input[type="number"] {

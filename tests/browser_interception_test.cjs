@@ -85,7 +85,8 @@ function browserApi(rootName) {
     },
     tabs: {
       onRemoved: event(),
-      async get() { return { url: "https://example.test/page" }; }
+      async get() { return { url: "https://example.test/page" }; },
+      async query() { return [{ id: 101, active: true, url: "https://video.example.test/watch" }]; }
     },
     webRequest: {
       onBeforeRequest: event(),
@@ -146,6 +147,26 @@ async function testVariant(relativePath, rootName) {
   assert.equal(
     context.mediaSuggestedFilename({}, { title: "Persona 5 Episode 01 :: Kwik" }),
     "Persona 5 Episode 01"
+  );
+  assert.equal(
+    context.mediaSuggestedFilename({}, { title: "Steel Ball Run: JoJo's Bizarre Adventure Ep. 7 :: animepahe" }),
+    "Steel Ball Run - JoJo's Bizarre Adventure Ep. 7"
+  );
+  assert.equal(
+    context.mediaSuggestedFilename({}, { title: "Fate/stay night [Unlimited Blade Works] - Ep. 01" }),
+    "Fate - stay night [Unlimited Blade Works] - Ep. 01"
+  );
+  assert.equal(
+    context.mediaSuggestedFilename({}, { title: "Dr. STONE Season 3 Ep. 12" }),
+    "Dr. STONE Season 3 Ep. 12"
+  );
+  assert.equal(
+    context.mediaSuggestedFilename({ suggestedFilename: "uwu.m3u8" }, { title: "Steel Ball Run: JoJo's Bizarre Adventure Ep. 7 :: animepahe" }),
+    "Steel Ball Run - JoJo's Bizarre Adventure Ep. 7"
+  );
+  assert.equal(
+    context.mediaSuggestedFilename({}, { title: "Episode 01." }),
+    "Episode 01"
   );
 
   mock.api.webRequest.onBeforeSendHeaders.listeners[0]({
@@ -283,10 +304,33 @@ async function testVariant(relativePath, rootName) {
   assert.ok(!redirectedSent.cookies.some((c) => c.name === "expired_token"), "Expired cookie must NOT be present in structured cookies");
 
   // Phase D: In-Page Media Bridge (discoveredMedia message handling & scheme validation)
+  assert.ok(
+    context.isDirectMediaResponse({
+      type: "xmlhttprequest",
+      url: "https://example.test/stream.mp4",
+      responseHeaders: [{ name: "Content-Type", value: "video/mp4" }]
+    }),
+    "Direct media response must recognize video/mp4 fetched via XHR/fetch"
+  );
+  assert.ok(
+    !context.isDirectMediaResponse({
+      type: "xmlhttprequest",
+      url: "https://example.test/segment_1.ts",
+      responseHeaders: [{ name: "Content-Type", value: "video/mp2t" }]
+    }),
+    "Direct media response must not treat transport stream segments as standalone media"
+  );
+
+  const resolvedTabId = await context.resolveTabId({
+    tabId: -1,
+    initiator: "https://video.example.test"
+  });
+  assert.equal(resolvedTabId, 101, "Decoupled media request must resolve active tab by initiator origin");
+
   for (const listener of mock.api.runtime.onMessage.listeners) {
     let responseResult = null;
     await listener(
-      { type: "discoveredMedia", url: "https://video.example.test/live/stream.m3u8", mediaType: "HLS" },
+      { type: "discoveredMedia", url: "https://video.example.test/live/stream.m3u8", mediaType: "HLS", referrer: "https://video.example.test/watch" },
       { tab: { id: 101 } },
       (res) => { responseResult = res; }
     );
@@ -294,6 +338,11 @@ async function testVariant(relativePath, rootName) {
     await listener(
       { type: "discoveredMedia", url: "javascript:alert(1)", mediaType: "HLS" },
       { tab: { id: 101 } },
+      (res) => { responseResult = res; }
+    );
+    await listener(
+      { type: "listMedia", tabId: 101 },
+      {},
       (res) => { responseResult = res; }
     );
   }

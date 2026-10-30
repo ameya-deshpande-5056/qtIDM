@@ -8,7 +8,12 @@ function notice(message, error = false) {
 }
 
 async function activeTab() {
-  return (await api.tabs.query({ active: true, currentWindow: true }))[0];
+  const current = await api.tabs?.query({ active: true, currentWindow: true }).catch(() => []);
+  if (current && current[0]) return current[0];
+  const focused = await api.tabs?.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+  if (focused && focused[0]) return focused[0];
+  const allActive = await api.tabs?.query({ active: true }).catch(() => []);
+  return allActive?.[0];
 }
 
 function showPanel(id) {
@@ -30,6 +35,7 @@ async function refresh() {
   $("#count").textContent = String(items.length);
   $("#status").textContent = `${items.length} captured item${items.length === 1 ? "" : "s"}`;
   $("#empty").hidden = items.length > 0;
+  $("#empty").style.display = items.length > 0 ? "none" : "";
   items.forEach((item, index) => {
     const row = document.createElement("article");
     row.className = "item";
@@ -120,5 +126,21 @@ $("#excludeCurrentSite").addEventListener("click", async () => {
   } catch (_) { notice("This tab does not have an excludable web address.", true); }
 });
 $("#saveSettings").addEventListener("click", saveSettings);
+
+if (api.storage?.onChanged) {
+  api.storage.onChanged.addListener((changes, areaName) => {
+    if (tab && (areaName === "session" || areaName === "local")) {
+      const key = `qtidm-media-${tab.id}`;
+      if (changes[key]) refresh().catch(() => {});
+    }
+  });
+}
+if (api.runtime?.onMessage) {
+  api.runtime.onMessage.addListener((msg) => {
+    if (msg?.type === "mediaCaptured" && (!tab || msg.tabId === tab.id)) {
+      refresh().catch(() => {});
+    }
+  });
+}
 
 Promise.all([refresh(), loadSettings()]).catch((error) => notice(error.message, true));

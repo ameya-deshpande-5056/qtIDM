@@ -22,6 +22,8 @@ public:
     static bool declaresUnsupportedDrm(const QByteArray& manifest);
     static QString protocolWhitelist(const QUrl& url);
     static QStringList httpInputArguments(const QVariantMap& headers);
+    static QString suggestedFilename(const QString& name);
+    static QString mediaStagingPath(const QString& targetPath);
     QString enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId = {});
     bool contains(const QString& id) const;
     void pause(const QString& id);
