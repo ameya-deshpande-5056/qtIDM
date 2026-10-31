@@ -329,9 +329,21 @@ void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDo
 
     if (!request.pinnedIp.isEmpty() && transfer) {
         const int port = request.url.port(isSecureScheme ? 443 : 80);
-        const auto entry = QStringLiteral("%1:%2:%3").arg(request.url.host()).arg(port).arg(request.pinnedIp).toUtf8();
-        transfer->resolveList = curl_slist_append(transfer->resolveList, entry.constData());
-        curl_easy_setopt(easy, CURLOPT_RESOLVE, transfer->resolveList);
+        QStringList formattedIps;
+        const auto rawIps = request.pinnedIp.split(QLatin1Char(','), Qt::SkipEmptyParts);
+        for (const auto& ip : rawIps) {
+            const auto trimmed = ip.trimmed();
+            if (trimmed.contains(QLatin1Char(':')) && !trimmed.startsWith(QLatin1Char('['))) {
+                formattedIps.append(QStringLiteral("[%1]").arg(trimmed));
+            } else {
+                formattedIps.append(trimmed);
+            }
+        }
+        if (!formattedIps.isEmpty()) {
+            const auto entry = QStringLiteral("%1:%2:%3").arg(request.url.host()).arg(port).arg(formattedIps.join(QLatin1Char(','))).toUtf8();
+            transfer->resolveList = curl_slist_append(transfer->resolveList, entry.constData());
+            curl_easy_setopt(easy, CURLOPT_RESOLVE, transfer->resolveList);
+        }
     }
     if (!request.caCertificatePath.isEmpty() && transfer) {
         transfer->caCertBytes = request.caCertificatePath.toUtf8();
@@ -512,10 +524,13 @@ bool isPrivateIpv6(const struct in6_addr& in6)
 }
 }
 
-bool CurlEpollDownloader::isPrivateOrLoopbackHost(const QString& host, QString* resolvedPublicIp)
+bool CurlEpollDownloader::isPrivateOrLoopbackHost(const QString& host, QString* resolvedPublicIp, QStringList* allPublicIps)
 {
     if (resolvedPublicIp) {
         resolvedPublicIp->clear();
+    }
+    if (allPublicIps) {
+        allPublicIps->clear();
     }
     QString cleanHost = host.trimmed().toLower();
     if (cleanHost.isEmpty()) {
@@ -559,6 +574,9 @@ bool CurlEpollDownloader::isPrivateOrLoopbackHost(const QString& host, QString* 
                 *resolvedPublicIp = QString::fromLatin1(buf);
             }
         }
+        if (allPublicIps && resolvedPublicIp && !resolvedPublicIp->isEmpty()) {
+            allPublicIps->append(*resolvedPublicIp);
+        }
         return false;
     }
 
@@ -577,6 +595,9 @@ bool CurlEpollDownloader::isPrivateOrLoopbackHost(const QString& host, QString* 
                 *resolvedPublicIp = QString::fromLatin1(buf);
             }
         }
+        if (allPublicIps && resolvedPublicIp && !resolvedPublicIp->isEmpty()) {
+            allPublicIps->append(*resolvedPublicIp);
+        }
         return false;
     }
 
@@ -592,6 +613,9 @@ bool CurlEpollDownloader::isPrivateOrLoopbackHost(const QString& host, QString* 
                 *resolvedPublicIp = QString::fromLatin1(buf);
             }
         }
+        if (allPublicIps && resolvedPublicIp && !resolvedPublicIp->isEmpty()) {
+            allPublicIps->append(QStringLiteral("[%1]").arg(*resolvedPublicIp));
+        }
         return false;
     }
 
@@ -603,6 +627,7 @@ bool CurlEpollDownloader::isPrivateOrLoopbackHost(const QString& host, QString* 
     if (::getaddrinfo(hostBytes.constData(), nullptr, &hints, &res) == 0 && res) {
         bool resolvedPrivate = false;
         QString firstPublic;
+        QStringList publicList;
         for (auto* cur = res; cur != nullptr; cur = cur->ai_next) {
             if (cur->ai_family == AF_INET) {
                 auto* s4 = reinterpret_cast<struct sockaddr_in*>(cur->ai_addr);
@@ -610,10 +635,15 @@ bool CurlEpollDownloader::isPrivateOrLoopbackHost(const QString& host, QString* 
                 if (isPrivateIpv4(ip)) {
                     resolvedPrivate = true;
                     break;
-                } else if (firstPublic.isEmpty()) {
-                    char buf[INET_ADDRSTRLEN];
-                    if (::inet_ntop(AF_INET, &s4->sin_addr, buf, sizeof(buf))) {
-                        firstPublic = QString::fromLatin1(buf);
+                }
+                char buf[INET_ADDRSTRLEN];
+                if (::inet_ntop(AF_INET, &s4->sin_addr, buf, sizeof(buf))) {
+                    const auto str = QString::fromLatin1(buf);
+                    if (firstPublic.isEmpty()) {
+                        firstPublic = str;
+                    }
+                    if (!publicList.contains(str)) {
+                        publicList.append(str);
                     }
                 }
             } else if (cur->ai_family == AF_INET6) {
@@ -621,10 +651,16 @@ bool CurlEpollDownloader::isPrivateOrLoopbackHost(const QString& host, QString* 
                 if (isPrivateIpv6(s6->sin6_addr)) {
                     resolvedPrivate = true;
                     break;
-                } else if (firstPublic.isEmpty()) {
-                    char buf[INET6_ADDRSTRLEN];
-                    if (::inet_ntop(AF_INET6, &s6->sin6_addr, buf, sizeof(buf))) {
-                        firstPublic = QString::fromLatin1(buf);
+                }
+                char buf[INET6_ADDRSTRLEN];
+                if (::inet_ntop(AF_INET6, &s6->sin6_addr, buf, sizeof(buf))) {
+                    const auto rawStr = QString::fromLatin1(buf);
+                    const auto bracketedStr = QStringLiteral("[%1]").arg(rawStr);
+                    if (firstPublic.isEmpty()) {
+                        firstPublic = rawStr;
+                    }
+                    if (!publicList.contains(bracketedStr)) {
+                        publicList.append(bracketedStr);
                     }
                 }
             }
@@ -635,6 +671,9 @@ bool CurlEpollDownloader::isPrivateOrLoopbackHost(const QString& host, QString* 
         }
         if (resolvedPublicIp && !firstPublic.isEmpty()) {
             *resolvedPublicIp = firstPublic;
+        }
+        if (allPublicIps && !publicList.isEmpty()) {
+            *allPublicIps = publicList;
         }
     }
 
@@ -688,12 +727,17 @@ bool CurlEpollDownloader::validateRedirectUrl(const QUrl& originalUrl, const QUr
     // 4. Private network & SSRF protection policy:
     // If the original URL was a public internet host, reject redirects to private/loopback/link-local addresses
     // unless explicitly allowed.
+    QString firstPublic;
+    QStringList allPublic;
     const bool origIsPrivate = isPrivateOrLoopbackHost(originalUrl.host());
-    const bool targetIsPrivate = isPrivateOrLoopbackHost(targetUrl.host(), pinnedPublicIp);
+    const bool targetIsPrivate = isPrivateOrLoopbackHost(targetUrl.host(), &firstPublic, &allPublic);
     if (!origIsPrivate && targetIsPrivate && !allowPrivateNetworks) {
         if (error) *error = QStringLiteral("Redirect from public origin '%1' to private/local network address '%2' is blocked for SSRF security")
                                 .arg(originalUrl.host(), targetUrl.host());
         return false;
+    }
+    if (pinnedPublicIp) {
+        *pinnedPublicIp = !allPublic.isEmpty() ? allPublic.join(QLatin1Char(',')) : firstPublic;
     }
 
     return true;
@@ -1172,7 +1216,8 @@ void CurlEpollDownloader::addTransfer(QueuedRequest queued)
             }
         } else {
             QString validatedPublicIp;
-            const bool isPrivateOrBlocked = isPrivateOrLoopbackHost(host, &validatedPublicIp);
+            QStringList allPublicIps;
+            const bool isPrivateOrBlocked = isPrivateOrLoopbackHost(host, &validatedPublicIp, &allPublicIps);
             if (!queued.request.allowPrivateNetworkRedirects && isPrivateOrBlocked) {
                 emit statusChanged(queued.id, DownloadStatus::Failed,
                                    QStringLiteral("destination resolves to a private or loopback address"));
@@ -1183,7 +1228,9 @@ void CurlEpollDownloader::addTransfer(QueuedRequest queued)
                                    QStringLiteral("could not resolve destination host to a public IP address"));
                 return;
             }
-            if (!validatedPublicIp.isEmpty()) {
+            if (!allPublicIps.isEmpty()) {
+                queued.request.pinnedIp = allPublicIps.join(QLatin1Char(','));
+            } else if (!validatedPublicIp.isEmpty()) {
                 queued.request.pinnedIp = validatedPublicIp;
             } else if (!queued.request.allowPrivateNetworkRedirects) {
                 queued.request.pinnedIp.clear();
@@ -1768,6 +1815,13 @@ void CurlEpollDownloader::addSegmentTransfer(const std::shared_ptr<DownloadBatch
 void CurlEpollDownloader::retryTransfer(std::unique_ptr<SegmentTransfer> transfer, long responseCode, CURLcode result)
 {
     const auto batch = transfer->batch;
+    if (!batch->request.pinnedIp.isEmpty()) {
+        auto ips = batch->request.pinnedIp.split(QLatin1Char(','), Qt::SkipEmptyParts);
+        if (ips.size() > 1) {
+            ips.append(ips.takeFirst());
+            batch->request.pinnedIp = ips.join(QLatin1Char(','));
+        }
+    }
     const int nextAttempt = transfer->attempt + 1;
     const qint64 exponentialDelay = static_cast<qint64>(qMax(100, batch->request.retryBaseDelayMs))
         * (qint64(1) << qMin(transfer->attempt, 9));

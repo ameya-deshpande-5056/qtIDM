@@ -204,7 +204,7 @@ Build and test the Debian package:
 
 ```bash
 sh packaging/build-deb.sh
-sudo apt-get install -y ./dist/qtidm_0.2.6-1_amd64.deb
+sudo apt-get install -y ./dist/qtidm_0.2.7-1_amd64.deb
 qtIDM --version
 ```
 
@@ -226,7 +226,7 @@ chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
 sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
 sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
 APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.2.6-x86_64.AppImage --version
+APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.2.7-x86_64.AppImage --version
 ```
 
 The script writes exactly one versioned AppImage to `dist/`. The checksums pin
@@ -239,7 +239,7 @@ Build and test the Flatpak bundle:
 ```bash
 sh packaging/release/version-info.sh
 sh packaging/release/build-flatpak-bundle.sh
-flatpak install --user -y dist/qtIDM-0.2.6.flatpak
+flatpak install --user -y dist/qtIDM-0.2.7.flatpak
 flatpak run io.qtidm.Qtidm --version
 ```
 
@@ -293,7 +293,7 @@ The application and browser integrations have independent version tracks:
 
 | Component | Current version | Authoritative files |
 | --- | --- | --- |
-| qtIDM application and release tag | `0.2.6` / `v0.2.6` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
+| qtIDM application and release tag | `0.2.7` / `v0.2.7` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
 | Chrome and Firefox extensions | `0.4.0` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
 
 The two checked-in browser manifest versions must always match each other, but

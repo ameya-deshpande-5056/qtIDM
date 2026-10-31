@@ -44,7 +44,7 @@ signals:
     void hostConnectionCountChanged(QString host, int activeConnections);
 
 public:
-    static bool isPrivateOrLoopbackHost(const QString& host, QString* resolvedPublicIp = nullptr);
+    static bool isPrivateOrLoopbackHost(const QString& host, QString* resolvedPublicIp = nullptr, QStringList* allPublicIps = nullptr);
     static bool validateRedirectUrl(const QUrl& originalUrl, const QUrl& targetUrl,
                                     bool allowPrivateNetworks, QString* error = nullptr,
                                     QString* pinnedPublicIp = nullptr);

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.7
+
+- Enhanced `CurlEpollDownloader` DNS inspection and address pinning (`isPrivateOrLoopbackHost`) to discover, validate, and preserve all resolved public IPv4 and IPv6 addresses for multi-homed hosts and anycast CDN networks (such as GitHub release assets hosted on Fastly CDN), eliminating single-point-of-failure hangs when individual CDN edge nodes time out or drop packets.
+- Standardized all pinned IP addresses according to libcurl `CURLOPT_RESOLVE` syntax (including square-bracketed notation `[...]` for IPv6 addresses), enabling libcurl's built-in multi-IP connection failover across all validated CDN addresses during the initial request probe and segment transfers.
+- Added automatic address rotation in `CurlEpollDownloader::retryTransfer`, cycling the pinned IP list so subsequent retry attempts immediately target the next healthy CDN edge node without waiting through redundant connection timeouts on unresponsive nodes.
+- Added test coverage in `DownloaderIntegrationTest` verifying multi-IP discovery and validation for multi-homed domains while strictly preserving private, loopback, and cloud metadata SSRF boundaries.
+
 ## 0.2.6
 
 - Added automated fallback handling in `CurlEpollDownloader` for server-side byte-range compression corruption (such as Cloudflare returning compressed lengths in `Content-Range` while streaming uncompressed payloads, causing `response exceeds its declared Content-Range`). The engine automatically cancels split transfers, truncates staging, reconfigures the transfer to a single connection without dynamic range splitting, and seamlessly restarts as an unsegmented full-file `GET` request.

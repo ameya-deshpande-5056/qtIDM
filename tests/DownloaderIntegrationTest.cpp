@@ -1568,11 +1568,14 @@ void persistsDurableCheckpointsWithAcknowledgement()
         const auto reqFromUntrusted = qtidm::requestFromJson(untrustedJson);
         QVERIFY(reqFromUntrusted.pinnedIp.isEmpty());
 
-        // 2. Verify that isPrivateOrLoopbackHost populates resolvedPublicIp for a public domain
+        // 2. Verify that isPrivateOrLoopbackHost populates resolvedPublicIp and allPublicIps for a public domain
         QString publicIp;
-        const bool isPriv = qtidm::CurlEpollDownloader::isPrivateOrLoopbackHost(QStringLiteral("example.com"), &publicIp);
+        QStringList allPublicIps;
+        const bool isPriv = qtidm::CurlEpollDownloader::isPrivateOrLoopbackHost(QStringLiteral("example.com"), &publicIp, &allPublicIps);
         QVERIFY(!isPriv);
         QVERIFY(!publicIp.isEmpty());
+        QVERIFY(!allPublicIps.isEmpty());
+        QVERIFY(allPublicIps.contains(publicIp) || allPublicIps.contains(QStringLiteral("[%1]").arg(publicIp)));
         struct in_addr in4;
         struct in6_addr in6;
         const auto ipBytes = publicIp.toUtf8();
