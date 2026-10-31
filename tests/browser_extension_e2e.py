@@ -315,9 +315,13 @@ def validate_persistent_session(messages: list[dict[str, object]]) -> None:
         raise AssertionError(f"native host did not receive a persistent prepare/download session: {messages!r}")
     if not messages[0].get("prepare") or not messages[0].get("id"):
         raise AssertionError(f"first native message was not an identified prepare request: {messages!r}")
-    if messages[1].get("prepare") or not messages[1].get("id"):
-        raise AssertionError(f"second native message was not an identified download request: {messages!r}")
-    if messages[0].get("_e2eHostPid") != messages[1].get("_e2eHostPid"):
+    downloads = [m for m in messages if not m.get("prepare") and m.get("id") and m.get("downloads")]
+    if not downloads:
+        raise AssertionError(f"native host did not receive an identified download request: {messages!r}")
+    first_download = downloads[0]
+    session_messages = messages[: messages.index(first_download) + 1]
+    pids = {m.get("_e2eHostPid") for m in session_messages if "_e2eHostPid" in m}
+    if len(pids) != 1 or not next(iter(pids)):
         raise AssertionError(f"browser reopened the native host instead of reusing its port: {messages!r}")
 
 

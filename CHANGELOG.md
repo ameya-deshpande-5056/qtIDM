@@ -6,6 +6,7 @@
 - Standardized all pinned IP addresses according to libcurl `CURLOPT_RESOLVE` syntax (including square-bracketed notation `[...]` for IPv6 addresses), enabling libcurl's built-in multi-IP connection failover across all validated CDN addresses during the initial request probe and segment transfers.
 - Added automatic address rotation in `CurlEpollDownloader::retryTransfer`, cycling the pinned IP list so subsequent retry attempts immediately target the next healthy CDN edge node without waiting through redundant connection timeouts on unresponsive nodes.
 - Added test coverage in `DownloaderIntegrationTest` verifying multi-IP discovery and validation for multi-homed domains while strictly preserving private, loopback, and cloud metadata SSRF boundaries.
+- Resolved an E2E test assertion defect in `tests/browser_extension_e2e.py` where repeated fixture download triggers in Firefox resulted in queued prepare requests, verifying persistent port reuse across all pre-download messages rather than assuming an exact two-message sequence.
 
 ## 0.2.6
 
