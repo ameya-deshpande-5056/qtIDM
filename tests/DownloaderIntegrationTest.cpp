@@ -1642,7 +1642,10 @@ void persistsDurableCheckpointsWithAcknowledgement()
         QVERIFY(h2Server.waitForStarted());
         QVERIFY(h2Server.waitForReadyRead(5000));
         const int h2Port = QString::fromUtf8(h2Server.readLine()).trimmed().toInt();
-        const QString caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
+        QString caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
+        while (caCertPath.isEmpty() && h2Server.waitForReadyRead(5000)) {
+            caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
+        }
         QVERIFY(h2Port > 0);
         QVERIFY(QFileInfo::exists(caCertPath));
 
@@ -1732,7 +1735,10 @@ void persistsDurableCheckpointsWithAcknowledgement()
         QVERIFY(h2Server.waitForStarted());
         QVERIFY(h2Server.waitForReadyRead(5000));
         const int h2Port = QString::fromUtf8(h2Server.readLine()).trimmed().toInt();
-        const QString caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
+        QString caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
+        while (caCertPath.isEmpty() && h2Server.waitForReadyRead(5000)) {
+            caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
+        }
         QVERIFY(h2Port > 0);
         QVERIFY(QFileInfo::exists(caCertPath));
 

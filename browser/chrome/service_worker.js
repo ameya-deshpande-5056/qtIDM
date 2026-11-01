@@ -77,8 +77,13 @@ function isExcluded(url, value) {
 }
 
 function extensionFor(url, filename = "") {
-  const source = String(filename || new URL(url).pathname || "").toLowerCase();
-  return source.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] || "";
+  try {
+    const source = String(filename || (url ? new URL(url).pathname : "") || "").toLowerCase();
+    return source.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] || "";
+  } catch (_) {
+    const fallback = String(filename || url || "").toLowerCase();
+    return fallback.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] || "";
+  }
 }
 
 function shouldIntercept(item, value) {
@@ -241,22 +246,129 @@ function leafFilename(value) {
   return normalized.split("/").pop() || "";
 }
 
-function browserSuggestedFilename(filename, url) {
+function extensionFromMime(mime) {
+  if (!mime) return "";
+  const cleaned = String(mime).split(";")[0].trim().toLowerCase();
+  switch (cleaned) {
+    // Audio
+    case "audio/mpeg":
+    case "audio/mp3":
+      return "mp3";
+    case "audio/mp4":
+    case "audio/x-m4a":
+    case "audio/m4a":
+      return "m4a";
+    case "audio/aac":
+    case "audio/x-aac":
+    case "audio/aacp":
+      return "aac";
+    case "audio/ogg":
+    case "audio/vorbis":
+    case "application/ogg":
+      return "ogg";
+    case "audio/opus":
+    case "audio/x-opus":
+      return "opus";
+    case "audio/flac":
+    case "audio/x-flac":
+      return "flac";
+    case "audio/wav":
+    case "audio/x-wav":
+    case "audio/wave":
+      return "wav";
+    case "audio/webm":
+      return "webm";
+
+    // Video
+    case "video/mp4":
+      return "mp4";
+    case "video/webm":
+      return "webm";
+    case "video/x-matroska":
+      return "mkv";
+    case "video/quicktime":
+      return "mov";
+    case "video/x-flv":
+      return "flv";
+    case "video/x-msvideo":
+      return "avi";
+    case "video/3gpp":
+      return "3gp";
+    case "video/mp2t":
+      return "ts";
+
+    // Adaptive manifests
+    case "application/vnd.apple.mpegurl":
+    case "application/x-mpegurl":
+    case "audio/mpegurl":
+      return "m3u8";
+    case "application/dash+xml":
+      return "mpd";
+
+    // Subtitles
+    case "text/vtt":
+      return "vtt";
+    case "application/x-subrip":
+      return "srt";
+    case "application/ttml+xml":
+      return "ttml";
+    case "text/x-ssa":
+    case "text/x-ass":
+      return "ass";
+
+    // Documents & archives
+    case "application/pdf":
+      return "pdf";
+    case "application/zip":
+      return "zip";
+    case "application/x-tar":
+      return "tar";
+    case "application/gzip":
+    case "application/x-gzip":
+      return "gz";
+    case "application/x-7z-compressed":
+      return "7z";
+
+    default:
+      if (cleaned.startsWith("audio/")) return "mp3";
+      if (cleaned.startsWith("video/")) return "mp4";
+      return "";
+  }
+}
+
+function browserSuggestedFilename(filename, url, mimeType = "") {
   const captured = leafFilename(filename);
   const response = recentResponseFilename(url);
-  if (!captured || !response || captured === response) return captured || response;
+  let chosen = (!captured || !response || captured === response) ? (captured || response) : captured;
 
   // Browsers reserve a local name before the extension can cancel the download,
   // so their temporary collision suffix must not become qtIDM's requested name.
   // qtIDM applies its own conflict policy against the real destination.
-  const extensionAt = response.lastIndexOf(".");
-  const stem = extensionAt > 0 ? response.slice(0, extensionAt) : response;
-  const extension = extensionAt > 0 ? response.slice(extensionAt) : "";
-  const collisionSuffix = captured.slice(stem.length, captured.length - extension.length);
-  if (captured.startsWith(stem) && captured.endsWith(extension) && /^\(\d+\)$/.test(collisionSuffix)) {
-    return response;
+  if (captured && response && captured !== response) {
+    const extensionAt = response.lastIndexOf(".");
+    const stem = extensionAt > 0 ? response.slice(0, extensionAt) : response;
+    const extension = extensionAt > 0 ? response.slice(extensionAt) : "";
+    const collisionSuffix = captured.slice(stem.length, captured.length - extension.length);
+    if (captured.startsWith(stem) && captured.endsWith(extension) && /^\(\d+\)$/.test(collisionSuffix)) {
+      chosen = response;
+    }
   }
-  return captured;
+
+  if (chosen) {
+    const existingExt = extensionFor("", chosen);
+    if (!existingExt) {
+      const urlExt = extensionFor(url);
+      if (urlExt && !/^(?:php|aspx?|cgi|jsp|html?)$/i.test(urlExt)) {
+        chosen = `${chosen}.${urlExt}`;
+      } else {
+        const mimeExt = extensionFromMime(mimeType);
+        if (mimeExt) {
+          chosen = `${chosen}.${mimeExt}`;
+        }
+      }
+    }
+  }
+  return chosen;
 }
 
 function responseFilename(details) {
@@ -301,18 +413,69 @@ function sanitizeMediaTitle(rawTitle) {
   return title;
 }
 
+function mediaExtension(item) {
+  const urlExt = extensionFor(item?.url);
+  if (urlExt && !/^(?:php|aspx?|cgi|jsp|html?|m3u8|mpd)$/i.test(urlExt)) {
+    return urlExt;
+  }
+  const capturedExt = extensionFor("", item?.suggestedFilename);
+  if (capturedExt && !/^(?:m3u8|mpd)$/i.test(capturedExt)) {
+    return capturedExt;
+  }
+  const mimeExt = extensionFromMime(item?.contentType);
+  if (mimeExt && !/^(?:m3u8|mpd)$/i.test(mimeExt)) {
+    return mimeExt;
+  }
+  const type = (item?.type || "").toUpperCase();
+  if (type === "VIDEO") return "mp4";
+  if (type === "AUDIO") return "mp3";
+  if (type === "SUBTITLE") return "vtt";
+  return "";
+}
+
 function mediaSuggestedFilename(item, tab) {
+  const ext = mediaExtension(item);
+  const withExt = (title) => {
+    if (!title) return "";
+    const existingExt = extensionFor("", title);
+    if (existingExt && !/^(?:m3u8|mpd)$/i.test(existingExt)) {
+      if (existingExt === ext) return title;
+      if (/^(?:php|aspx?|cgi|jsp|html?|bin)$/i.test(existingExt)) {
+        return ext ? `${title.slice(0, -(existingExt.length + 1))}.${ext}` : title;
+      }
+      if (ext && /^(?:mp4|mp3|m4a|webm|opus|ogg|flac|wav|mkv|mov|avi)$/i.test(existingExt)) {
+        return `${title.slice(0, -(existingExt.length + 1))}.${ext}`;
+      }
+      return title;
+    }
+    return ext ? `${title}.${ext}` : title;
+  };
+
   const captured = leafFilename(item?.suggestedFilename);
-  if (captured && !/\.(?:m3u8|mpd)$/i.test(captured)) return sanitizeMediaTitle(captured);
+  if (captured && !/\.(?:m3u8|mpd)$/i.test(captured)) {
+    return withExt(sanitizeMediaTitle(captured));
+  }
   const fromTitle = sanitizeMediaTitle(tab?.title);
-  if (fromTitle) return fromTitle;
+  if (fromTitle) {
+    return withExt(fromTitle);
+  }
   if (captured) {
     const stem = captured.replace(/\.(?:m3u8|mpd)$/i, "").trim();
     if (stem && !/^(?:index|master|playlist|manifest|uwu|stream|video|audio)$/i.test(stem)) {
-      return sanitizeMediaTitle(stem);
+      return withExt(sanitizeMediaTitle(stem));
     }
   }
-  return "";
+  try {
+    const pathLeaf = new URL(item?.url || "").pathname.split("/").pop() || "";
+    const cleanLeaf = decodeURIComponent(pathLeaf).trim();
+    const leafExt = extensionFor("", cleanLeaf);
+    const stem = leafExt ? cleanLeaf.slice(0, -(leafExt.length + 1)) : cleanLeaf;
+    if (stem && !/^(?:index|master|playlist|manifest|stream|video|audio|videoplayback|playback)$/i.test(stem)) {
+      return withExt(sanitizeMediaTitle(stem));
+    }
+  } catch (_) {}
+
+  return ext ? `media.${ext}` : "";
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -423,6 +586,7 @@ async function storeMedia(details, value) {
       || previous?.referrer || "",
     detectedAt: Date.now(),
     type: mediaType(details.url, contentType),
+    contentType: contentType || previous?.contentType || "",
     headers: Object.keys(observedHeaders).length ? observedHeaders : previous?.headers || {},
     suggestedFilename: responseFilename(details) || previous?.suggestedFilename || ""
   };
@@ -541,7 +705,7 @@ async function getScopedCookies(targetUrl, initialUrl = "") {
   }
 }
 
-async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "") {
+async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "", mimeType = "") {
   if (!/^(?:https?|ftp):/i.test(url)) {
     throw new Error("Only HTTP, HTTPS, and FTP downloads can be redirected to qtIDM.");
   }
@@ -555,7 +719,8 @@ async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, 
     setHeaderDefault(headers, "Origin", httpOrigin(pageReferrer));
   }
   setHeaderDefault(headers, "User-Agent", navigator.userAgent);
-  if (mediaTypeHint === "HLS" || mediaTypeHint === "DASH") headers._qtidmMediaType = mediaTypeHint;
+  if (mediaTypeHint) headers._qtidmMediaType = mediaTypeHint;
+  if (mimeType) headers._qtidmMimeType = mimeType;
   return {
     url,
     headers,
@@ -566,9 +731,9 @@ async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, 
   };
 }
 
-async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "") {
+async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "", mimeType = "") {
   const response = await nativeRequest({
-    downloads: [await makeDownloadEntry(url, tab, referrer, capturedHeaders, mediaTypeHint, suggestedFilename, method, body, initialUrl)]
+    downloads: [await makeDownloadEntry(url, tab, referrer, capturedHeaders, mediaTypeHint, suggestedFilename, method, body, initialUrl, mimeType)]
   });
   if (!response || !response.ok || response.accepted !== true) {
     throw new Error(response && response.message ? response.message : "The qtIDM native host did not acknowledge the request.");
@@ -641,7 +806,7 @@ async function redirectBrowserDownload(item, url) {
       removed = true;
     }
     await sendToHost(
-      url, null, item.referrer || "", {}, "", browserSuggestedFilename(item.filename, url), request.method, request.body, initialUrl
+      url, null, item.referrer || "", {}, "", browserSuggestedFilename(item.filename, url, item.mime || ""), request.method, request.body, initialUrl, item.mime || ""
     );
     if (!prepared) {
       await chrome.downloads.cancel(item.id).catch(() => {});
@@ -824,14 +989,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "downloadMedia") {
       const stored = (await captureStorage.get(key))[key];
       const items = Array.isArray(stored) ? stored : [];
-      const item = items[message.index];
+      const item = (typeof message.url === "string")
+        ? items.find((e) => e.url === message.url) || items[message.index]
+        : items[message.index];
       if (!item) {
         sendResponse({ ok: false, message: "The selected media capture no longer exists." });
         return;
       }
       try {
         const tab = await chrome.tabs.get(message.tabId);
-        await sendToHost(item.url, tab, item.referrer, item.headers, item.type, mediaSuggestedFilename(item, tab));
+        await sendToHost(item.url, tab, item.referrer, item.headers, item.type, mediaSuggestedFilename(item, tab), "", "", "", item.contentType || "");
         sendResponse({ ok: true });
       } catch (error) {
         showError(error.message);

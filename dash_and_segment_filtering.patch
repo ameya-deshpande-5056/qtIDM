@@ -1,0 +1,1773 @@
+diff --git a/browser/chrome/popup.css b/browser/chrome/popup.css
+index 0a690e2..f22a811 100644
+--- a/browser/chrome/popup.css
++++ b/browser/chrome/popup.css
+@@ -15,12 +15,17 @@
+ body {
+   width: 430px;
+   min-height: 420px;
++  max-height: 600px;
+   margin: 0;
++  display: flex;
++  flex-direction: column;
+   font: 13px "Trebuchet MS", sans-serif;
+   color: var(--ink);
+   background: linear-gradient(145deg, #211118, #0d080a);
++  overflow: hidden;
+ }
+ .hero {
++  flex-shrink: 0;
+   display: grid;
+   grid-template-columns: 42px 1fr auto;
+   gap: 10px;
+@@ -51,7 +56,12 @@ body {
+   text-align: center;
+   font-weight: bold;
+ }
+-nav { display: grid; grid-template-columns: repeat(3, 1fr); background: #1c0f14; }
++nav {
++  flex-shrink: 0;
++  display: grid;
++  grid-template-columns: repeat(3, 1fr);
++  background: #1c0f14;
++}
+ .tab {
+   border: 0;
+   border-bottom: 3px solid transparent;
+@@ -66,7 +76,29 @@ nav { display: grid; grid-template-columns: repeat(3, 1fr); background: #1c0f14;
+ .tab:hover { background: #321923; color: #f1d8cf; }
+ .tab.active { color: #fff; border-color: var(--accent); background: #28131b; }
+ .panel { display: none; padding: 14px 16px; }
+-.panel.active { display: block; }
++.panel.active {
++  display: flex;
++  flex-direction: column;
++  flex: 1 1 auto;
++  min-height: 0;
++  overflow-y: auto;
++  overflow-x: hidden;
++  scrollbar-width: thin;
++  scrollbar-color: var(--line) transparent;
++}
++.panel::-webkit-scrollbar {
++  width: 6px;
++}
++.panel::-webkit-scrollbar-track {
++  background: transparent;
++}
++.panel::-webkit-scrollbar-thumb {
++  background: var(--line);
++  border-radius: 3px;
++}
++.panel::-webkit-scrollbar-thumb:hover {
++  background: var(--brand-hover);
++}
+ .section-head {
+   display: flex;
+   justify-content: space-between;
+@@ -95,6 +127,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
+   box-shadow: 0 5px 16px #0005;
+ }
+ .item:hover { background: var(--card-hover); }
++.item.stream {
++  border-left: 4px solid var(--accent);
++  background: #331a25;
++}
++.item.stream .type {
++  color: #ffc28d;
++}
+ .type { font-size: 11px; font-weight: bold; color: var(--accent); }
+ .url-wrap { min-width: 0; }
+ .url {
+@@ -115,7 +154,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
+ }
+ .download:hover, .primary:hover { background: var(--brand-hover); }
+ .empty {
++  flex: 1;
+   min-height: 210px;
++  margin-top: 8px;
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+@@ -207,6 +248,8 @@ textarea { resize: vertical; }
+ .switch-row input:checked + i { background: var(--brand); }
+ .switch-row input:checked + i::after { left: 21px; }
+ footer {
++  margin-top: auto;
++  flex-shrink: 0;
+   padding: 8px 16px;
+   border-top: 1px solid var(--line);
+   background: #160c10;
+diff --git a/browser/chrome/popup.js b/browser/chrome/popup.js
+index 9dbedf3..64754d6 100644
+--- a/browser/chrome/popup.js
++++ b/browser/chrome/popup.js
+@@ -26,6 +26,23 @@ function displayName(value) {
+   try { return decodeURIComponent(tail); } catch (_) { return tail; }
+ }
+ 
++function itemTitle(item, currentTab) {
++  if (item.suggestedFilename && !/\.(?:m3u8|mpd)$/i.test(item.suggestedFilename)) {
++    return item.suggestedFilename;
++  }
++  const pageTitle = (currentTab?.title || "")
++    .replace(/\s+::\s+[^:]+$/, "")
++    .replace(/\s*-\s*(?:Prime Video|YouTube|Netflix|Twitch|Vimeo|Dailymotion)$/i, "")
++    .trim();
++  if (pageTitle && pageTitle !== "Current tab") {
++    if (item.type === "DASH" || item.type === "HLS") {
++      return `${pageTitle} (${item.type} Full Stream)`;
++    }
++    return pageTitle;
++  }
++  return displayName(item.url);
++}
++
+ const SOCIAL_HOSTS = [
+   "youtube.com", "youtu.be",
+   "bilibili.com", "b23.tv", "bili2233.cn",
+@@ -68,9 +85,18 @@ async function refresh() {
+   const showEmpty = items.length === 0 && !isSocial;
+   $("#empty").hidden = !showEmpty;
+   $("#empty").style.display = showEmpty ? "" : "none";
+-  items.forEach((item, index) => {
++  const sortedItems = items.map((item, originalIndex) => ({ ...item, originalIndex }))
++    .sort((a, b) => {
++      const aStream = a.type === "DASH" || a.type === "HLS" ? 1 : 0;
++      const bStream = b.type === "DASH" || b.type === "HLS" ? 1 : 0;
++      if (aStream !== bStream) return bStream - aStream;
++      return (b.detectedAt || 0) - (a.detectedAt || 0);
++    });
++
++  sortedItems.forEach((item) => {
++    const isStream = item.type === "DASH" || item.type === "HLS";
+     const row = document.createElement("article");
+-    row.className = "item";
++    row.className = isStream ? "item stream" : "item";
+     const type = document.createElement("span");
+     type.className = "type";
+     type.textContent = item.type || "Media";
+@@ -78,7 +104,7 @@ async function refresh() {
+     details.className = "url-wrap";
+     const url = document.createElement("span");
+     url.className = "url";
+-    url.textContent = item.suggestedFilename || displayName(item.url);
++    url.textContent = itemTitle(item, tab);
+     url.title = item.url;
+     const host = document.createElement("span");
+     host.className = "host";
+@@ -89,7 +115,12 @@ async function refresh() {
+     button.textContent = "GET";
+     button.addEventListener("click", async () => {
+       button.disabled = true;
+-      const result = await api.runtime.sendMessage({ type: "downloadMedia", tabId: tab.id, index });
++      const result = await api.runtime.sendMessage({
++        type: "downloadMedia",
++        tabId: tab.id,
++        index: item.originalIndex,
++        url: item.url
++      });
+       button.disabled = false;
+       notice(result?.ok ? "Capture sent to qtIDM." : (result?.message || "Could not contact qtIDM."), !result?.ok);
+     });
+diff --git a/browser/chrome/service_worker.js b/browser/chrome/service_worker.js
+index df1bd7b..66035ee 100644
+--- a/browser/chrome/service_worker.js
++++ b/browser/chrome/service_worker.js
+@@ -77,8 +77,13 @@ function isExcluded(url, value) {
+ }
+ 
+ function extensionFor(url, filename = "") {
+-  const source = String(filename || new URL(url).pathname || "").toLowerCase();
+-  return source.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] || "";
++  try {
++    const source = String(filename || (url ? new URL(url).pathname : "") || "").toLowerCase();
++    return source.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] || "";
++  } catch (_) {
++    const fallback = String(filename || url || "").toLowerCase();
++    return fallback.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] || "";
++  }
+ }
+ 
+ function shouldIntercept(item, value) {
+@@ -241,22 +246,129 @@ function leafFilename(value) {
+   return normalized.split("/").pop() || "";
+ }
+ 
+-function browserSuggestedFilename(filename, url) {
++function extensionFromMime(mime) {
++  if (!mime) return "";
++  const cleaned = String(mime).split(";")[0].trim().toLowerCase();
++  switch (cleaned) {
++    // Audio
++    case "audio/mpeg":
++    case "audio/mp3":
++      return "mp3";
++    case "audio/mp4":
++    case "audio/x-m4a":
++    case "audio/m4a":
++      return "m4a";
++    case "audio/aac":
++    case "audio/x-aac":
++    case "audio/aacp":
++      return "aac";
++    case "audio/ogg":
++    case "audio/vorbis":
++    case "application/ogg":
++      return "ogg";
++    case "audio/opus":
++    case "audio/x-opus":
++      return "opus";
++    case "audio/flac":
++    case "audio/x-flac":
++      return "flac";
++    case "audio/wav":
++    case "audio/x-wav":
++    case "audio/wave":
++      return "wav";
++    case "audio/webm":
++      return "webm";
++
++    // Video
++    case "video/mp4":
++      return "mp4";
++    case "video/webm":
++      return "webm";
++    case "video/x-matroska":
++      return "mkv";
++    case "video/quicktime":
++      return "mov";
++    case "video/x-flv":
++      return "flv";
++    case "video/x-msvideo":
++      return "avi";
++    case "video/3gpp":
++      return "3gp";
++    case "video/mp2t":
++      return "ts";
++
++    // Adaptive manifests
++    case "application/vnd.apple.mpegurl":
++    case "application/x-mpegurl":
++    case "audio/mpegurl":
++      return "m3u8";
++    case "application/dash+xml":
++      return "mpd";
++
++    // Subtitles
++    case "text/vtt":
++      return "vtt";
++    case "application/x-subrip":
++      return "srt";
++    case "application/ttml+xml":
++      return "ttml";
++    case "text/x-ssa":
++    case "text/x-ass":
++      return "ass";
++
++    // Documents & archives
++    case "application/pdf":
++      return "pdf";
++    case "application/zip":
++      return "zip";
++    case "application/x-tar":
++      return "tar";
++    case "application/gzip":
++    case "application/x-gzip":
++      return "gz";
++    case "application/x-7z-compressed":
++      return "7z";
++
++    default:
++      if (cleaned.startsWith("audio/")) return "mp3";
++      if (cleaned.startsWith("video/")) return "mp4";
++      return "";
++  }
++}
++
++function browserSuggestedFilename(filename, url, mimeType = "") {
+   const captured = leafFilename(filename);
+   const response = recentResponseFilename(url);
+-  if (!captured || !response || captured === response) return captured || response;
++  let chosen = (!captured || !response || captured === response) ? (captured || response) : captured;
+ 
+   // Browsers reserve a local name before the extension can cancel the download,
+   // so their temporary collision suffix must not become qtIDM's requested name.
+   // qtIDM applies its own conflict policy against the real destination.
+-  const extensionAt = response.lastIndexOf(".");
+-  const stem = extensionAt > 0 ? response.slice(0, extensionAt) : response;
+-  const extension = extensionAt > 0 ? response.slice(extensionAt) : "";
+-  const collisionSuffix = captured.slice(stem.length, captured.length - extension.length);
+-  if (captured.startsWith(stem) && captured.endsWith(extension) && /^\(\d+\)$/.test(collisionSuffix)) {
+-    return response;
++  if (captured && response && captured !== response) {
++    const extensionAt = response.lastIndexOf(".");
++    const stem = extensionAt > 0 ? response.slice(0, extensionAt) : response;
++    const extension = extensionAt > 0 ? response.slice(extensionAt) : "";
++    const collisionSuffix = captured.slice(stem.length, captured.length - extension.length);
++    if (captured.startsWith(stem) && captured.endsWith(extension) && /^\(\d+\)$/.test(collisionSuffix)) {
++      chosen = response;
++    }
+   }
+-  return captured;
++
++  if (chosen) {
++    const existingExt = extensionFor("", chosen);
++    if (!existingExt) {
++      const urlExt = extensionFor(url);
++      if (urlExt && !/^(?:php|aspx?|cgi|jsp|html?)$/i.test(urlExt)) {
++        chosen = `${chosen}.${urlExt}`;
++      } else {
++        const mimeExt = extensionFromMime(mimeType);
++        if (mimeExt) {
++          chosen = `${chosen}.${mimeExt}`;
++        }
++      }
++    }
++  }
++  return chosen;
+ }
+ 
+ function responseFilename(details) {
+@@ -301,18 +413,69 @@ function sanitizeMediaTitle(rawTitle) {
+   return title;
+ }
+ 
++function mediaExtension(item) {
++  const urlExt = extensionFor(item?.url);
++  if (urlExt && !/^(?:php|aspx?|cgi|jsp|html?|m3u8|mpd)$/i.test(urlExt)) {
++    return urlExt;
++  }
++  const capturedExt = extensionFor("", item?.suggestedFilename);
++  if (capturedExt && !/^(?:m3u8|mpd)$/i.test(capturedExt)) {
++    return capturedExt;
++  }
++  const mimeExt = extensionFromMime(item?.contentType);
++  if (mimeExt && !/^(?:m3u8|mpd)$/i.test(mimeExt)) {
++    return mimeExt;
++  }
++  const type = (item?.type || "").toUpperCase();
++  if (type === "VIDEO") return "mp4";
++  if (type === "AUDIO") return "mp3";
++  if (type === "SUBTITLE") return "vtt";
++  return "";
++}
++
+ function mediaSuggestedFilename(item, tab) {
++  const ext = mediaExtension(item);
++  const withExt = (title) => {
++    if (!title) return "";
++    const existingExt = extensionFor("", title);
++    if (existingExt && !/^(?:m3u8|mpd)$/i.test(existingExt)) {
++      if (existingExt === ext) return title;
++      if (/^(?:php|aspx?|cgi|jsp|html?|bin)$/i.test(existingExt)) {
++        return ext ? `${title.slice(0, -(existingExt.length + 1))}.${ext}` : title;
++      }
++      if (ext && /^(?:mp4|mp3|m4a|webm|opus|ogg|flac|wav|mkv|mov|avi)$/i.test(existingExt)) {
++        return `${title.slice(0, -(existingExt.length + 1))}.${ext}`;
++      }
++      return title;
++    }
++    return ext ? `${title}.${ext}` : title;
++  };
++
+   const captured = leafFilename(item?.suggestedFilename);
+-  if (captured && !/\.(?:m3u8|mpd)$/i.test(captured)) return sanitizeMediaTitle(captured);
++  if (captured && !/\.(?:m3u8|mpd)$/i.test(captured)) {
++    return withExt(sanitizeMediaTitle(captured));
++  }
+   const fromTitle = sanitizeMediaTitle(tab?.title);
+-  if (fromTitle) return fromTitle;
++  if (fromTitle) {
++    return withExt(fromTitle);
++  }
+   if (captured) {
+     const stem = captured.replace(/\.(?:m3u8|mpd)$/i, "").trim();
+     if (stem && !/^(?:index|master|playlist|manifest|uwu|stream|video|audio)$/i.test(stem)) {
+-      return sanitizeMediaTitle(stem);
++      return withExt(sanitizeMediaTitle(stem));
+     }
+   }
+-  return "";
++  try {
++    const pathLeaf = new URL(item?.url || "").pathname.split("/").pop() || "";
++    const cleanLeaf = decodeURIComponent(pathLeaf).trim();
++    const leafExt = extensionFor("", cleanLeaf);
++    const stem = leafExt ? cleanLeaf.slice(0, -(leafExt.length + 1)) : cleanLeaf;
++    if (stem && !/^(?:index|master|playlist|manifest|stream|video|audio|videoplayback|playback)$/i.test(stem)) {
++      return withExt(sanitizeMediaTitle(stem));
++    }
++  } catch (_) {}
++
++  return ext ? `media.${ext}` : "";
+ }
+ 
+ chrome.runtime.onInstalled.addListener(() => {
+@@ -350,7 +513,23 @@ function isManifestResponse(details) {
+ }
+ 
+ function isDirectMediaResponse(details) {
+-  if (/\.(?:ts|m4s|aac|key|vtt)(?:$|[?#])/i.test(details.url || "")) return false;
++  // If the browser natively requests media for an <audio> or <video> element,
++  // it is always a direct media file, never an MSE adaptive segment chunk.
++  if (details.type === "media") {
++    return (details.responseHeaders || []).some((header) => {
++      const value = String(header.value || "").toLowerCase();
++      return header.name.toLowerCase() === "content-type"
++        && (value.startsWith("video/") || value.startsWith("audio/"));
++    });
++  }
++
++  // Pure adaptive segment formats fetched via XHR/fetch
++  if (/\.(?:m4s|ts|key)(?:$|[?#])/i.test(details.url || "")) return false;
++
++  // Explicit DASH/HLS representation segment query markers or UUID representation chunks
++  if (/[?&]encoding=segment(?:Base|Timeline)/i.test(details.url || "")) return false;
++  if (/[0-9a-fA-F-]{8,36}_(?:video|audio|init)[-_]?\d*\.(?:mp4|m4a|webm)(?:$|[?#])/i.test(details.url || "")) return false;
++
+   return (details.responseHeaders || []).some((header) => {
+     const value = String(header.value || "").toLowerCase();
+     return header.name.toLowerCase() === "content-type"
+@@ -407,6 +586,28 @@ async function storeMedia(details, value) {
+   const key = mediaKey(tabId);
+   const stored = (await captureStorage.get(key))[key];
+   const items = Array.isArray(stored) ? stored : (stored && stored.url ? [stored] : []);
++
++  // If this tab already captured a full DASH or HLS manifest, suppress sub-segment chunks
++  // from the same origin or streaming path to prevent popup clutter.
++  if (details.type === "xmlhttprequest" && items.some((e) => e.type === "DASH" || e.type === "HLS")) {
++    const isSubSegment = items.some((stream) => {
++      if (stream.type !== "DASH" && stream.type !== "HLS") return false;
++      try {
++        const streamUrl = new URL(stream.url);
++        const chunkUrl = new URL(details.url);
++        if (streamUrl.origin !== chunkUrl.origin) return false;
++        const streamDir = streamUrl.pathname.substring(0, streamUrl.pathname.lastIndexOf("/"));
++        return (streamDir.length > 1 && chunkUrl.pathname.startsWith(streamDir))
++          || /(?:dash|hls|segment|chunk)/i.test(chunkUrl.pathname);
++      } catch (_) {
++        return false;
++      }
++    });
++    if (isSubSegment) {
++      return;
++    }
++  }
++
+   const contentType = (details.responseHeaders || [])
+     .find((header) => header.name.toLowerCase() === "content-type")?.value?.toLowerCase() || "";
+   const duplicate = items.findIndex((entry) => entry.url === details.url);
+@@ -423,6 +624,7 @@ async function storeMedia(details, value) {
+       || previous?.referrer || "",
+     detectedAt: Date.now(),
+     type: mediaType(details.url, contentType),
++    contentType: contentType || previous?.contentType || "",
+     headers: Object.keys(observedHeaders).length ? observedHeaders : previous?.headers || {},
+     suggestedFilename: responseFilename(details) || previous?.suggestedFilename || ""
+   };
+@@ -541,7 +743,7 @@ async function getScopedCookies(targetUrl, initialUrl = "") {
+   }
+ }
+ 
+-async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "") {
++async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "", mimeType = "") {
+   if (!/^(?:https?|ftp):/i.test(url)) {
+     throw new Error("Only HTTP, HTTPS, and FTP downloads can be redirected to qtIDM.");
+   }
+@@ -555,7 +757,8 @@ async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {},
+     setHeaderDefault(headers, "Origin", httpOrigin(pageReferrer));
+   }
+   setHeaderDefault(headers, "User-Agent", navigator.userAgent);
+-  if (mediaTypeHint === "HLS" || mediaTypeHint === "DASH") headers._qtidmMediaType = mediaTypeHint;
++  if (mediaTypeHint) headers._qtidmMediaType = mediaTypeHint;
++  if (mimeType) headers._qtidmMimeType = mimeType;
+   return {
+     url,
+     headers,
+@@ -566,9 +769,9 @@ async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {},
+   };
+ }
+ 
+-async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "") {
++async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "", mimeType = "") {
+   const response = await nativeRequest({
+-    downloads: [await makeDownloadEntry(url, tab, referrer, capturedHeaders, mediaTypeHint, suggestedFilename, method, body, initialUrl)]
++    downloads: [await makeDownloadEntry(url, tab, referrer, capturedHeaders, mediaTypeHint, suggestedFilename, method, body, initialUrl, mimeType)]
+   });
+   if (!response || !response.ok || response.accepted !== true) {
+     throw new Error(response && response.message ? response.message : "The qtIDM native host did not acknowledge the request.");
+@@ -641,7 +844,7 @@ async function redirectBrowserDownload(item, url) {
+       removed = true;
+     }
+     await sendToHost(
+-      url, null, item.referrer || "", {}, "", browserSuggestedFilename(item.filename, url), request.method, request.body, initialUrl
++      url, null, item.referrer || "", {}, "", browserSuggestedFilename(item.filename, url, item.mime || ""), request.method, request.body, initialUrl, item.mime || ""
+     );
+     if (!prepared) {
+       await chrome.downloads.cancel(item.id).catch(() => {});
+@@ -824,14 +1027,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+     if (message.type === "downloadMedia") {
+       const stored = (await captureStorage.get(key))[key];
+       const items = Array.isArray(stored) ? stored : [];
+-      const item = items[message.index];
++      const item = (typeof message.url === "string")
++        ? items.find((e) => e.url === message.url) || items[message.index]
++        : items[message.index];
+       if (!item) {
+         sendResponse({ ok: false, message: "The selected media capture no longer exists." });
+         return;
+       }
+       try {
+         const tab = await chrome.tabs.get(message.tabId);
+-        await sendToHost(item.url, tab, item.referrer, item.headers, item.type, mediaSuggestedFilename(item, tab));
++        await sendToHost(item.url, tab, item.referrer, item.headers, item.type, mediaSuggestedFilename(item, tab), "", "", "", item.contentType || "");
+         sendResponse({ ok: true });
+       } catch (error) {
+         showError(error.message);
+diff --git a/browser/firefox/background.js b/browser/firefox/background.js
+index f916b93..f0234ce 100644
+--- a/browser/firefox/background.js
++++ b/browser/firefox/background.js
+@@ -68,8 +68,13 @@ function isExcluded(url, value) {
+ }
+ 
+ function extensionFor(url, filename = "") {
+-  const source = String(filename || new URL(url).pathname || "").toLowerCase();
+-  return source.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] || "";
++  try {
++    const source = String(filename || (url ? new URL(url).pathname : "") || "").toLowerCase();
++    return source.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] || "";
++  } catch (_) {
++    const fallback = String(filename || url || "").toLowerCase();
++    return fallback.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] || "";
++  }
+ }
+ 
+ function shouldIntercept(item, value) {
+@@ -225,22 +230,129 @@ function leafFilename(value) {
+   return normalized.split("/").pop() || "";
+ }
+ 
+-function browserSuggestedFilename(filename, url) {
++function extensionFromMime(mime) {
++  if (!mime) return "";
++  const cleaned = String(mime).split(";")[0].trim().toLowerCase();
++  switch (cleaned) {
++    // Audio
++    case "audio/mpeg":
++    case "audio/mp3":
++      return "mp3";
++    case "audio/mp4":
++    case "audio/x-m4a":
++    case "audio/m4a":
++      return "m4a";
++    case "audio/aac":
++    case "audio/x-aac":
++    case "audio/aacp":
++      return "aac";
++    case "audio/ogg":
++    case "audio/vorbis":
++    case "application/ogg":
++      return "ogg";
++    case "audio/opus":
++    case "audio/x-opus":
++      return "opus";
++    case "audio/flac":
++    case "audio/x-flac":
++      return "flac";
++    case "audio/wav":
++    case "audio/x-wav":
++    case "audio/wave":
++      return "wav";
++    case "audio/webm":
++      return "webm";
++
++    // Video
++    case "video/mp4":
++      return "mp4";
++    case "video/webm":
++      return "webm";
++    case "video/x-matroska":
++      return "mkv";
++    case "video/quicktime":
++      return "mov";
++    case "video/x-flv":
++      return "flv";
++    case "video/x-msvideo":
++      return "avi";
++    case "video/3gpp":
++      return "3gp";
++    case "video/mp2t":
++      return "ts";
++
++    // Adaptive manifests
++    case "application/vnd.apple.mpegurl":
++    case "application/x-mpegurl":
++    case "audio/mpegurl":
++      return "m3u8";
++    case "application/dash+xml":
++      return "mpd";
++
++    // Subtitles
++    case "text/vtt":
++      return "vtt";
++    case "application/x-subrip":
++      return "srt";
++    case "application/ttml+xml":
++      return "ttml";
++    case "text/x-ssa":
++    case "text/x-ass":
++      return "ass";
++
++    // Documents & archives
++    case "application/pdf":
++      return "pdf";
++    case "application/zip":
++      return "zip";
++    case "application/x-tar":
++      return "tar";
++    case "application/gzip":
++    case "application/x-gzip":
++      return "gz";
++    case "application/x-7z-compressed":
++      return "7z";
++
++    default:
++      if (cleaned.startsWith("audio/")) return "mp3";
++      if (cleaned.startsWith("video/")) return "mp4";
++      return "";
++  }
++}
++
++function browserSuggestedFilename(filename, url, mimeType = "") {
+   const captured = leafFilename(filename);
+   const response = recentResponseFilename(url);
+-  if (!captured || !response || captured === response) return captured || response;
++  let chosen = (!captured || !response || captured === response) ? (captured || response) : captured;
+ 
+   // Browsers reserve a local name before the extension can cancel the download,
+   // so their temporary collision suffix must not become qtIDM's requested name.
+   // qtIDM applies its own conflict policy against the real destination.
+-  const extensionAt = response.lastIndexOf(".");
+-  const stem = extensionAt > 0 ? response.slice(0, extensionAt) : response;
+-  const extension = extensionAt > 0 ? response.slice(extensionAt) : "";
+-  const collisionSuffix = captured.slice(stem.length, captured.length - extension.length);
+-  if (captured.startsWith(stem) && captured.endsWith(extension) && /^\(\d+\)$/.test(collisionSuffix)) {
+-    return response;
++  if (captured && response && captured !== response) {
++    const extensionAt = response.lastIndexOf(".");
++    const stem = extensionAt > 0 ? response.slice(0, extensionAt) : response;
++    const extension = extensionAt > 0 ? response.slice(extensionAt) : "";
++    const collisionSuffix = captured.slice(stem.length, captured.length - extension.length);
++    if (captured.startsWith(stem) && captured.endsWith(extension) && /^\(\d+\)$/.test(collisionSuffix)) {
++      chosen = response;
++    }
++  }
++
++  if (chosen) {
++    const existingExt = extensionFor("", chosen);
++    if (!existingExt) {
++      const urlExt = extensionFor(url);
++      if (urlExt && !/^(?:php|aspx?|cgi|jsp|html?)$/i.test(urlExt)) {
++        chosen = `${chosen}.${urlExt}`;
++      } else {
++        const mimeExt = extensionFromMime(mimeType);
++        if (mimeExt) {
++          chosen = `${chosen}.${mimeExt}`;
++        }
++      }
++    }
+   }
+-  return captured;
++  return chosen;
+ }
+ 
+ function responseFilename(details) {
+@@ -285,18 +397,69 @@ function sanitizeMediaTitle(rawTitle) {
+   return title;
+ }
+ 
++function mediaExtension(item) {
++  const urlExt = extensionFor(item?.url);
++  if (urlExt && !/^(?:php|aspx?|cgi|jsp|html?|m3u8|mpd)$/i.test(urlExt)) {
++    return urlExt;
++  }
++  const capturedExt = extensionFor("", item?.suggestedFilename);
++  if (capturedExt && !/^(?:m3u8|mpd)$/i.test(capturedExt)) {
++    return capturedExt;
++  }
++  const mimeExt = extensionFromMime(item?.contentType);
++  if (mimeExt && !/^(?:m3u8|mpd)$/i.test(mimeExt)) {
++    return mimeExt;
++  }
++  const type = (item?.type || "").toUpperCase();
++  if (type === "VIDEO") return "mp4";
++  if (type === "AUDIO") return "mp3";
++  if (type === "SUBTITLE") return "vtt";
++  return "";
++}
++
+ function mediaSuggestedFilename(item, tab) {
++  const ext = mediaExtension(item);
++  const withExt = (title) => {
++    if (!title) return "";
++    const existingExt = extensionFor("", title);
++    if (existingExt && !/^(?:m3u8|mpd)$/i.test(existingExt)) {
++      if (existingExt === ext) return title;
++      if (/^(?:php|aspx?|cgi|jsp|html?|bin)$/i.test(existingExt)) {
++        return ext ? `${title.slice(0, -(existingExt.length + 1))}.${ext}` : title;
++      }
++      if (ext && /^(?:mp4|mp3|m4a|webm|opus|ogg|flac|wav|mkv|mov|avi)$/i.test(existingExt)) {
++        return `${title.slice(0, -(existingExt.length + 1))}.${ext}`;
++      }
++      return title;
++    }
++    return ext ? `${title}.${ext}` : title;
++  };
++
+   const captured = leafFilename(item?.suggestedFilename);
+-  if (captured && !/\.(?:m3u8|mpd)$/i.test(captured)) return sanitizeMediaTitle(captured);
++  if (captured && !/\.(?:m3u8|mpd)$/i.test(captured)) {
++    return withExt(sanitizeMediaTitle(captured));
++  }
+   const fromTitle = sanitizeMediaTitle(tab?.title);
+-  if (fromTitle) return fromTitle;
++  if (fromTitle) {
++    return withExt(fromTitle);
++  }
+   if (captured) {
+     const stem = captured.replace(/\.(?:m3u8|mpd)$/i, "").trim();
+     if (stem && !/^(?:index|master|playlist|manifest|uwu|stream|video|audio)$/i.test(stem)) {
+-      return sanitizeMediaTitle(stem);
++      return withExt(sanitizeMediaTitle(stem));
+     }
+   }
+-  return "";
++  try {
++    const pathLeaf = new URL(item?.url || "").pathname.split("/").pop() || "";
++    const cleanLeaf = decodeURIComponent(pathLeaf).trim();
++    const leafExt = extensionFor("", cleanLeaf);
++    const stem = leafExt ? cleanLeaf.slice(0, -(leafExt.length + 1)) : cleanLeaf;
++    if (stem && !/^(?:index|master|playlist|manifest|stream|video|audio|videoplayback|playback)$/i.test(stem)) {
++      return withExt(sanitizeMediaTitle(stem));
++    }
++  } catch (_) {}
++
++  return ext ? `media.${ext}` : "";
+ }
+ 
+ browser.contextMenus.create({
+@@ -330,7 +493,23 @@ function isManifestResponse(details) {
+ }
+ 
+ function isDirectMediaResponse(details) {
+-  if (/\.(?:ts|m4s|aac|key|vtt)(?:$|[?#])/i.test(details.url || "")) return false;
++  // If the browser natively requests media for an <audio> or <video> element,
++  // it is always a direct media file, never an MSE adaptive segment chunk.
++  if (details.type === "media") {
++    return (details.responseHeaders || []).some((header) => {
++      const value = String(header.value || "").toLowerCase();
++      return header.name.toLowerCase() === "content-type"
++        && (value.startsWith("video/") || value.startsWith("audio/"));
++    });
++  }
++
++  // Pure adaptive segment formats fetched via XHR/fetch
++  if (/\.(?:m4s|ts|key)(?:$|[?#])/i.test(details.url || "")) return false;
++
++  // Explicit DASH/HLS representation segment query markers or UUID representation chunks
++  if (/[?&]encoding=segment(?:Base|Timeline)/i.test(details.url || "")) return false;
++  if (/[0-9a-fA-F-]{8,36}_(?:video|audio|init)[-_]?\d*\.(?:mp4|m4a|webm)(?:$|[?#])/i.test(details.url || "")) return false;
++
+   return (details.responseHeaders || []).some((header) => {
+     const value = String(header.value || "").toLowerCase();
+     return header.name.toLowerCase() === "content-type"
+@@ -387,6 +566,28 @@ async function storeMedia(details, value) {
+   const key = mediaKey(tabId);
+   const stored = (await captureStorage.get(key))[key];
+   const items = Array.isArray(stored) ? stored : (stored && stored.url ? [stored] : []);
++
++  // If this tab already captured a full DASH or HLS manifest, suppress sub-segment chunks
++  // from the same origin or streaming path to prevent popup clutter.
++  if (details.type === "xmlhttprequest" && items.some((e) => e.type === "DASH" || e.type === "HLS")) {
++    const isSubSegment = items.some((stream) => {
++      if (stream.type !== "DASH" && stream.type !== "HLS") return false;
++      try {
++        const streamUrl = new URL(stream.url);
++        const chunkUrl = new URL(details.url);
++        if (streamUrl.origin !== chunkUrl.origin) return false;
++        const streamDir = streamUrl.pathname.substring(0, streamUrl.pathname.lastIndexOf("/"));
++        return (streamDir.length > 1 && chunkUrl.pathname.startsWith(streamDir))
++          || /(?:dash|hls|segment|chunk)/i.test(chunkUrl.pathname);
++      } catch (_) {
++        return false;
++      }
++    });
++    if (isSubSegment) {
++      return;
++    }
++  }
++
+   const contentType = (details.responseHeaders || [])
+     .find((header) => header.name.toLowerCase() === "content-type")?.value?.toLowerCase() || "";
+   const duplicate = items.findIndex((entry) => entry.url === details.url);
+@@ -403,6 +604,7 @@ async function storeMedia(details, value) {
+       || previous?.referrer || "",
+     detectedAt: Date.now(),
+     type: mediaType(details.url, contentType),
++    contentType: contentType || previous?.contentType || "",
+     headers: Object.keys(observedHeaders).length ? observedHeaders : previous?.headers || {},
+     suggestedFilename: responseFilename(details) || previous?.suggestedFilename || ""
+   };
+@@ -521,7 +723,7 @@ async function getScopedCookies(targetUrl, initialUrl = "") {
+   }
+ }
+ 
+-async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "") {
++async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "", mimeType = "") {
+   if (!/^(?:https?|ftp):/i.test(url)) {
+     throw new Error("Only HTTP, HTTPS, and FTP downloads can be redirected to qtIDM.");
+   }
+@@ -535,12 +737,13 @@ async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {},
+     setHeaderDefault(headers, "Origin", httpOrigin(pageReferrer));
+   }
+   setHeaderDefault(headers, "User-Agent", navigator.userAgent);
+-  if (mediaTypeHint === "HLS" || mediaTypeHint === "DASH") headers._qtidmMediaType = mediaTypeHint;
++  if (mediaTypeHint) headers._qtidmMediaType = mediaTypeHint;
++  if (mimeType) headers._qtidmMimeType = mimeType;
+   return { url, headers, cookies: structuredCookies, method: method === "POST" || request.method === "POST" ? "POST" : "", body: body ? textToBase64(body) : (request.bodyBase64 || textToBase64(request.body)), suggestedFilename: suggestedFilename ? sanitizeMediaTitle(suggestedFilename) : "" };
+ }
+ 
+-async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "") {
+-  const response = await nativeRequest({ downloads: [await makeDownloadEntry(url, tab, referrer, capturedHeaders, mediaTypeHint, suggestedFilename, method, body, initialUrl)] });
++async function sendToHost(url, tab, referrer = "", capturedHeaders = {}, mediaTypeHint = "", suggestedFilename = "", method = "", body = "", initialUrl = "", mimeType = "") {
++  const response = await nativeRequest({ downloads: [await makeDownloadEntry(url, tab, referrer, capturedHeaders, mediaTypeHint, suggestedFilename, method, body, initialUrl, mimeType)] });
+   if (!response || !response.ok || response.accepted !== true) {
+     throw new Error(response && response.message ? response.message : "The qtIDM native host did not acknowledge the request.");
+   }
+@@ -598,7 +801,7 @@ async function redirectBrowserDownload(item, url) {
+       removed = true;
+     }
+     await sendToHost(
+-      url, null, item.referrer || "", {}, "", browserSuggestedFilename(item.filename, url), request.method, request.body, initialUrl
++      url, null, item.referrer || "", {}, "", browserSuggestedFilename(item.filename, url, item.mime || ""), request.method, request.body, initialUrl, item.mime || ""
+     );
+     if (!prepared) {
+       await browser.downloads.cancel(item.id).catch(() => {});
+@@ -767,11 +970,13 @@ browser.runtime.onMessage.addListener(async (message, sender) => {
+   if (message.type === "downloadMedia") {
+     const stored = (await captureStorage.get(key))[key];
+     const items = Array.isArray(stored) ? stored : [];
+-    const item = items[message.index];
++    const item = (typeof message.url === "string")
++      ? items.find((e) => e.url === message.url) || items[message.index]
++      : items[message.index];
+     if (!item) return { ok: false, message: "The selected media capture no longer exists." };
+     const tab = await browser.tabs.get(message.tabId);
+     try {
+-      await sendToHost(item.url, tab, item.referrer, item.headers, item.type, mediaSuggestedFilename(item, tab));
++      await sendToHost(item.url, tab, item.referrer, item.headers, item.type, mediaSuggestedFilename(item, tab), "", "", "", item.contentType || "");
+       return { ok: true };
+     } catch (error) {
+       showError(error.message);
+diff --git a/browser/firefox/popup.css b/browser/firefox/popup.css
+index 0a690e2..f22a811 100644
+--- a/browser/firefox/popup.css
++++ b/browser/firefox/popup.css
+@@ -15,12 +15,17 @@
+ body {
+   width: 430px;
+   min-height: 420px;
++  max-height: 600px;
+   margin: 0;
++  display: flex;
++  flex-direction: column;
+   font: 13px "Trebuchet MS", sans-serif;
+   color: var(--ink);
+   background: linear-gradient(145deg, #211118, #0d080a);
++  overflow: hidden;
+ }
+ .hero {
++  flex-shrink: 0;
+   display: grid;
+   grid-template-columns: 42px 1fr auto;
+   gap: 10px;
+@@ -51,7 +56,12 @@ body {
+   text-align: center;
+   font-weight: bold;
+ }
+-nav { display: grid; grid-template-columns: repeat(3, 1fr); background: #1c0f14; }
++nav {
++  flex-shrink: 0;
++  display: grid;
++  grid-template-columns: repeat(3, 1fr);
++  background: #1c0f14;
++}
+ .tab {
+   border: 0;
+   border-bottom: 3px solid transparent;
+@@ -66,7 +76,29 @@ nav { display: grid; grid-template-columns: repeat(3, 1fr); background: #1c0f14;
+ .tab:hover { background: #321923; color: #f1d8cf; }
+ .tab.active { color: #fff; border-color: var(--accent); background: #28131b; }
+ .panel { display: none; padding: 14px 16px; }
+-.panel.active { display: block; }
++.panel.active {
++  display: flex;
++  flex-direction: column;
++  flex: 1 1 auto;
++  min-height: 0;
++  overflow-y: auto;
++  overflow-x: hidden;
++  scrollbar-width: thin;
++  scrollbar-color: var(--line) transparent;
++}
++.panel::-webkit-scrollbar {
++  width: 6px;
++}
++.panel::-webkit-scrollbar-track {
++  background: transparent;
++}
++.panel::-webkit-scrollbar-thumb {
++  background: var(--line);
++  border-radius: 3px;
++}
++.panel::-webkit-scrollbar-thumb:hover {
++  background: var(--brand-hover);
++}
+ .section-head {
+   display: flex;
+   justify-content: space-between;
+@@ -95,6 +127,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
+   box-shadow: 0 5px 16px #0005;
+ }
+ .item:hover { background: var(--card-hover); }
++.item.stream {
++  border-left: 4px solid var(--accent);
++  background: #331a25;
++}
++.item.stream .type {
++  color: #ffc28d;
++}
+ .type { font-size: 11px; font-weight: bold; color: var(--accent); }
+ .url-wrap { min-width: 0; }
+ .url {
+@@ -115,7 +154,9 @@ button:focus-visible, textarea:focus-visible, input:focus-visible {
+ }
+ .download:hover, .primary:hover { background: var(--brand-hover); }
+ .empty {
++  flex: 1;
+   min-height: 210px;
++  margin-top: 8px;
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+@@ -207,6 +248,8 @@ textarea { resize: vertical; }
+ .switch-row input:checked + i { background: var(--brand); }
+ .switch-row input:checked + i::after { left: 21px; }
+ footer {
++  margin-top: auto;
++  flex-shrink: 0;
+   padding: 8px 16px;
+   border-top: 1px solid var(--line);
+   background: #160c10;
+diff --git a/browser/firefox/popup.js b/browser/firefox/popup.js
+index 9dbedf3..64754d6 100644
+--- a/browser/firefox/popup.js
++++ b/browser/firefox/popup.js
+@@ -26,6 +26,23 @@ function displayName(value) {
+   try { return decodeURIComponent(tail); } catch (_) { return tail; }
+ }
+ 
++function itemTitle(item, currentTab) {
++  if (item.suggestedFilename && !/\.(?:m3u8|mpd)$/i.test(item.suggestedFilename)) {
++    return item.suggestedFilename;
++  }
++  const pageTitle = (currentTab?.title || "")
++    .replace(/\s+::\s+[^:]+$/, "")
++    .replace(/\s*-\s*(?:Prime Video|YouTube|Netflix|Twitch|Vimeo|Dailymotion)$/i, "")
++    .trim();
++  if (pageTitle && pageTitle !== "Current tab") {
++    if (item.type === "DASH" || item.type === "HLS") {
++      return `${pageTitle} (${item.type} Full Stream)`;
++    }
++    return pageTitle;
++  }
++  return displayName(item.url);
++}
++
+ const SOCIAL_HOSTS = [
+   "youtube.com", "youtu.be",
+   "bilibili.com", "b23.tv", "bili2233.cn",
+@@ -68,9 +85,18 @@ async function refresh() {
+   const showEmpty = items.length === 0 && !isSocial;
+   $("#empty").hidden = !showEmpty;
+   $("#empty").style.display = showEmpty ? "" : "none";
+-  items.forEach((item, index) => {
++  const sortedItems = items.map((item, originalIndex) => ({ ...item, originalIndex }))
++    .sort((a, b) => {
++      const aStream = a.type === "DASH" || a.type === "HLS" ? 1 : 0;
++      const bStream = b.type === "DASH" || b.type === "HLS" ? 1 : 0;
++      if (aStream !== bStream) return bStream - aStream;
++      return (b.detectedAt || 0) - (a.detectedAt || 0);
++    });
++
++  sortedItems.forEach((item) => {
++    const isStream = item.type === "DASH" || item.type === "HLS";
+     const row = document.createElement("article");
+-    row.className = "item";
++    row.className = isStream ? "item stream" : "item";
+     const type = document.createElement("span");
+     type.className = "type";
+     type.textContent = item.type || "Media";
+@@ -78,7 +104,7 @@ async function refresh() {
+     details.className = "url-wrap";
+     const url = document.createElement("span");
+     url.className = "url";
+-    url.textContent = item.suggestedFilename || displayName(item.url);
++    url.textContent = itemTitle(item, tab);
+     url.title = item.url;
+     const host = document.createElement("span");
+     host.className = "host";
+@@ -89,7 +115,12 @@ async function refresh() {
+     button.textContent = "GET";
+     button.addEventListener("click", async () => {
+       button.disabled = true;
+-      const result = await api.runtime.sendMessage({ type: "downloadMedia", tabId: tab.id, index });
++      const result = await api.runtime.sendMessage({
++        type: "downloadMedia",
++        tabId: tab.id,
++        index: item.originalIndex,
++        url: item.url
++      });
+       button.disabled = false;
+       notice(result?.ok ? "Capture sent to qtIDM." : (result?.message || "Could not contact qtIDM."), !result?.ok);
+     });
+diff --git a/src/core/DownloadTypes.cpp b/src/core/DownloadTypes.cpp
+index 88e2c0d..748c9b6 100644
+--- a/src/core/DownloadTypes.cpp
++++ b/src/core/DownloadTypes.cpp
+@@ -2,6 +2,9 @@
+ 
+ #include <QJsonArray>
+ #include <QJsonValue>
++#include <QRegularExpression>
++#include <QSet>
++#include <QUrl>
+ 
+ namespace qtidm {
+ 
+@@ -272,4 +275,191 @@ DownloadRecord recordFromJson(const QJsonObject& object)
+     return record;
+ }
+ 
++QString extensionFromMime(const QString& mimeType)
++{
++    if (mimeType.isEmpty()) {
++        return {};
++    }
++    const auto cleaned = mimeType.section(QLatin1Char(';'), 0, 0).trimmed().toLower();
++
++    // Audio
++    if (cleaned == QStringLiteral("audio/mpeg") || cleaned == QStringLiteral("audio/mp3")) return QStringLiteral("mp3");
++    if (cleaned == QStringLiteral("audio/mp4") || cleaned == QStringLiteral("audio/x-m4a") || cleaned == QStringLiteral("audio/m4a")) return QStringLiteral("m4a");
++    if (cleaned == QStringLiteral("audio/aac") || cleaned == QStringLiteral("audio/x-aac") || cleaned == QStringLiteral("audio/aacp")) return QStringLiteral("aac");
++    if (cleaned == QStringLiteral("audio/ogg") || cleaned == QStringLiteral("audio/vorbis") || cleaned == QStringLiteral("application/ogg")) return QStringLiteral("ogg");
++    if (cleaned == QStringLiteral("audio/opus") || cleaned == QStringLiteral("audio/x-opus")) return QStringLiteral("opus");
++    if (cleaned == QStringLiteral("audio/flac") || cleaned == QStringLiteral("audio/x-flac")) return QStringLiteral("flac");
++    if (cleaned == QStringLiteral("audio/wav") || cleaned == QStringLiteral("audio/x-wav") || cleaned == QStringLiteral("audio/wave")) return QStringLiteral("wav");
++    if (cleaned == QStringLiteral("audio/webm")) return QStringLiteral("webm");
++
++    // Video
++    if (cleaned == QStringLiteral("video/mp4")) return QStringLiteral("mp4");
++    if (cleaned == QStringLiteral("video/webm")) return QStringLiteral("webm");
++    if (cleaned == QStringLiteral("video/x-matroska")) return QStringLiteral("mkv");
++    if (cleaned == QStringLiteral("video/quicktime")) return QStringLiteral("mov");
++    if (cleaned == QStringLiteral("video/x-flv")) return QStringLiteral("flv");
++    if (cleaned == QStringLiteral("video/x-msvideo")) return QStringLiteral("avi");
++    if (cleaned == QStringLiteral("video/3gpp")) return QStringLiteral("3gp");
++    if (cleaned == QStringLiteral("video/mp2t")) return QStringLiteral("ts");
++
++    // Streaming Manifests
++    if (cleaned == QStringLiteral("application/vnd.apple.mpegurl") || cleaned == QStringLiteral("application/x-mpegurl") || cleaned == QStringLiteral("audio/mpegurl")) return QStringLiteral("m3u8");
++    if (cleaned == QStringLiteral("application/dash+xml")) return QStringLiteral("mpd");
++
++    // Subtitles
++    if (cleaned == QStringLiteral("text/vtt")) return QStringLiteral("vtt");
++    if (cleaned == QStringLiteral("application/x-subrip")) return QStringLiteral("srt");
++    if (cleaned == QStringLiteral("application/ttml+xml")) return QStringLiteral("ttml");
++    if (cleaned == QStringLiteral("text/x-ssa") || cleaned == QStringLiteral("text/x-ass")) return QStringLiteral("ass");
++
++    // Common web formats
++    if (cleaned == QStringLiteral("application/pdf")) return QStringLiteral("pdf");
++    if (cleaned == QStringLiteral("application/zip")) return QStringLiteral("zip");
++    if (cleaned == QStringLiteral("application/x-tar")) return QStringLiteral("tar");
++    if (cleaned == QStringLiteral("application/gzip") || cleaned == QStringLiteral("application/x-gzip")) return QStringLiteral("gz");
++    if (cleaned == QStringLiteral("application/x-7z-compressed")) return QStringLiteral("7z");
++
++    // Broad audio/video fallbacks
++    if (cleaned.startsWith(QStringLiteral("audio/"))) return QStringLiteral("mp3");
++    if (cleaned.startsWith(QStringLiteral("video/"))) return QStringLiteral("mp4");
++
++    return {};
++}
++
++QString safeSuggestedFilename(QString value)
++{
++    value = value.trimmed();
++    if (value.isEmpty() || value == QStringLiteral(".") || value == QStringLiteral("..")) {
++        return {};
++    }
++    value.remove(QRegularExpression(QStringLiteral("[\\x{0}-\\x{1f}\\x{7f}]")));
++    value.replace(QLatin1Char('/'), QStringLiteral(" - "));
++    value.replace(QLatin1Char('\\'), QStringLiteral(" - "));
++    value.replace(QLatin1Char(':'), QStringLiteral(" - "));
++    value.replace(QLatin1Char('"'), QLatin1Char('\''));
++    value.replace(QLatin1Char('?'), QString());
++    value.replace(QLatin1Char('*'), QLatin1Char('_'));
++    value.replace(QLatin1Char('<'), QLatin1Char('_'));
++    value.replace(QLatin1Char('>'), QLatin1Char('_'));
++    value.replace(QLatin1Char('|'), QLatin1Char('-'));
++    value.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
++    value.replace(QRegularExpression(QStringLiteral("-\\s+-+")), QStringLiteral("-"));
++    while (value.endsWith(QLatin1Char('.')) || value.endsWith(QLatin1Char(' ')) || value.endsWith(QLatin1Char('-'))) {
++        value.chop(1);
++        value = value.trimmed();
++    }
++    return value.trimmed();
++}
++
++QString adaptiveMediaSuggestedFilename(const QString& inputName)
++{
++    QString name = inputName.trimmed();
++    if (name.isEmpty()) {
++        return QStringLiteral("stream.mkv");
++    }
++    static const QStringList mediaExtensions {
++        QStringLiteral(".m3u8"), QStringLiteral(".mpd"),
++        QStringLiteral(".mkv"), QStringLiteral(".mp4"),
++        QStringLiteral(".webm"), QStringLiteral(".ts"),
++        QStringLiteral(".m4v"), QStringLiteral(".mov"),
++        QStringLiteral(".avi"), QStringLiteral(".flv")
++    };
++    for (const auto& ext : mediaExtensions) {
++        if (name.endsWith(ext, Qt::CaseInsensitive)) {
++            name.chop(ext.length());
++            break;
++        }
++    }
++    name = safeSuggestedFilename(name);
++    if (name.isEmpty()) {
++        name = QStringLiteral("stream");
++    }
++    return name + QStringLiteral(".mkv");
++}
++
++QString resolveDownloadFilename(const QString& rawSuggested, const QUrl& url, const QString& mediaTypeHint, bool adaptiveMedia, const QString& mimeTypeHint)
++{
++    QString name = safeSuggestedFilename(rawSuggested);
++    if (name.isEmpty()) {
++        name = safeSuggestedFilename(url.fileName());
++    }
++    if (name.isEmpty()) {
++        name = QStringLiteral("download");
++    }
++
++    if (adaptiveMedia) {
++        return adaptiveMediaSuggestedFilename(name);
++    }
++
++    const auto dotIndex = name.lastIndexOf(QLatin1Char('.'));
++    QString currentExt;
++    if (dotIndex >= 0 && dotIndex < name.length() - 1) {
++        const auto candidate = name.mid(dotIndex + 1).trimmed();
++        static const QRegularExpression validExtRe(QStringLiteral("^[a-zA-Z0-9]{1,10}$"));
++        if (validExtRe.match(candidate).hasMatch() && !candidate.contains(QLatin1Char(' '))) {
++            currentExt = candidate.toLower();
++        }
++    }
++
++    static const QSet<QString> scriptExtensions {
++        QStringLiteral("php"), QStringLiteral("asp"), QStringLiteral("aspx"),
++        QStringLiteral("jsp"), QStringLiteral("cgi"), QStringLiteral("htm"),
++        QStringLiteral("html")
++    };
++
++    static const QSet<QString> mediaExtensions {
++        QStringLiteral("mp4"), QStringLiteral("mp3"), QStringLiteral("m4a"),
++        QStringLiteral("webm"), QStringLiteral("opus"), QStringLiteral("ogg"),
++        QStringLiteral("flac"), QStringLiteral("wav"), QStringLiteral("aac"),
++        QStringLiteral("mkv"), QStringLiteral("mov"), QStringLiteral("avi"),
++        QStringLiteral("flv"), QStringLiteral("vtt"), QStringLiteral("srt")
++    };
++
++    const auto urlPath = url.path(QUrl::FullyDecoded);
++    const auto urlDot = urlPath.lastIndexOf(QLatin1Char('.'));
++    QString urlExt;
++    if (urlDot >= 0 && urlDot < urlPath.length() - 1) {
++        const auto candidate = urlPath.mid(urlDot + 1).trimmed().toLower();
++        static const QRegularExpression validExtRe(QStringLiteral("^[a-zA-Z0-9]{1,10}$"));
++        if (validExtRe.match(candidate).hasMatch() && !scriptExtensions.contains(candidate)) {
++            urlExt = candidate;
++        }
++    }
++
++    const QString mimeExt = extensionFromMime(mimeTypeHint);
++
++    QString hintExt;
++    const auto hint = mediaTypeHint.trimmed().toUpper();
++    if (hint == QStringLiteral("VIDEO")) hintExt = QStringLiteral("mp4");
++    else if (hint == QStringLiteral("AUDIO")) hintExt = QStringLiteral("mp3");
++    else if (hint == QStringLiteral("SUBTITLE")) hintExt = QStringLiteral("vtt");
++    else if (hint == QStringLiteral("HLS") || hint == QStringLiteral("DASH")) hintExt = QStringLiteral("mkv");
++
++    QString targetExt;
++    if (!urlExt.isEmpty() && mediaExtensions.contains(urlExt)) {
++        targetExt = urlExt;
++    } else if (!mimeExt.isEmpty()) {
++        targetExt = mimeExt;
++    } else if (!urlExt.isEmpty()) {
++        targetExt = urlExt;
++    } else if (!hintExt.isEmpty()) {
++        targetExt = hintExt;
++    }
++
++    if (currentExt.isEmpty() || scriptExtensions.contains(currentExt)) {
++        if (!currentExt.isEmpty()) {
++            name = name.left(dotIndex);
++        }
++        if (!targetExt.isEmpty()) {
++            name += QLatin1Char('.') + targetExt;
++        } else {
++            name += QStringLiteral(".bin");
++        }
++    } else if (!targetExt.isEmpty() && mediaExtensions.contains(currentExt) && currentExt != targetExt && !mimeExt.isEmpty()) {
++        name = name.left(dotIndex) + QLatin1Char('.') + targetExt;
++    }
++
++    return name;
++}
++
+ }
+diff --git a/src/core/DownloadTypes.h b/src/core/DownloadTypes.h
+index 6bd0e84..590e0a1 100644
+--- a/src/core/DownloadTypes.h
++++ b/src/core/DownloadTypes.h
+@@ -139,6 +139,11 @@ DownloadRequest requestFromJson(const QJsonObject& object);
+ QJsonObject recordToJson(const DownloadRecord& record);
+ DownloadRecord recordFromJson(const QJsonObject& object);
+ 
++QString extensionFromMime(const QString& mimeType);
++QString safeSuggestedFilename(QString value);
++QString adaptiveMediaSuggestedFilename(const QString& inputName);
++QString resolveDownloadFilename(const QString& rawSuggested, const QUrl& url, const QString& mediaTypeHint = {}, bool adaptiveMedia = false, const QString& mimeTypeHint = {});
++
+ }
+ 
+ Q_DECLARE_METATYPE(qtidm::DownloadStatus)
+diff --git a/src/core/MediaDownloader.cpp b/src/core/MediaDownloader.cpp
+index dca8e77..1391e02 100644
+--- a/src/core/MediaDownloader.cpp
++++ b/src/core/MediaDownloader.cpp
+@@ -66,44 +66,7 @@ QString MediaDownloader::mediaStagingPath(const QString& targetPath)
+ 
+ QString MediaDownloader::suggestedFilename(const QString& inputName)
+ {
+-    QString name = inputName.trimmed();
+-    if (name.isEmpty()) {
+-        return QStringLiteral("stream.mkv");
+-    }
+-    static const QStringList mediaExtensions {
+-        QStringLiteral(".m3u8"), QStringLiteral(".mpd"),
+-        QStringLiteral(".mkv"), QStringLiteral(".mp4"),
+-        QStringLiteral(".webm"), QStringLiteral(".ts"),
+-        QStringLiteral(".m4v"), QStringLiteral(".mov"),
+-        QStringLiteral(".avi"), QStringLiteral(".flv")
+-    };
+-    for (const auto& ext : mediaExtensions) {
+-        if (name.endsWith(ext, Qt::CaseInsensitive)) {
+-            name.chop(ext.length());
+-            break;
+-        }
+-    }
+-    name.remove(QRegularExpression(QStringLiteral("[\\x{0}-\\x{1f}\\x{7f}]")));
+-    name.replace(QLatin1Char('/'), QStringLiteral(" - "));
+-    name.replace(QLatin1Char('\\'), QStringLiteral(" - "));
+-    name.replace(QLatin1Char(':'), QStringLiteral(" - "));
+-    name.replace(QLatin1Char('"'), QLatin1Char('\''));
+-    name.replace(QLatin1Char('?'), QString());
+-    name.replace(QLatin1Char('*'), QLatin1Char('_'));
+-    name.replace(QLatin1Char('<'), QLatin1Char('_'));
+-    name.replace(QLatin1Char('>'), QLatin1Char('_'));
+-    name.replace(QLatin1Char('|'), QLatin1Char('-'));
+-    name.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+-    name.replace(QRegularExpression(QStringLiteral("-\\s+-+")), QStringLiteral("-"));
+-    while (name.endsWith(QLatin1Char('.')) || name.endsWith(QLatin1Char(' ')) || name.endsWith(QLatin1Char('-'))) {
+-        name.chop(1);
+-        name = name.trimmed();
+-    }
+-    name = name.trimmed();
+-    if (name.isEmpty()) {
+-        name = QStringLiteral("stream");
+-    }
+-    return name + QStringLiteral(".mkv");
++    return adaptiveMediaSuggestedFilename(inputName);
+ }
+ 
+ MediaDownloader::MediaDownloader(QObject* parent)
+@@ -262,12 +225,11 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
+         return id;
+     }
+ 
+-    const bool isAdaptiveUrl = url.path(QUrl::FullyDecoded).contains(QStringLiteral(".m3u8"), Qt::CaseInsensitive)
+-        || url.path(QUrl::FullyDecoded).contains(QStringLiteral(".mpd"), Qt::CaseInsensitive)
+-        || hint.toUpper() == QStringLiteral("HLS") || hint.toUpper() == QStringLiteral("DASH");
++    const bool isHlsUrl = url.path(QUrl::FullyDecoded).contains(QStringLiteral(".m3u8"), Qt::CaseInsensitive)
++        || hint.toUpper() == QStringLiteral("HLS");
+     std::shared_ptr<MediaStreamProxy> proxy;
+     QUrl inputUrl = url;
+-    if ((url.scheme() == QStringLiteral("http") || url.scheme() == QStringLiteral("https")) && isAdaptiveUrl) {
++    if ((url.scheme() == QStringLiteral("http") || url.scheme() == QStringLiteral("https")) && isHlsUrl) {
+         proxy = std::make_shared<MediaStreamProxy>();
+         if (!proxy->start(url, headers)) {
+             const auto message = QStringLiteral("Could not initialize local HTTP/2 stream proxy.");
+@@ -282,10 +244,9 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
+     QUrl audioInputUrl = audioUrl;
+     if (audioUrl.isValid()) {
+         const auto audioHint = audioHeaders.value(QStringLiteral("_qtidmMediaType")).toString();
+-        const bool isAdaptiveAudio = audioUrl.path(QUrl::FullyDecoded).contains(QStringLiteral(".m3u8"), Qt::CaseInsensitive)
+-            || audioUrl.path(QUrl::FullyDecoded).contains(QStringLiteral(".mpd"), Qt::CaseInsensitive)
+-            || audioHint.toUpper() == QStringLiteral("HLS") || audioHint.toUpper() == QStringLiteral("DASH");
+-        if ((audioUrl.scheme() == QStringLiteral("http") || audioUrl.scheme() == QStringLiteral("https")) && isAdaptiveAudio) {
++        const bool isHlsAudio = audioUrl.path(QUrl::FullyDecoded).contains(QStringLiteral(".m3u8"), Qt::CaseInsensitive)
++            || audioHint.toUpper() == QStringLiteral("HLS");
++        if ((audioUrl.scheme() == QStringLiteral("http") || audioUrl.scheme() == QStringLiteral("https")) && isHlsAudio) {
+             audioProxy = std::make_shared<MediaStreamProxy>();
+             if (!audioProxy->start(audioUrl, audioHeaders)) {
+                 const auto message = QStringLiteral("Could not initialize local HTTP/2 stream proxy for audio.");
+diff --git a/src/core/MediaStreamProxy.cpp b/src/core/MediaStreamProxy.cpp
+index 15d6f24..18f403d 100644
+--- a/src/core/MediaStreamProxy.cpp
++++ b/src/core/MediaStreamProxy.cpp
+@@ -34,10 +34,7 @@ quint16 MediaStreamProxy::port() const
+ 
+ QUrl MediaStreamProxy::proxyUrl() const
+ {
+-    const QString ext = rootUrl_.path().endsWith(QStringLiteral(".mpd"), Qt::CaseInsensitive)
+-        ? QStringLiteral("/start.mpd")
+-        : QStringLiteral("/start.m3u8");
+-    return QUrl(QStringLiteral("http://127.0.0.1:%1%2").arg(port_).arg(ext));
++    return QUrl(QStringLiteral("http://127.0.0.1:%1/start.m3u8").arg(port_));
+ }
+ 
+ bool MediaStreamProxy::start(const QUrl& rootUrl, const QVariantMap& headers)
+@@ -168,12 +165,10 @@ void MediaStreamProxy::handleClient(int clientFd)
+     }
+ 
+     std::string targetUrlStr;
+-    bool isStart = false;
+     {
+         std::lock_guard<std::mutex> lock(mapMutex_);
+-        if (path == "/start.m3u8" || path == "/start.mpd") {
++        if (path == "/start.m3u8") {
+             targetUrlStr = rootUrl_.toString().toStdString();
+-            isStart = true;
+         } else {
+             auto it = urlMap_.find(path);
+             if (it != urlMap_.end()) {
+@@ -241,7 +236,7 @@ void MediaStreamProxy::handleClient(int clientFd)
+     };
+     StreamState state;
+     state.fd = clientFd;
+-    state.isM3u8 = isStart || path.find(".m3u8") != std::string::npos;
++    state.isM3u8 = (path == "/start.m3u8") || path.find(".m3u8") != std::string::npos;
+ 
+     auto writeCb = [](char* ptr, size_t size, size_t nmemb, void* userdata) -> size_t {
+         auto* s = static_cast<StreamState*>(userdata);
+diff --git a/src/ui/MainWindow.cpp b/src/ui/MainWindow.cpp
+index 7e50808..3a6c03e 100644
+--- a/src/ui/MainWindow.cpp
++++ b/src/ui/MainWindow.cpp
+@@ -146,31 +146,6 @@ QString takeHeader(QVariantMap* headers, QStringView name)
+     return {};
+ }
+ 
+-QString safeSuggestedFilename(QString value)
+-{
+-    value = value.trimmed();
+-    if (value.isEmpty() || value == QStringLiteral(".") || value == QStringLiteral("..")) {
+-        return {};
+-    }
+-    value.remove(QRegularExpression(QStringLiteral("[\\x{0}-\\x{1f}\\x{7f}]")));
+-    value.replace(QLatin1Char('/'), QStringLiteral(" - "));
+-    value.replace(QLatin1Char('\\'), QStringLiteral(" - "));
+-    value.replace(QLatin1Char(':'), QStringLiteral(" - "));
+-    value.replace(QLatin1Char('"'), QLatin1Char('\''));
+-    value.replace(QLatin1Char('?'), QString());
+-    value.replace(QLatin1Char('*'), QLatin1Char('_'));
+-    value.replace(QLatin1Char('<'), QLatin1Char('_'));
+-    value.replace(QLatin1Char('>'), QLatin1Char('_'));
+-    value.replace(QLatin1Char('|'), QLatin1Char('-'));
+-    value.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+-    value.replace(QRegularExpression(QStringLiteral("-\\s+-+")), QStringLiteral("-"));
+-    while (value.endsWith(QLatin1Char('.')) || value.endsWith(QLatin1Char(' ')) || value.endsWith(QLatin1Char('-'))) {
+-        value.chop(1);
+-        value = value.trimmed();
+-    }
+-    return value.trimmed();
+-}
+-
+ bool mergeHeaderLines(const QString& text, QVariantMap* headers, QString* error)
+ {
+     const auto lines = text.split(QLatin1Char('\n'));
+@@ -392,18 +367,13 @@ bool MainWindow::addUrl(QString url, QVariantMap headers)
+     }
+ 
+     const auto mediaTypeHint = takeHeader(&headers, u"_qtidmMediaType").trimmed().toUpper();
++    const auto mimeTypeHint = takeHeader(&headers, u"_qtidmMimeType").trimmed().toLower();
+     const auto suggestedFilename = safeSuggestedFilename(takeHeader(&headers, u"_qtidmSuggestedFilename"));
+     const auto httpMethod = takeHeader(&headers, u"_qtidmHttpMethod").trimmed().toUpper();
+     const auto requestBody = QByteArray::fromBase64(takeHeader(&headers, u"_qtidmRequestBody").toLatin1());
+     const bool browserPost = httpMethod == QStringLiteral("POST");
+     const bool adaptiveMedia = MediaDownloader::supports(parsed, mediaTypeHint);
+-    QString name = suggestedFilename;
+-    if (name.isEmpty()) {
+-        name = parsed.fileName().isEmpty() ? QStringLiteral("download.bin") : parsed.fileName();
+-    }
+-    if (adaptiveMedia) {
+-        name = MediaDownloader::suggestedFilename(name);
+-    }
++    QString name = resolveDownloadFilename(suggestedFilename, parsed, mediaTypeHint, adaptiveMedia, mimeTypeHint);
+     QDialog dialog(this);
+     dialog.setWindowTitle(QStringLiteral("Download Options"));
+     auto* dialogLayout = new QVBoxLayout(&dialog);
+@@ -879,15 +849,13 @@ bool MainWindow::addUrls(QStringList urls, QVariantMap headers)
+             if (!suggested.isEmpty()) requestHeaders.insert(QStringLiteral("_qtidmSuggestedFilename"), suggested);
+         }
+         const auto mediaTypeHint = takeHeader(&requestHeaders, u"_qtidmMediaType").trimmed().toUpper();
++        const auto mimeTypeHint = takeHeader(&requestHeaders, u"_qtidmMimeType").trimmed().toLower();
+         const bool adaptiveMedia = MediaDownloader::supports(url, mediaTypeHint);
+-        QString name = safeSuggestedFilename(takeHeader(&requestHeaders, u"_qtidmSuggestedFilename"));
+-        if (name.isEmpty()) name = url.fileName();
+-        if (name.isEmpty()) {
+-            name = QStringLiteral("download-%1.bin").arg(unnamed++);
+-        }
+-        if (adaptiveMedia) {
+-            name = MediaDownloader::suggestedFilename(name);
++        auto suggested = safeSuggestedFilename(takeHeader(&requestHeaders, u"_qtidmSuggestedFilename"));
++        if (suggested.isEmpty() && url.fileName().isEmpty()) {
++            suggested = QStringLiteral("download-%1").arg(unnamed++);
+         }
++        QString name = resolveDownloadFilename(suggested, url, mediaTypeHint, adaptiveMedia, mimeTypeHint);
+         const auto dotIndex = name.lastIndexOf(QLatin1Char('.'));
+         const auto base = dotIndex >= 0 ? name.left(dotIndex) : name;
+         const auto suffix = dotIndex >= 0 ? name.mid(dotIndex + 1) : QString();
+diff --git a/tests/DownloadTypesTest.cpp b/tests/DownloadTypesTest.cpp
+index c68cf29..893b0e1 100644
+--- a/tests/DownloadTypesTest.cpp
++++ b/tests/DownloadTypesTest.cpp
+@@ -193,6 +193,71 @@ private slots:
+         QCOMPARE(static_cast<int>(copy.segments[1].status), static_cast<int>(qtidm::DownloadStatus::Downloading));
+         QCOMPARE(copy.request.proxyUrl, record.request.proxyUrl);
+     }
++
++    void mimeTypeMapsToCorrectExtension()
++    {
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/opus")), QStringLiteral("opus"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/x-opus")), QStringLiteral("opus"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/webm")), QStringLiteral("webm"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/webm; codecs=\"opus\"")), QStringLiteral("webm"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/x-m4a")), QStringLiteral("m4a"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/mp4")), QStringLiteral("m4a"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/aac")), QStringLiteral("aac"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/flac")), QStringLiteral("flac"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/ogg")), QStringLiteral("ogg"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/mpeg")), QStringLiteral("mp3"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("video/webm")), QStringLiteral("webm"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("video/webm; codecs=\"vp9\"")), QStringLiteral("webm"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("video/mp4")), QStringLiteral("mp4"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("video/quicktime")), QStringLiteral("mov"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("video/x-matroska")), QStringLiteral("mkv"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("application/dash+xml")), QStringLiteral("mpd"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("application/vnd.apple.mpegurl")), QStringLiteral("m3u8"));
++        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("text/vtt")), QStringLiteral("vtt"));
++    }
++
++    void resolveDownloadFilenamePreservesAccurateFormat()
++    {
++        // 1. Audio stream with no URL extension resolves to Opus from MIME, not mp3
++        const QUrl opusUrl(QStringLiteral("https://example.com/stream?id=audio-track"));
++        const auto opusName = qtidm::resolveDownloadFilename(
++            QStringLiteral("Podcast Episode 10"), opusUrl, QStringLiteral("Audio"), false, QStringLiteral("audio/opus"));
++        QCOMPARE(opusName, QStringLiteral("Podcast Episode 10.opus"));
++
++        // 2. WebM video with no URL extension resolves to .webm, not .mp4
++        const QUrl webmUrl(QStringLiteral("https://example.com/videoplayback?expire=123"));
++        const auto webmName = qtidm::resolveDownloadFilename(
++            QStringLiteral("Tutorial Video"), webmUrl, QStringLiteral("Video"), false, QStringLiteral("video/webm; codecs=\"vp9\""));
++        QCOMPARE(webmName, QStringLiteral("Tutorial Video.webm"));
++
++        // 3. FLAC audio with authoritative URL path extension
++        const QUrl flacUrl(QStringLiteral("https://example.com/music/masterpiece.flac"));
++        const auto flacName = qtidm::resolveDownloadFilename(
++            QStringLiteral("Symphony No 5"), flacUrl, QStringLiteral("Audio"), false, QStringLiteral("audio/flac"));
++        QCOMPARE(flacName, QStringLiteral("Symphony No 5.flac"));
++
++        // 4. Script URL (.php) with audio/ogg MIME resolves to .ogg, not .php or .mp3
++        const QUrl phpUrl(QStringLiteral("https://example.com/get_audio.php?track=99"));
++        const auto oggName = qtidm::resolveDownloadFilename(
++            QStringLiteral("Interview"), phpUrl, QStringLiteral("Audio"), false, QStringLiteral("audio/ogg"));
++        QCOMPARE(oggName, QStringLiteral("Interview.ogg"));
++
++        // 5. Title had mismatched .mp4 but stream is audio/opus: corrects to .opus to prevent corruption
++        const auto fixedOpus = qtidm::resolveDownloadFilename(
++            QStringLiteral("Song.mp4"), opusUrl, QStringLiteral("Audio"), false, QStringLiteral("audio/opus"));
++        QCOMPARE(fixedOpus, QStringLiteral("Song.opus"));
++
++        // 6. Title had mismatched .mp4 but stream is video/webm: corrects to .webm
++        const auto fixedWebm = qtidm::resolveDownloadFilename(
++            QStringLiteral("Movie.mp4"), webmUrl, QStringLiteral("Video"), false, QStringLiteral("video/webm"));
++        QCOMPARE(fixedWebm, QStringLiteral("Movie.webm"));
++
++        // 7. Adaptive HLS/DASH always packages into universal container .mkv
++        const QUrl dashUrl(QStringLiteral("https://example.com/manifest.mpd"));
++        const auto dashName = qtidm::resolveDownloadFilename(
++            QStringLiteral("Big Stream"), dashUrl, QStringLiteral("DASH"), true, QStringLiteral("application/dash+xml"));
++        QCOMPARE(dashName, QStringLiteral("Big Stream.mkv"));
++    }
+ };
+ 
+ QTEST_MAIN(DownloadTypesTest)
+diff --git a/tests/DownloaderIntegrationTest.cpp b/tests/DownloaderIntegrationTest.cpp
+index dff5ee0..3cddeb4 100644
+--- a/tests/DownloaderIntegrationTest.cpp
++++ b/tests/DownloaderIntegrationTest.cpp
+@@ -1642,7 +1642,10 @@ void persistsDurableCheckpointsWithAcknowledgement()
+         QVERIFY(h2Server.waitForStarted());
+         QVERIFY(h2Server.waitForReadyRead(5000));
+         const int h2Port = QString::fromUtf8(h2Server.readLine()).trimmed().toInt();
+-        const QString caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
++        QString caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
++        while (caCertPath.isEmpty() && h2Server.waitForReadyRead(5000)) {
++            caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
++        }
+         QVERIFY(h2Port > 0);
+         QVERIFY(QFileInfo::exists(caCertPath));
+ 
+@@ -1732,7 +1735,10 @@ void persistsDurableCheckpointsWithAcknowledgement()
+         QVERIFY(h2Server.waitForStarted());
+         QVERIFY(h2Server.waitForReadyRead(5000));
+         const int h2Port = QString::fromUtf8(h2Server.readLine()).trimmed().toInt();
+-        const QString caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
++        QString caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
++        while (caCertPath.isEmpty() && h2Server.waitForReadyRead(5000)) {
++            caCertPath = QString::fromUtf8(h2Server.readLine()).trimmed();
++        }
+         QVERIFY(h2Port > 0);
+         QVERIFY(QFileInfo::exists(caCertPath));
+ 
+diff --git a/tests/MediaDownloaderTest.cpp b/tests/MediaDownloaderTest.cpp
+index 1bafb97..9fee079 100644
+--- a/tests/MediaDownloaderTest.cpp
++++ b/tests/MediaDownloaderTest.cpp
+@@ -126,6 +126,44 @@ private slots:
+         const auto streams = probe.readAllStandardOutput();
+         QVERIFY(streams.contains("video"));
+         QVERIFY(streams.contains("audio"));
++
++        // Verify downloading the DASH manifest over HTTP without proxy corruption
++        QProcess server;
++        server.setProgram(QStringLiteral("python3"));
++        server.setArguments({
++            QStringLiteral("-c"),
++            QStringLiteral("import http.server, sys; "
++                           "server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), http.server.SimpleHTTPRequestHandler); "
++                           "print(server.server_port, flush=True); "
++                           "server.serve_forever()"),
++        });
++        server.setWorkingDirectory(dir.path());
++        server.start();
++        QVERIFY(server.waitForStarted(5000));
++        QVERIFY(server.waitForReadyRead(5000));
++        const auto port = QString::fromUtf8(server.readLine()).trimmed().toUShort();
++        QVERIFY(port > 0);
++
++        const QUrl httpUrl(QStringLiteral("http://127.0.0.1:%1/stream.mpd").arg(port));
++        const auto httpOutput = dir.path() + QStringLiteral("/http_output.mp4");
++        const auto httpId = downloader.enqueue(httpUrl, httpOutput, {});
++        QVERIFY(!httpId.isEmpty());
++
++        bool httpCompleted = false;
++        QTRY_VERIFY_WITH_TIMEOUT(([&] {
++            for (const auto& event : statusSpy) {
++                if (event.at(0).toString() == httpId
++                    && event.at(1).value<qtidm::DownloadStatus>() == qtidm::DownloadStatus::Completed) {
++                    httpCompleted = true;
++                    return true;
++                }
++            }
++            return false;
++        })(), 15000);
++        QVERIFY(httpCompleted);
++        QVERIFY(QFileInfo(httpOutput).size() > 0);
++        server.terminate();
++        server.waitForFinished(2000);
+     }
+ 
+     void rejectsLocalFileBoundaryViolationsAndEmbeddedCredentials()
+diff --git a/tests/browser_interception_test.cjs b/tests/browser_interception_test.cjs
+index b3ee400..27ca8db 100644
+--- a/tests/browser_interception_test.cjs
++++ b/tests/browser_interception_test.cjs
+@@ -168,6 +168,21 @@ async function testVariant(relativePath, rootName) {
+     context.mediaSuggestedFilename({}, { title: "Episode 01." }),
+     "Episode 01"
+   );
++  assert.equal(
++    context.mediaSuggestedFilename({ url: "https://example.test/stream/episode1.mp4" }, { title: "Persona 5 Episode 01" }),
++    "Persona 5 Episode 01.mp4",
++    "mediaSuggestedFilename must retain video extension from URL"
++  );
++  assert.equal(
++    context.mediaSuggestedFilename({ type: "Audio" }, { title: "Podcast Episode 10" }),
++    "Podcast Episode 10.mp3",
++    "mediaSuggestedFilename must provide audio extension based on detected media type"
++  );
++  assert.equal(
++    context.browserSuggestedFilename("document_without_ext", "https://example.test/files/manual.pdf"),
++    "document_without_ext.pdf",
++    "browserSuggestedFilename must preserve extension from URL if captured filename lacks one"
++  );
+ 
+   mock.api.webRequest.onBeforeSendHeaders.listeners[0]({
+     requestId: "observed-request",
+@@ -320,6 +335,54 @@ async function testVariant(relativePath, rootName) {
+     }),
+     "Direct media response must not treat transport stream segments as standalone media"
+   );
++  assert.ok(
++    !context.isDirectMediaResponse({
++      type: "xmlhttprequest",
++      url: "https://example.test/7f0f5e20_video_1.mp4",
++      responseHeaders: [{ name: "Content-Type", value: "video/mp4" }]
++    }),
++    "Direct media response must not treat dash video chunks as standalone media"
++  );
++  assert.ok(
++    !context.isDirectMediaResponse({
++      type: "xmlhttprequest",
++      url: "https://example.test/7f0f5e20_audio_11.mp4",
++      responseHeaders: [{ name: "Content-Type", value: "audio/mp4" }]
++    }),
++    "Direct media response must not treat dash audio chunks as standalone media"
++  );
++  assert.ok(
++    context.isDirectMediaResponse({
++      type: "media",
++      url: "https://example.test/video1.mp4",
++      responseHeaders: [{ name: "Content-Type", value: "video/mp4" }]
++    }),
++    "Direct media response must NEVER block native <video> playback named video1.mp4"
++  );
++  assert.ok(
++    context.isDirectMediaResponse({
++      type: "media",
++      url: "https://example.test/video_1.mp4",
++      responseHeaders: [{ name: "Content-Type", value: "video/mp4" }]
++    }),
++    "Direct media response must NEVER block native <video> playback named video_1.mp4"
++  );
++  assert.ok(
++    context.isDirectMediaResponse({
++      type: "media",
++      url: "https://example.test/audio_1.m4a",
++      responseHeaders: [{ name: "Content-Type", value: "audio/mp4" }]
++    }),
++    "Direct media response must NEVER block native <audio> playback named audio_1.m4a"
++  );
++  assert.ok(
++    context.isDirectMediaResponse({
++      type: "xmlhttprequest",
++      url: "https://example.test/uploads/video1.mp4",
++      responseHeaders: [{ name: "Content-Type", value: "video/mp4" }]
++    }),
++    "Direct media response must allow standalone files named video1.mp4 fetched via XHR"
++  );
+ 
+   const resolvedTabId = await context.resolveTabId({
+     tabId: -1,
+@@ -358,6 +421,75 @@ async function testVariant(relativePath, rootName) {
+     assert.equal(mock.nativeMessages.at(-1)?.type, "extractSocialMedia");
+     assert.equal(mock.nativeMessages.at(-1)?.url, "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+   }
++
++  // Phase E: Verify dynamic MIME-to-extension resolution across containers without hardcoding
++  assert.equal(context.extensionFromMime("audio/opus"), "opus");
++  assert.equal(context.extensionFromMime("audio/webm; codecs=\"opus\""), "webm");
++  assert.equal(context.extensionFromMime("video/webm; codecs=\"vp9\""), "webm");
++  assert.equal(context.extensionFromMime("audio/flac"), "flac");
++  assert.equal(context.extensionFromMime("audio/x-m4a"), "m4a");
++  assert.equal(context.extensionFromMime("audio/mp4"), "m4a");
++  assert.equal(context.extensionFromMime("audio/aac"), "aac");
++  assert.equal(context.extensionFromMime("video/quicktime"), "mov");
++  assert.equal(context.extensionFromMime("video/x-matroska"), "mkv");
++
++  const opusItem = {
++    url: "https://example.test/stream?id=audio-only",
++    type: "Audio",
++    contentType: "audio/opus"
++  };
++  assert.equal(context.mediaExtension(opusItem), "opus", "Opus audio stream without file extension in URL must resolve to .opus");
++  assert.equal(
++    context.mediaSuggestedFilename(opusItem, { title: "Podcast Deep Dive" }),
++    "Podcast Deep Dive.opus",
++    "Suggested filename for Opus audio must be .opus, never hardcoded to .mp3"
++  );
++
++  const webmItem = {
++    url: "https://example.test/videoplayback?expire=999",
++    type: "Video",
++    contentType: "video/webm; codecs=\"vp9\""
++  };
++  assert.equal(context.mediaExtension(webmItem), "webm", "WebM video stream without file extension in URL must resolve to .webm");
++  assert.equal(
++    context.mediaSuggestedFilename(webmItem, { title: "4K Nature Documentary" }),
++    "4K Nature Documentary.webm",
++    "Suggested filename for WebM video must be .webm, never hardcoded to .mp4"
++  );
++
++  const flacItem = {
++    url: "https://example.test/music/song.flac",
++    type: "Audio",
++    contentType: "audio/flac"
++  };
++  assert.equal(context.mediaExtension(flacItem), "flac", "FLAC stream must retain .flac extension");
++  assert.equal(
++    context.mediaSuggestedFilename(flacItem, { title: "Lossless Track" }),
++    "Lossless Track.flac",
++    "Suggested filename for FLAC audio must retain .flac"
++  );
++
++  // Mismatched title extension (e.g. author typed .mp4 in title, but stream is actually webm or opus)
++  assert.equal(
++    context.mediaSuggestedFilename(webmItem, { title: "Nature.mp4" }),
++    "Nature.webm",
++    "Mismatched container extension in title must be replaced with true stream container to prevent file corruption"
++  );
++
++  const downloadEntry = await context.makeDownloadEntry(
++    "https://example.test/audio-stream",
++    { url: "https://example.test/page" },
++    "",
++    {},
++    "Audio",
++    "Podcast.opus",
++    "GET",
++    "",
++    "",
++    "audio/opus"
++  );
++  assert.equal(downloadEntry.headers._qtidmMimeType, "audio/opus", "makeDownloadEntry must pass _qtidmMimeType");
++  assert.equal(downloadEntry.headers._qtidmMediaType, "Audio", "makeDownloadEntry must pass _qtidmMediaType");
+ }
+ 
+ Promise.all([

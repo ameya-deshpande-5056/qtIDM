@@ -146,31 +146,6 @@ QString takeHeader(QVariantMap* headers, QStringView name)
     return {};
 }
 
-QString safeSuggestedFilename(QString value)
-{
-    value = value.trimmed();
-    if (value.isEmpty() || value == QStringLiteral(".") || value == QStringLiteral("..")) {
-        return {};
-    }
-    value.remove(QRegularExpression(QStringLiteral("[\\x{0}-\\x{1f}\\x{7f}]")));
-    value.replace(QLatin1Char('/'), QStringLiteral(" - "));
-    value.replace(QLatin1Char('\\'), QStringLiteral(" - "));
-    value.replace(QLatin1Char(':'), QStringLiteral(" - "));
-    value.replace(QLatin1Char('"'), QLatin1Char('\''));
-    value.replace(QLatin1Char('?'), QString());
-    value.replace(QLatin1Char('*'), QLatin1Char('_'));
-    value.replace(QLatin1Char('<'), QLatin1Char('_'));
-    value.replace(QLatin1Char('>'), QLatin1Char('_'));
-    value.replace(QLatin1Char('|'), QLatin1Char('-'));
-    value.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
-    value.replace(QRegularExpression(QStringLiteral("-\\s+-+")), QStringLiteral("-"));
-    while (value.endsWith(QLatin1Char('.')) || value.endsWith(QLatin1Char(' ')) || value.endsWith(QLatin1Char('-'))) {
-        value.chop(1);
-        value = value.trimmed();
-    }
-    return value.trimmed();
-}
-
 bool mergeHeaderLines(const QString& text, QVariantMap* headers, QString* error)
 {
     const auto lines = text.split(QLatin1Char('\n'));
@@ -392,18 +367,13 @@ bool MainWindow::addUrl(QString url, QVariantMap headers)
     }
 
     const auto mediaTypeHint = takeHeader(&headers, u"_qtidmMediaType").trimmed().toUpper();
+    const auto mimeTypeHint = takeHeader(&headers, u"_qtidmMimeType").trimmed().toLower();
     const auto suggestedFilename = safeSuggestedFilename(takeHeader(&headers, u"_qtidmSuggestedFilename"));
     const auto httpMethod = takeHeader(&headers, u"_qtidmHttpMethod").trimmed().toUpper();
     const auto requestBody = QByteArray::fromBase64(takeHeader(&headers, u"_qtidmRequestBody").toLatin1());
     const bool browserPost = httpMethod == QStringLiteral("POST");
     const bool adaptiveMedia = MediaDownloader::supports(parsed, mediaTypeHint);
-    QString name = suggestedFilename;
-    if (name.isEmpty()) {
-        name = parsed.fileName().isEmpty() ? QStringLiteral("download.bin") : parsed.fileName();
-    }
-    if (adaptiveMedia) {
-        name = MediaDownloader::suggestedFilename(name);
-    }
+    QString name = resolveDownloadFilename(suggestedFilename, parsed, mediaTypeHint, adaptiveMedia, mimeTypeHint);
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("Download Options"));
     auto* dialogLayout = new QVBoxLayout(&dialog);
@@ -879,15 +849,13 @@ bool MainWindow::addUrls(QStringList urls, QVariantMap headers)
             if (!suggested.isEmpty()) requestHeaders.insert(QStringLiteral("_qtidmSuggestedFilename"), suggested);
         }
         const auto mediaTypeHint = takeHeader(&requestHeaders, u"_qtidmMediaType").trimmed().toUpper();
+        const auto mimeTypeHint = takeHeader(&requestHeaders, u"_qtidmMimeType").trimmed().toLower();
         const bool adaptiveMedia = MediaDownloader::supports(url, mediaTypeHint);
-        QString name = safeSuggestedFilename(takeHeader(&requestHeaders, u"_qtidmSuggestedFilename"));
-        if (name.isEmpty()) name = url.fileName();
-        if (name.isEmpty()) {
-            name = QStringLiteral("download-%1.bin").arg(unnamed++);
+        auto suggested = safeSuggestedFilename(takeHeader(&requestHeaders, u"_qtidmSuggestedFilename"));
+        if (suggested.isEmpty() && url.fileName().isEmpty()) {
+            suggested = QStringLiteral("download-%1").arg(unnamed++);
         }
-        if (adaptiveMedia) {
-            name = MediaDownloader::suggestedFilename(name);
-        }
+        QString name = resolveDownloadFilename(suggested, url, mediaTypeHint, adaptiveMedia, mimeTypeHint);
         const auto dotIndex = name.lastIndexOf(QLatin1Char('.'));
         const auto base = dotIndex >= 0 ? name.left(dotIndex) : name;
         const auto suffix = dotIndex >= 0 ? name.mid(dotIndex + 1) : QString();

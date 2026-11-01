@@ -26,6 +26,23 @@ function displayName(value) {
   try { return decodeURIComponent(tail); } catch (_) { return tail; }
 }
 
+function itemTitle(item, currentTab) {
+  if (item.suggestedFilename && !/\.(?:m3u8|mpd)$/i.test(item.suggestedFilename)) {
+    return item.suggestedFilename;
+  }
+  const pageTitle = (currentTab?.title || "")
+    .replace(/\s+::\s+[^:]+$/, "")
+    .replace(/\s*-\s*(?:Prime Video|YouTube|Netflix|Twitch|Vimeo|Dailymotion)$/i, "")
+    .trim();
+  if (pageTitle && pageTitle !== "Current tab") {
+    if (item.type === "DASH" || item.type === "HLS") {
+      return `${pageTitle} (${item.type} Full Stream)`;
+    }
+    return pageTitle;
+  }
+  return displayName(item.url);
+}
+
 const SOCIAL_HOSTS = [
   "youtube.com", "youtu.be",
   "bilibili.com", "b23.tv", "bili2233.cn",
@@ -68,9 +85,18 @@ async function refresh() {
   const showEmpty = items.length === 0 && !isSocial;
   $("#empty").hidden = !showEmpty;
   $("#empty").style.display = showEmpty ? "" : "none";
-  items.forEach((item, index) => {
+  const sortedItems = items.map((item, originalIndex) => ({ ...item, originalIndex }))
+    .sort((a, b) => {
+      const aStream = a.type === "DASH" || a.type === "HLS" ? 1 : 0;
+      const bStream = b.type === "DASH" || b.type === "HLS" ? 1 : 0;
+      if (aStream !== bStream) return bStream - aStream;
+      return (b.detectedAt || 0) - (a.detectedAt || 0);
+    });
+
+  sortedItems.forEach((item) => {
+    const isStream = item.type === "DASH" || item.type === "HLS";
     const row = document.createElement("article");
-    row.className = "item";
+    row.className = isStream ? "item stream" : "item";
     const type = document.createElement("span");
     type.className = "type";
     type.textContent = item.type || "Media";
@@ -78,7 +104,7 @@ async function refresh() {
     details.className = "url-wrap";
     const url = document.createElement("span");
     url.className = "url";
-    url.textContent = item.suggestedFilename || displayName(item.url);
+    url.textContent = itemTitle(item, tab);
     url.title = item.url;
     const host = document.createElement("span");
     host.className = "host";
@@ -89,7 +115,12 @@ async function refresh() {
     button.textContent = "GET";
     button.addEventListener("click", async () => {
       button.disabled = true;
-      const result = await api.runtime.sendMessage({ type: "downloadMedia", tabId: tab.id, index });
+      const result = await api.runtime.sendMessage({
+        type: "downloadMedia",
+        tabId: tab.id,
+        index: item.originalIndex,
+        url: item.url
+      });
       button.disabled = false;
       notice(result?.ok ? "Capture sent to qtIDM." : (result?.message || "Could not contact qtIDM."), !result?.ok);
     });

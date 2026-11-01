@@ -193,6 +193,71 @@ private slots:
         QCOMPARE(static_cast<int>(copy.segments[1].status), static_cast<int>(qtidm::DownloadStatus::Downloading));
         QCOMPARE(copy.request.proxyUrl, record.request.proxyUrl);
     }
+
+    void mimeTypeMapsToCorrectExtension()
+    {
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/opus")), QStringLiteral("opus"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/x-opus")), QStringLiteral("opus"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/webm")), QStringLiteral("webm"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/webm; codecs=\"opus\"")), QStringLiteral("webm"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/x-m4a")), QStringLiteral("m4a"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/mp4")), QStringLiteral("m4a"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/aac")), QStringLiteral("aac"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/flac")), QStringLiteral("flac"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/ogg")), QStringLiteral("ogg"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("audio/mpeg")), QStringLiteral("mp3"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("video/webm")), QStringLiteral("webm"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("video/webm; codecs=\"vp9\"")), QStringLiteral("webm"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("video/mp4")), QStringLiteral("mp4"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("video/quicktime")), QStringLiteral("mov"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("video/x-matroska")), QStringLiteral("mkv"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("application/dash+xml")), QStringLiteral("mpd"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("application/vnd.apple.mpegurl")), QStringLiteral("m3u8"));
+        QCOMPARE(qtidm::extensionFromMime(QStringLiteral("text/vtt")), QStringLiteral("vtt"));
+    }
+
+    void resolveDownloadFilenamePreservesAccurateFormat()
+    {
+        // 1. Audio stream with no URL extension resolves to Opus from MIME, not mp3
+        const QUrl opusUrl(QStringLiteral("https://example.com/stream?id=audio-track"));
+        const auto opusName = qtidm::resolveDownloadFilename(
+            QStringLiteral("Podcast Episode 10"), opusUrl, QStringLiteral("Audio"), false, QStringLiteral("audio/opus"));
+        QCOMPARE(opusName, QStringLiteral("Podcast Episode 10.opus"));
+
+        // 2. WebM video with no URL extension resolves to .webm, not .mp4
+        const QUrl webmUrl(QStringLiteral("https://example.com/videoplayback?expire=123"));
+        const auto webmName = qtidm::resolveDownloadFilename(
+            QStringLiteral("Tutorial Video"), webmUrl, QStringLiteral("Video"), false, QStringLiteral("video/webm; codecs=\"vp9\""));
+        QCOMPARE(webmName, QStringLiteral("Tutorial Video.webm"));
+
+        // 3. FLAC audio with authoritative URL path extension
+        const QUrl flacUrl(QStringLiteral("https://example.com/music/masterpiece.flac"));
+        const auto flacName = qtidm::resolveDownloadFilename(
+            QStringLiteral("Symphony No 5"), flacUrl, QStringLiteral("Audio"), false, QStringLiteral("audio/flac"));
+        QCOMPARE(flacName, QStringLiteral("Symphony No 5.flac"));
+
+        // 4. Script URL (.php) with audio/ogg MIME resolves to .ogg, not .php or .mp3
+        const QUrl phpUrl(QStringLiteral("https://example.com/get_audio.php?track=99"));
+        const auto oggName = qtidm::resolveDownloadFilename(
+            QStringLiteral("Interview"), phpUrl, QStringLiteral("Audio"), false, QStringLiteral("audio/ogg"));
+        QCOMPARE(oggName, QStringLiteral("Interview.ogg"));
+
+        // 5. Title had mismatched .mp4 but stream is audio/opus: corrects to .opus to prevent corruption
+        const auto fixedOpus = qtidm::resolveDownloadFilename(
+            QStringLiteral("Song.mp4"), opusUrl, QStringLiteral("Audio"), false, QStringLiteral("audio/opus"));
+        QCOMPARE(fixedOpus, QStringLiteral("Song.opus"));
+
+        // 6. Title had mismatched .mp4 but stream is video/webm: corrects to .webm
+        const auto fixedWebm = qtidm::resolveDownloadFilename(
+            QStringLiteral("Movie.mp4"), webmUrl, QStringLiteral("Video"), false, QStringLiteral("video/webm"));
+        QCOMPARE(fixedWebm, QStringLiteral("Movie.webm"));
+
+        // 7. Adaptive HLS/DASH always packages into universal container .mkv
+        const QUrl dashUrl(QStringLiteral("https://example.com/manifest.mpd"));
+        const auto dashName = qtidm::resolveDownloadFilename(
+            QStringLiteral("Big Stream"), dashUrl, QStringLiteral("DASH"), true, QStringLiteral("application/dash+xml"));
+        QCOMPARE(dashName, QStringLiteral("Big Stream.mkv"));
+    }
 };
 
 QTEST_MAIN(DownloadTypesTest)

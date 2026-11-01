@@ -139,6 +139,11 @@ DownloadRequest requestFromJson(const QJsonObject& object);
 QJsonObject recordToJson(const DownloadRecord& record);
 DownloadRecord recordFromJson(const QJsonObject& object);
 
+QString extensionFromMime(const QString& mimeType);
+QString safeSuggestedFilename(QString value);
+QString adaptiveMediaSuggestedFilename(const QString& inputName);
+QString resolveDownloadFilename(const QString& rawSuggested, const QUrl& url, const QString& mediaTypeHint = {}, bool adaptiveMedia = false, const QString& mimeTypeHint = {});
+
 }
 
 Q_DECLARE_METATYPE(qtidm::DownloadStatus)

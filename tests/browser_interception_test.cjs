@@ -168,6 +168,21 @@ async function testVariant(relativePath, rootName) {
     context.mediaSuggestedFilename({}, { title: "Episode 01." }),
     "Episode 01"
   );
+  assert.equal(
+    context.mediaSuggestedFilename({ url: "https://example.test/stream/episode1.mp4" }, { title: "Persona 5 Episode 01" }),
+    "Persona 5 Episode 01.mp4",
+    "mediaSuggestedFilename must retain video extension from URL"
+  );
+  assert.equal(
+    context.mediaSuggestedFilename({ type: "Audio" }, { title: "Podcast Episode 10" }),
+    "Podcast Episode 10.mp3",
+    "mediaSuggestedFilename must provide audio extension based on detected media type"
+  );
+  assert.equal(
+    context.browserSuggestedFilename("document_without_ext", "https://example.test/files/manual.pdf"),
+    "document_without_ext.pdf",
+    "browserSuggestedFilename must preserve extension from URL if captured filename lacks one"
+  );
 
   mock.api.webRequest.onBeforeSendHeaders.listeners[0]({
     requestId: "observed-request",
@@ -358,6 +373,75 @@ async function testVariant(relativePath, rootName) {
     assert.equal(mock.nativeMessages.at(-1)?.type, "extractSocialMedia");
     assert.equal(mock.nativeMessages.at(-1)?.url, "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
   }
+
+  // Phase E: Verify dynamic MIME-to-extension resolution across containers without hardcoding
+  assert.equal(context.extensionFromMime("audio/opus"), "opus");
+  assert.equal(context.extensionFromMime("audio/webm; codecs=\"opus\""), "webm");
+  assert.equal(context.extensionFromMime("video/webm; codecs=\"vp9\""), "webm");
+  assert.equal(context.extensionFromMime("audio/flac"), "flac");
+  assert.equal(context.extensionFromMime("audio/x-m4a"), "m4a");
+  assert.equal(context.extensionFromMime("audio/mp4"), "m4a");
+  assert.equal(context.extensionFromMime("audio/aac"), "aac");
+  assert.equal(context.extensionFromMime("video/quicktime"), "mov");
+  assert.equal(context.extensionFromMime("video/x-matroska"), "mkv");
+
+  const opusItem = {
+    url: "https://example.test/stream?id=audio-only",
+    type: "Audio",
+    contentType: "audio/opus"
+  };
+  assert.equal(context.mediaExtension(opusItem), "opus", "Opus audio stream without file extension in URL must resolve to .opus");
+  assert.equal(
+    context.mediaSuggestedFilename(opusItem, { title: "Podcast Deep Dive" }),
+    "Podcast Deep Dive.opus",
+    "Suggested filename for Opus audio must be .opus, never hardcoded to .mp3"
+  );
+
+  const webmItem = {
+    url: "https://example.test/videoplayback?expire=999",
+    type: "Video",
+    contentType: "video/webm; codecs=\"vp9\""
+  };
+  assert.equal(context.mediaExtension(webmItem), "webm", "WebM video stream without file extension in URL must resolve to .webm");
+  assert.equal(
+    context.mediaSuggestedFilename(webmItem, { title: "4K Nature Documentary" }),
+    "4K Nature Documentary.webm",
+    "Suggested filename for WebM video must be .webm, never hardcoded to .mp4"
+  );
+
+  const flacItem = {
+    url: "https://example.test/music/song.flac",
+    type: "Audio",
+    contentType: "audio/flac"
+  };
+  assert.equal(context.mediaExtension(flacItem), "flac", "FLAC stream must retain .flac extension");
+  assert.equal(
+    context.mediaSuggestedFilename(flacItem, { title: "Lossless Track" }),
+    "Lossless Track.flac",
+    "Suggested filename for FLAC audio must retain .flac"
+  );
+
+  // Mismatched title extension (e.g. author typed .mp4 in title, but stream is actually webm or opus)
+  assert.equal(
+    context.mediaSuggestedFilename(webmItem, { title: "Nature.mp4" }),
+    "Nature.webm",
+    "Mismatched container extension in title must be replaced with true stream container to prevent file corruption"
+  );
+
+  const downloadEntry = await context.makeDownloadEntry(
+    "https://example.test/audio-stream",
+    { url: "https://example.test/page" },
+    "",
+    {},
+    "Audio",
+    "Podcast.opus",
+    "GET",
+    "",
+    "",
+    "audio/opus"
+  );
+  assert.equal(downloadEntry.headers._qtidmMimeType, "audio/opus", "makeDownloadEntry must pass _qtidmMimeType");
+  assert.equal(downloadEntry.headers._qtidmMediaType, "Audio", "makeDownloadEntry must pass _qtidmMediaType");
 }
 
 Promise.all([

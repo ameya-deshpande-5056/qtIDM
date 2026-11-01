@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.8
+
+- Replaced hardcoded fallback extensions in `resolveDownloadFilename` and browser extension background scripts with a comprehensive MIME-to-extension dictionary (`extensionFromMime`), supporting audio, video, subtitle, document, and archive formats (Opus, WebM, FLAC, AAC, M4A, MP4, MP3, MKV, MOV, VTT, SRT).
+- Implemented container validation and mismatch correction in filename resolution across single and batch download dialogs, correcting mismatched title extensions (such as page titles ending in `.mp4` for Opus or WebM streams) according to authoritative `Content-Type` headers (`_qtidmMimeType`) or URL paths to prevent file extension mismatch and unplayable files.
+- Enhanced browser extension media capture resolution (`mediaExtension` and `mediaSuggestedFilename`) so direct audio and video streams lacking URL path extensions dynamically adopt their proper container extension from their response `Content-Type`.
+- Forwarded intercepted `Content-Type` from browser extensions to qtIDM as `_qtidmMimeType` to ensure consistent format detection between the browser and desktop application.
+- Fixed a layout issue in the browser extension popup where the `#notice` status footer floated upward into the middle of the popup when only one or few media items were captured; converted the popup container to a flex column layout with `margin-top: auto; flex-shrink: 0;` so the footer is permanently anchored to the bottom of the popup.
+- Made the extension popup active panels internally scrollable (`overflow-y: auto`) within bounded height (`min-height: 420px; max-height: 600px;`), keeping the header, navigation tabs, and status footer pinned in place while long capture lists or settings scroll smoothly.
+- Added visual styling enhancements to the extension popup, including distinctive accent borders and type indicators for adaptive streams (`.item.stream`), full-height empty state placeholders, and descriptive stream title formatting based on tab titles.
+- Resolved a pipe buffering race condition in `DownloaderIntegrationTest` ALPN test cases where the local HTTP/2 mock server's CA certificate path was read before being fully flushed to stdout.
+- Added comprehensive unit test coverage in `DownloadTypesTest` and `browser_interception_test.cjs` covering dynamic MIME mappings, extension overrides, and container correction.
+
 ## 0.2.7
 
 - Enhanced `CurlEpollDownloader` DNS inspection and address pinning (`isPrivateOrLoopbackHost`) to discover, validate, and preserve all resolved public IPv4 and IPv6 addresses for multi-homed hosts and anycast CDN networks (such as GitHub release assets hosted on Fastly CDN), eliminating single-point-of-failure hangs when individual CDN edge nodes time out or drop packets.
