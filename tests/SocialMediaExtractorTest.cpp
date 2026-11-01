@@ -151,6 +151,42 @@ private slots:
         QCOMPARE(result.formats[2].label, QStringLiteral("480p · MP4 · video only"));
         QVERIFY(!result.formats[2].isCombined);
     }
+
+    void selectsLatestYtDlpBinaryAcrossCandidates()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        // Mock older apt package (e.g. 2024.04.09)
+        QFile aptTool(dir.path() + QStringLiteral("/apt_ytdlp"));
+        QVERIFY(aptTool.open(QIODevice::WriteOnly));
+        aptTool.write("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '2024.04.09'; exit 0; fi\nexit 1\n");
+        aptTool.close();
+        QVERIFY(aptTool.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+
+        // Mock newer pip package (e.g. 2026.10.26)
+        QFile pipTool(dir.path() + QStringLiteral("/pip_ytdlp"));
+        QVERIFY(pipTool.open(QIODevice::WriteOnly));
+        pipTool.write("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '2026.10.26'; exit 0; fi\nexit 1\n");
+        pipTool.close();
+        QVERIFY(pipTool.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+
+        QList<qtidm::SocialMediaExtractor::CommandInvocation> candidates {
+            {aptTool.fileName(), {}},
+            {pipTool.fileName(), {}}
+        };
+
+        const auto selected = qtidm::SocialMediaExtractor::selectLatestCommand(candidates);
+        QCOMPARE(selected.program, pipTool.fileName());
+
+        // Reverse order must also pick the latest pip candidate
+        QList<qtidm::SocialMediaExtractor::CommandInvocation> reverseCandidates {
+            {pipTool.fileName(), {}},
+            {aptTool.fileName(), {}}
+        };
+        const auto selectedReverse = qtidm::SocialMediaExtractor::selectLatestCommand(reverseCandidates);
+        QCOMPARE(selectedReverse.program, pipTool.fileName());
+    }
 };
 
 QTEST_MAIN(SocialMediaExtractorTest)

@@ -38,7 +38,7 @@ qtIDM is an original, clean-room implementation developed independently from ope
 - Virtual playlist rewriting in `MediaStreamProxy` normalizing disguised media extensions (e.g. `.jpg` segment files) to virtual `.ts` paths.
 - Explicit Widevine, PlayReady, FairPlay, and SAMPLE-AES detection with a clear refusal instead of attempting DRM circumvention.
 - Separate adaptive and progressive audio and video track downloading and remuxing into unified `.mp4` or `.webm` containers via FFmpeg without quality loss (`-c copy`).
-- Maintained social-site extraction through `yt-dlp` for supported YouTube, Bilibili, Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, Dailymotion, Twitch, and SoundCloud links, with automatic combined audio+video pairing and user-local executable discovery (`~/.local/bin`, `~/.pyenv/shims`).
+- Maintained social-site extraction through `yt-dlp` for supported YouTube, Bilibili, Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, Dailymotion, Twitch, and SoundCloud links, with automatic combined audio+video pairing and dynamic discovery prioritizing the newest version across user pip (`~/.local/bin`), pyenv (`~/.pyenv/shims`), Python 3 modules (`python3 -m yt_dlp`), and system packages.
 - Browser detection of HLS, DASH, direct audio/video, and common subtitle responses, with YouTube/Bilibili extension popup awareness and smart URL routing.
 - Accurate stream title preservation capturing complete names and numbers (e.g. `Ep. 7`) without truncation at periods before the file extension.
 - Pause, resume, cancel, progress reporting, and persisted history for media downloads.
@@ -119,8 +119,12 @@ cmake --build build
 Install all optional runtime integrations on Ubuntu with:
 
 ```bash
-sudo apt-get install -y ffmpeg 7zip libsecret-tools yt-dlp chromium
+sudo apt-get install -y ffmpeg 7zip libsecret-tools pipx chromium
+pipx install yt-dlp
 ```
+
+> [!TIP]
+> Distribution `apt` packages of `yt-dlp` are frequently months or years out of date. Installing `yt-dlp` via `pipx install yt-dlp` or `pip install --user --upgrade yt-dlp` provides the latest platform extractor definitions. qtIDM automatically discovers, queries versions for, and prioritizes the newest installation across user pip (`~/.local/bin`), pyenv (`~/.pyenv/shims`), Python 3 modules (`python3 -m yt_dlp`), and system directories.
 
 For release builds with Chrome native messaging, pass the ID derived from the
 persistent Chrome signing key:
@@ -197,7 +201,7 @@ Local package prerequisites on Ubuntu:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper-compat devscripts appstream desktop-file-utils flatpak flatpak-builder libfuse2 ffmpeg 7zip libsecret-tools yt-dlp
+sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper-compat devscripts appstream desktop-file-utils flatpak flatpak-builder libfuse2 ffmpeg 7zip libsecret-tools
 ```
 
 Build and test the Debian package:

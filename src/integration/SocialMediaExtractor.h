@@ -27,10 +27,19 @@ struct SocialMediaExtraction {
 
 class SocialMediaExtractor final {
 public:
+    struct CommandInvocation {
+        QString program;
+        QStringList prefixArguments;
+        bool isValid() const { return !program.isEmpty(); }
+    };
+
     explicit SocialMediaExtractor(QString executable = {});
 
     static bool supports(const QUrl& url);
+    static CommandInvocation selectLatestCommand(const QList<CommandInvocation>& candidates);
+
     bool isAvailable() const;
+    CommandInvocation resolveCommand() const;
     SocialMediaExtraction extract(const QUrl& url, const QString& browserCookies,
         QString* error = nullptr) const;
 
@@ -38,6 +47,8 @@ private:
     QString executable() const;
 
     QString executable_;
+    mutable bool commandResolved_ = false;
+    mutable CommandInvocation cachedCommand_;
 };
 
 }

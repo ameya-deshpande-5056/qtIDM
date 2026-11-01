@@ -13,6 +13,33 @@
 namespace qtidm {
 
 namespace {
+QList<int> parseVersion(const QString& raw)
+{
+    QList<int> numbers;
+    const auto tokens = raw.trimmed().split(QLatin1Char('.'));
+    for (const auto& token : tokens) {
+        bool ok = false;
+        int n = token.toInt(&ok);
+        if (ok) {
+            numbers.append(n);
+        }
+    }
+    return numbers;
+}
+
+bool isNewerVersion(const QList<int>& a, const QList<int>& b)
+{
+    const int maxLen = std::max(a.size(), b.size());
+    for (int i = 0; i < maxLen; ++i) {
+        const int valA = (i < a.size()) ? a[i] : 0;
+        const int valB = (i < b.size()) ? b[i] : 0;
+        if (valA != valB) {
+            return valA > valB;
+        }
+    }
+    return false;
+}
+
 QVariantMap headersFromJson(const QJsonObject& object)
 {
     QVariantMap result;
@@ -68,29 +95,113 @@ SocialMediaExtractor::SocialMediaExtractor(QString executable)
 {
 }
 
-QString SocialMediaExtractor::executable() const
+SocialMediaExtractor::CommandInvocation SocialMediaExtractor::selectLatestCommand(
+    const QList<CommandInvocation>& candidates)
 {
+    CommandInvocation bestCmd;
+    QList<int> bestVersion;
+
+    for (const auto& candidate : candidates) {
+        if (!candidate.isValid()) continue;
+
+        QProcess process;
+        process.start(candidate.program, candidate.prefixArguments + QStringList{QStringLiteral("--version")}, QIODevice::ReadOnly);
+        if (!process.waitForStarted(1500) || !process.waitForFinished(3000) || process.exitCode() != 0) {
+            if (!bestCmd.isValid()) {
+                bestCmd = candidate;
+            }
+            continue;
+        }
+
+        const auto output = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+        const auto version = parseVersion(output);
+        if (version.isEmpty()) {
+            if (!bestCmd.isValid()) {
+                bestCmd = candidate;
+            }
+            continue;
+        }
+
+        if (!bestCmd.isValid() || isNewerVersion(version, bestVersion)) {
+            bestCmd = candidate;
+            bestVersion = version;
+        }
+    }
+
+    return bestCmd;
+}
+
+SocialMediaExtractor::CommandInvocation SocialMediaExtractor::resolveCommand() const
+{
+    if (commandResolved_) {
+        return cachedCommand_;
+    }
+
     if (!executable_.isEmpty()) {
-        return executable_;
+        cachedCommand_ = CommandInvocation{executable_, {}};
+        commandResolved_ = true;
+        return cachedCommand_;
     }
-    const auto standard = QStandardPaths::findExecutable(QStringLiteral("yt-dlp"));
-    if (!standard.isEmpty()) {
-        return standard;
-    }
+
+    QList<CommandInvocation> candidates;
+    QSet<QString> seenPaths;
+
+    auto addCandidate = [&](const QString& path, const QStringList& prefixArgs = {}) {
+        if (path.isEmpty()) return;
+        const auto canonical = QFileInfo(path).canonicalFilePath();
+        const auto key = canonical.isEmpty() ? path : canonical;
+        if (seenPaths.contains(key)) return;
+        seenPaths.insert(key);
+        candidates.append(CommandInvocation{path, prefixArgs});
+    };
+
+    // 1. User pip / pipx / virtualenvs (~/.local/bin, ~/.pyenv/shims)
     const auto userLocal = QDir::home().filePath(QStringLiteral(".local/bin/yt-dlp"));
     if (QFileInfo::exists(userLocal)) {
-        return userLocal;
+        addCandidate(userLocal);
     }
     const auto pyenvShim = QDir::home().filePath(QStringLiteral(".pyenv/shims/yt-dlp"));
     if (QFileInfo::exists(pyenvShim)) {
-        return pyenvShim;
+        addCandidate(pyenvShim);
     }
-    return {};
+
+    // 2. Custom system-wide pip install (/usr/local/bin)
+    const auto usrLocal = QStringLiteral("/usr/local/bin/yt-dlp");
+    if (QFileInfo::exists(usrLocal)) {
+        addCandidate(usrLocal);
+    }
+
+    // 3. User PATH lookup (finds user venv or active python environment)
+    const auto standard = QStandardPaths::findExecutable(QStringLiteral("yt-dlp"));
+    if (!standard.isEmpty()) {
+        addCandidate(standard);
+    }
+
+    // 4. Distribution package (apt /usr/bin)
+    const auto usrBin = QStringLiteral("/usr/bin/yt-dlp");
+    if (QFileInfo::exists(usrBin)) {
+        addCandidate(usrBin);
+    }
+
+    // 5. Python3 module (python3 -m yt_dlp)
+    const auto python3 = QStandardPaths::findExecutable(QStringLiteral("python3"));
+    if (!python3.isEmpty()) {
+        candidates.append(CommandInvocation{python3, {QStringLiteral("-m"), QStringLiteral("yt_dlp")}});
+    }
+
+    cachedCommand_ = selectLatestCommand(candidates);
+    commandResolved_ = true;
+    return cachedCommand_;
+}
+
+QString SocialMediaExtractor::executable() const
+{
+    return resolveCommand().program;
 }
 
 bool SocialMediaExtractor::isAvailable() const
 {
-    return !executable().isEmpty();
+    return resolveCommand().isValid();
 }
 
 bool SocialMediaExtractor::supports(const QUrl& url)
@@ -119,8 +230,8 @@ SocialMediaExtraction SocialMediaExtractor::extract(
         }
         return result;
     }
-    const auto tool = executable();
-    if (tool.isEmpty()) {
+    const auto cmd = resolveCommand();
+    if (!cmd.isValid()) {
         if (error) {
             *error = QStringLiteral("Site-specific extraction requires yt-dlp.");
         }
@@ -140,7 +251,7 @@ SocialMediaExtraction SocialMediaExtractor::extract(
     arguments << QStringLiteral("--") << url.toString(QUrl::FullyEncoded);
 
     QProcess process;
-    process.start(tool, arguments, QIODevice::ReadOnly);
+    process.start(cmd.program, cmd.prefixArguments + arguments, QIODevice::ReadOnly);
     if (!process.waitForStarted(5000)) {
         if (error) {
             *error = process.errorString();
