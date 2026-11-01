@@ -219,7 +219,7 @@ Build and test the AppImage:
 curl -L -o linuxdeploy.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
 curl -L -o linuxdeploy-plugin-qt.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
 printf '%s  %s\n' \
-  8aea8da0f7f7039d2a2cecb14657d752a222a5e1d3825caeef186c82f751cdd1 linuxdeploy.AppImage \
+  d900b99faf8656aa613038dafbd2cc23ca7f90794a9a00c9546f0ab572af94dd linuxdeploy.AppImage \
   cfc1055b2b9dbc08412b579f20990b7b41a17b61beaa5847dc9477c96c9e9617 linuxdeploy-plugin-qt.AppImage \
   | sha256sum --check --strict
 chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
