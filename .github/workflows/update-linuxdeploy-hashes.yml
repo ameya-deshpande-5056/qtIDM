@@ -26,16 +26,16 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: 'chore(ci): update continuous linuxdeploy SHA-256 hashes'
-          title: 'chore(ci): update continuous linuxdeploy SHA-256 hashes'
+          commit-message: 'chore(ci): update packaging dependencies and continuous checksums'
+          title: 'chore(ci): update packaging dependencies and continuous checksums'
           body: |
-            Automated update of continuous `linuxdeploy` and `linuxdeploy-plugin-qt` SHA-256 checksums.
+            Automated update of Flatpak packaging dependencies (`yt-dlp`, `7zip`, `libsecret`) and continuous `linuxdeploy` / `linuxdeploy-plugin-qt` SHA-256 checksums.
 
             - **linuxdeploy**: `${{ steps.update.outputs.linuxdeploy_sha }}`
             - **linuxdeploy-plugin-qt**: `${{ steps.update.outputs.plugin_sha }}`
 
-            Triggered by scheduled CI hash verification workflow.
-          branch: ci/update-linuxdeploy-hashes
+            Triggered by scheduled packaging dependency verification workflow.
+          branch: ci/update-packaging-dependencies
           delete-branch: true
           labels: |
             ci

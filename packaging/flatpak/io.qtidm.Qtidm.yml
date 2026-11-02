@@ -33,8 +33,8 @@ modules:
       - /share/bash-completion
     sources:
       - type: archive
-        url: https://download.gnome.org/sources/libsecret/0.21/libsecret-0.21.7.tar.xz
-        sha256: 6b452e4750590a2b5617adc40026f28d2f4903de15f1250e1d1c40bfd68ed55e
+        url: https://download.gnome.org/sources/libsecret/0.21/libsecret-0.21.8.tar.xz
+        sha256: 70e7279ccc7e8cce1bb0e1c57a3785e2c79aea6d1dd9a538abda3886f11cdf72
 
   - name: sevenzip
     buildsystem: simple
@@ -46,8 +46,8 @@ modules:
       - install -Dm644 License.txt /app/share/licenses/7zip/License.txt
     sources:
       - type: archive
-        url: https://www.7-zip.org/a/7z2602-linux-x64.tar.xz
-        sha256: 41aaba7b1235304ab5aa0624530c67ae829496cd29e875925271efdccc28c03e
+        url: https://github.com/ip7z/7zip/releases/download/26.05/7z2605-linux-x64.tar.xz
+        sha256: 22cf82fcc6eb7474f1d5bb4f02c0f8ebd573a718089d6833dc30f8350a3b232e
         strip-components: 0
 
   - name: yt-dlp
@@ -59,11 +59,11 @@ modules:
       - install -Dm644 LICENSE /app/share/licenses/yt-dlp/LICENSE
     sources:
       - type: file
-        url: https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp_linux
-        sha256: bf8aac79b72287a6d2043074415132558b43743a8f9461a22b0141e90f16ce66
+        url: https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp_linux
+        sha256: 767ba9dce7052aa196f8b12652f433d76de128ba168966fa84b6394d5e6c6795
         dest-filename: yt-dlp
       - type: file
-        url: https://raw.githubusercontent.com/yt-dlp/yt-dlp/2026.06.09/LICENSE
+        url: https://raw.githubusercontent.com/yt-dlp/yt-dlp/2026.10.26/LICENSE
         sha256: 7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c
         dest-filename: LICENSE
 

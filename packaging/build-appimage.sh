@@ -27,6 +27,17 @@ if [ -z "$FFMPEG" ]; then
 fi
 cp -L "$FFMPEG" "$APPDIR/usr/bin/ffmpeg"
 
+SEVENZIP="$(command -v 7zz || command -v 7z || true)"
+if [ -n "$SEVENZIP" ]; then
+    cp -L "$SEVENZIP" "$APPDIR/usr/bin/7zz"
+    ln -sf 7zz "$APPDIR/usr/bin/7z"
+fi
+
+SECRET_TOOL="$(command -v secret-tool || true)"
+if [ -n "$SECRET_TOOL" ]; then
+    cp -L "$SECRET_TOOL" "$APPDIR/usr/bin/secret-tool"
+fi
+
 if ! command -v linuxdeploy >/dev/null 2>&1; then
     echo "linuxdeploy is required to build the AppImage." >&2
     exit 1

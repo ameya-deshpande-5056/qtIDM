@@ -13,6 +13,10 @@
 - Updated documentation and CI configurations to install and recommend `yt-dlp` via pip / `pipx` for up-to-date extractor definitions rather than outdated distribution packages.
 - Resolved a pipe buffering race condition in `DownloaderIntegrationTest` ALPN test cases where the local HTTP/2 mock server's CA certificate path was read before being fully flushed to stdout.
 - Fixed AppImage packaging failure with continuous `appimagetool` by explicitly staging the application icon (`io.qtidm.Qtidm.png`), creating `.DirIcon`, and passing `--desktop-file` and `--icon-file` in `packaging/build-appimage.sh`.
+- Bundled `7zz`/`7z` and `secret-tool` in AppImage packaging when present on the host to ensure self-contained archive extraction and credential retrieval.
+- Updated Debian packaging recommendations to `pipx | yt-dlp` to ensure users install up-to-date PyPI extractor packages rather than stale distribution packages.
+- Upgraded Flatpak packaging dependencies to the newest upstream releases (`yt-dlp` 2026.10.26, 7-Zip 26.05 from GitHub mirror `ip7z/7zip`, and `libsecret` 0.21.8).
+- Expanded automated CI dependency updater (`packaging/release/update-linuxdeploy-hashes.sh`) to automatically monitor, verify, and bump Flatpak dependencies alongside continuous `linuxdeploy` AppImage hashes.
 - Added comprehensive unit test coverage in `DownloadTypesTest` and `browser_interception_test.cjs` covering dynamic MIME mappings, extension overrides, and container correction.
 
 ## 0.2.7
