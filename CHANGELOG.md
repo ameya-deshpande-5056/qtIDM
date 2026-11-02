@@ -12,6 +12,7 @@
 - Enhanced `yt-dlp` discovery in `SocialMediaExtractor` to query and compare versions across all available installation sources (user pip in `~/.local/bin`, pyenv in `~/.pyenv/shims`, Python 3 modules via `python3 -m yt_dlp`, `/usr/local/bin`, and system distribution packages in `/usr/bin`), dynamically prioritizing and running whichever source has the newest release.
 - Updated documentation and CI configurations to install and recommend `yt-dlp` via pip / `pipx` for up-to-date extractor definitions rather than outdated distribution packages.
 - Resolved a pipe buffering race condition in `DownloaderIntegrationTest` ALPN test cases where the local HTTP/2 mock server's CA certificate path was read before being fully flushed to stdout.
+- Fixed AppImage packaging failure with continuous `appimagetool` by explicitly staging the application icon (`io.qtidm.Qtidm.png`), creating `.DirIcon`, and passing `--desktop-file` and `--icon-file` in `packaging/build-appimage.sh`.
 - Added comprehensive unit test coverage in `DownloadTypesTest` and `browser_interception_test.cjs` covering dynamic MIME mappings, extension overrides, and container correction.
 
 ## 0.2.7

@@ -35,9 +35,20 @@ fi
 cp "$ROOT/packaging/appimage/AppRun" "$APPDIR/AppRun"
 chmod +x "$APPDIR/AppRun"
 
+DESKTOP_FILE="$ROOT/assets/io.qtidm.Qtidm.desktop"
+ICON_FILE="$ROOT/assets/icons/hicolor/256x256/apps/io.qtidm.Qtidm.png"
+
+cp "$DESKTOP_FILE" "$APPDIR/io.qtidm.Qtidm.desktop"
+cp "$ICON_FILE" "$APPDIR/io.qtidm.Qtidm.png"
+ln -sf io.qtidm.Qtidm.png "$APPDIR/.DirIcon"
+
 (
     cd "$GENERATED"
-    linuxdeploy --appdir "$APPDIR" --plugin qt --output appimage
+    linuxdeploy --appdir "$APPDIR" \
+        --desktop-file "$DESKTOP_FILE" \
+        --icon-file "$ICON_FILE" \
+        --plugin qt \
+        --output appimage
 )
 
 GENERATED_APPIMAGE="$GENERATED/qtIDM-x86_64.AppImage"
