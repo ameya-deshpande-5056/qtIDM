@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.9
+
+- Added URL path normalization in `SocialMediaExtractor::normalizeUrl` for international Bilibili URLs, automatically stripping the `/en` path prefix (`/en/video/` -> `/video/`) so `yt-dlp` matches its dedicated Bilibili extractor rather than falling back to the generic extractor (`ext: html`) which returned no downloadable video or audio streams.
+- Updated browser extension popup logic (`browser/chrome/popup.js` and `browser/firefox/popup.js`) with `normalizeMediaUrl` to sanitize international Bilibili URLs before sending extraction requests to qtIDM.
+- Added comprehensive unit test coverage in `SocialMediaExtractorTest` verifying `normalizeUrl` transforms `/en/video/...` paths while preserving standard Bilibili URLs and unrelated domains.
+
 ## 0.2.8
 
 - Replaced hardcoded fallback extensions in `resolveDownloadFilename` and browser extension background scripts with a comprehensive MIME-to-extension dictionary (`extensionFromMime`), supporting audio, video, subtitle, document, and archive formats (Opus, WebM, FLAC, AAC, M4A, MP4, MP3, MKV, MOV, VTT, SRT).
