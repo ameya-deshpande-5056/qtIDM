@@ -220,6 +220,19 @@ bool SocialMediaExtractor::supports(const QUrl& url)
     });
 }
 
+QUrl SocialMediaExtractor::normalizeUrl(const QUrl& url)
+{
+    QUrl normalized = url;
+    const auto host = normalized.host().toLower();
+    if (host == QStringLiteral("bilibili.com") || host.endsWith(QStringLiteral(".bilibili.com"))) {
+        QString path = normalized.path();
+        if (path.startsWith(QStringLiteral("/en/video/"), Qt::CaseInsensitive)) {
+            normalized.setPath(path.mid(3)); // Strip /en prefix so yt-dlp matches the dedicated Bilibili extractor
+        }
+    }
+    return normalized;
+}
+
 SocialMediaExtraction SocialMediaExtractor::extract(
     const QUrl& url, const QString& browserCookies, QString* error) const
 {
@@ -238,6 +251,7 @@ SocialMediaExtraction SocialMediaExtractor::extract(
         return result;
     }
 
+    const auto targetUrl = normalizeUrl(url);
     QStringList arguments {
         QStringLiteral("--dump-single-json"),
         QStringLiteral("--no-warnings"),
@@ -248,7 +262,7 @@ SocialMediaExtraction SocialMediaExtractor::extract(
     if (!browserCookies.trimmed().isEmpty()) {
         arguments << QStringLiteral("--cookies-from-browser") << browserCookies.trimmed();
     }
-    arguments << QStringLiteral("--") << url.toString(QUrl::FullyEncoded);
+    arguments << QStringLiteral("--") << targetUrl.toString(QUrl::FullyEncoded);
 
     QProcess process;
     process.start(cmd.program, cmd.prefixArguments + arguments, QIODevice::ReadOnly);

@@ -36,6 +36,7 @@ public:
     explicit SocialMediaExtractor(QString executable = {});
 
     static bool supports(const QUrl& url);
+    static QUrl normalizeUrl(const QUrl& url);
     static CommandInvocation selectLatestCommand(const QList<CommandInvocation>& candidates);
 
     bool isAvailable() const;

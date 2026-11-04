@@ -20,9 +20,18 @@ private slots:
         QVERIFY(qtidm::SocialMediaExtractor::supports(
             QUrl(QStringLiteral("https://www.bilibili.com/video/BV1xx411c7mD"))));
         QVERIFY(qtidm::SocialMediaExtractor::supports(
+            QUrl(QStringLiteral("https://www.bilibili.com/en/video/BV1xx411c7mD"))));
+        QVERIFY(qtidm::SocialMediaExtractor::supports(
             QUrl(QStringLiteral("https://b23.tv/example"))));
         QVERIFY(!qtidm::SocialMediaExtractor::supports(
             QUrl(QStringLiteral("https://unsupported.example.test/watch"))));
+
+        QCOMPARE(qtidm::SocialMediaExtractor::normalizeUrl(
+                     QUrl(QStringLiteral("https://www.bilibili.com/en/video/BV1QHhd6WEtU/?param=1"))),
+                 QUrl(QStringLiteral("https://www.bilibili.com/video/BV1QHhd6WEtU/?param=1")));
+        QCOMPARE(qtidm::SocialMediaExtractor::normalizeUrl(
+                     QUrl(QStringLiteral("https://www.bilibili.com/video/BV1QHhd6WEtU/"))),
+                 QUrl(QStringLiteral("https://www.bilibili.com/video/BV1QHhd6WEtU/")));
     }
 
     void parsesFormatsAndHeaders()

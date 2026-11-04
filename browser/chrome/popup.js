@@ -165,10 +165,19 @@ $("#extractSocialBtn")?.addEventListener("click", async () => {
   const btn = $("#extractSocialBtn");
   btn.disabled = true;
   notice("Sending extraction request to qtIDM...");
+  let targetUrl = tab.url;
+  try {
+    const parsed = new URL(tab.url);
+    if ((parsed.hostname === "bilibili.com" || parsed.hostname.endsWith(".bilibili.com"))
+        && parsed.pathname.startsWith("/en/video/")) {
+      parsed.pathname = parsed.pathname.slice(3);
+      targetUrl = parsed.href;
+    }
+  } catch (_) {}
   const result = await api.runtime.sendMessage({
     type: "extractSocialMedia",
     tabId: tab.id,
-    url: tab.url
+    url: targetUrl
   });
   btn.disabled = false;
   notice(result?.ok ? "Extraction started in qtIDM." : (result?.message || "Could not contact qtIDM."), !result?.ok);
