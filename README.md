@@ -1,14 +1,51 @@
-<p align="left">
-  <img src="assets/io.qtidm.Qtidm.svg" width="128" height="128" alt="qtIDM logo">
+<p align="center">
+  <img src="assets/io.qtidm.Qtidm.svg" width="120" height="120" alt="qtIDM logo">
 </p>
 
-# qtIDM
+<h1 align="center">qtIDM</h1>
 
-qtIDM is a Linux-native Qt6 Widgets download manager written in C++20. It
-combines segmented HTTP/HTTPS/FTP transfers, persistent queues, adaptive-media
-handling, browser integration, and desktop automation in one application.
+<p align="center">
+  <strong>Fast, native, and feature-complete Internet Download Manager for Linux.</strong><br>
+  Built with modern C++20, Qt6 Widgets, and libcurl epoll.
+</p>
 
-qtIDM is an original, clean-room implementation developed independently from open web standards (RFC 7230, RFC 7233, RFC 6265, RFC 7540) and standard browser Native Messaging specifications. It accepts only original contributions or material distributed under compatible open-source licenses.
+<p align="center">
+  <a href="https://github.com/ameya-deshpande-5056/qtIDM/actions"><img src="https://img.shields.io/github/actions/workflow/status/ameya-deshpande-5056/qtIDM/build-release.yml?branch=main&style=flat-square&logo=github&label=build" alt="Build Status"></a>
+  <a href="https://github.com/ameya-deshpande-5056/qtIDM/releases"><img src="https://img.shields.io/github/v/release/ameya-deshpande-5056/qtIDM?include_prereleases&style=flat-square&color=8A1C3C" alt="Latest Release"></a>
+  <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=c%2B%2B&logoColor=white" alt="C++20">
+  <img src="https://img.shields.io/badge/Qt-6.x-41CD52?style=flat-square&logo=qt&logoColor=white" alt="Qt6">
+  <img src="https://img.shields.io/badge/Platform-Linux-FCC624?style=flat-square&logo=linux&logoColor=black" alt="Linux">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#screenshots">Screenshots</a> •
+  <a href="#browser-companion-extension-chrome--firefox">Browser Extensions</a> •
+  <a href="#build">Build</a> •
+  <a href="#packaging">Packaging</a>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/qtidm_main_window.png" alt="qtIDM Main Window" width="100%">
+</p>
+
+> [!NOTE]
+> qtIDM is an original, clean-room implementation developed independently from open web standards (RFC 7230, RFC 7233, RFC 6265, RFC 7540) and standard browser Native Messaging specifications. It accepts only original contributions or material distributed under compatible open-source licenses.
+
+## Screenshots
+
+### Application & Dialogs
+
+| Download Options & Segment Allocation | Application Preferences & Engine Settings |
+| :---: | :---: |
+| <img src="assets/screenshots/qtidm_download_options.png" alt="Download Options Dialog" width="100%"> | <img src="assets/screenshots/qtidm_options.png" alt="Application Options Dialog" width="100%"> |
+
+### Browser Companion Extension (Chrome & Firefox)
+
+| Media Stream Captures | Interception & Policies | Batch / Manual URL Submission |
+| :---: | :---: | :---: |
+| <img src="assets/screenshots/qtidm_browser_extension_captures.png" alt="Extension - Media Captures" width="100%"> | <img src="assets/screenshots/qtidm_browser_extension_settings.png" alt="Extension - Settings & Policies" width="100%"> | <img src="assets/screenshots/qtidm_browser_extension_addUrl.png" alt="Extension - Add URLs" width="100%"> |
 
 ## Features
 
