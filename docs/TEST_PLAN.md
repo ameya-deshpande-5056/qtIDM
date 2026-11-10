@@ -113,6 +113,11 @@
   - Download and mux separate DASH audio/video tracks with FFmpeg.
   - Detect explicit Widevine, PlayReady, FairPlay, and SAMPLE-AES manifests.
 
+- `qtIDM_main_window_tests`
+  - Synchronize status and progress updates between the download table and details pane.
+  - Restore hidden or minimized-maximized windows on system tray activation.
+  - Verify updated download table columns, hidden-URL search/copy, dynamic column resizing, and elided-cell tooltips.
+
 - `qtIDM_performance_smoke_tests`
   - Seed 10,000 persisted downloads.
   - Verify list/load path remains under budget.
@@ -133,7 +138,7 @@ ctest --test-dir build --output-on-failure
 - Pause preserves segment offsets.
 - Stop cancels active segment transfers.
 - Delete removes selected history row and persisted record.
-- Segment grid updates while downloading.
+- Segments details tab updates while downloading.
 - Tray menu opens app, adds URL, and quits.
 - System theme change updates light/dark stylesheet through portal D-Bus.
 - Single-instance D-Bus forwards URL to existing process.

@@ -30,6 +30,17 @@
   <launchable type="desktop-id">io.qtidm.Qtidm.desktop</launchable>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.3.0" date="2026-11-10">
+      <description>
+        <p>
+          Overhauls the download queue table with MIME file icons, numeric/date
+          sorting, viewport-responsive column sizing, and elided-cell tooltips;
+          offloads DNS and metadata probing to background worker threads with
+          fair multi-download connection scheduling; and improves browser
+          context-menu link batching and system tray window restoration.
+        </p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-07-19">
       <description>
         <p>

@@ -51,8 +51,8 @@
 
 ### Download Engine
 
-- Segmented HTTP, HTTPS, and FTP downloads through the libcurl multi-interface and Linux `epoll`.
-- Up to 32 simultaneous connections per download with configurable per-host connection limits.
+- Segmented HTTP, HTTPS, and FTP downloads through the libcurl multi-interface and Linux `epoll`, with asynchronous background DNS and metadata probing so new transfers never stall active downloads.
+- Up to 32 simultaneous connections per download with fair multi-download connection balancing and configurable per-host connection limits.
 - Dynamic range planning that keeps connections occupied as queued ranges complete.
 - Sparse `.part` files using `mmap` windows with a `pwrite` fallback.
 - Atomic promotion from `.part` to the final destination after successful completion.
@@ -82,17 +82,19 @@
 
 ### Queues And Scheduling
 
-- Persistent named queues, unlimited by default, with optional independent concurrency limits.
+- Persistent named queues (`Main` by default, unlimited concurrency unless configured), with optional independent limits (`1`–`64`).
 - Pause and resume dispatch for each queue without interrupting active downloads.
-- Editable, removable, and reorderable pending entries with stable schedule IDs.
-- Per-download start times, allowed weekdays, daily time windows, priorities, and repeat intervals.
-- Queue settings and pending requests survive application restarts.
+- Editable, removable, and reorderable pending entries with stable schedule IDs in the **Scheduler** dialog (**Queue** toolbar button).
+- Per-download start times, allowed weekdays, daily/overnight time windows, priorities (`-100` to `100`), and repeat intervals.
+- Queue settings and pending requests survive application restarts in `scheduled-downloads.json`, while dispatched transfers move to the main list (`downloads.sqlite3`).
 - Configurable metered-network handling: allow downloads, hold new work, or pause active work until NetworkManager reports an unmetered connection.
+
+See [Queues and Scheduler](#queues-and-scheduler) below for dialog usage, workflows, and limitations.
 
 ### Desktop Application
 
-- Qt6 Widgets UI with category filtering, download properties, segment visualization, and system tray integration; closing the window keeps qtIDM running in the tray, with an active-download confirmation before quitting.
-- Search and status filtering, sortable columns, multi-row actions, automatic categories, file/folder actions, and desktop notifications.
+- Qt6 Widgets UI with category filtering, download properties, segment visualization, and system tray integration; clicking the tray icon restores hidden or minimized windows, and closing the window keeps qtIDM running in the tray with an active-download confirmation before quitting.
+- Search and status filtering, MIME file icons, numeric/date column sorting, viewport-responsive columns with elided-text tooltips, multi-row actions, automatic categories, file/folder actions, and desktop notifications.
 - New single-URL downloads default to created category folders under `~/Downloads` (`Videos`, `Music`, `Images`, `Programs`, `Documents`, `Compressed`, or `Others`); the destination remains editable before confirmation.
 - Batch URL editor that creates multiple downloads without opening one dialog per URL.
 - Clipboard monitoring for HTTP and HTTPS links.
@@ -182,6 +184,9 @@ Common entry points:
 
 - **Add URL** configures a direct download, credentials, scheduling, checksum,
   completion actions, and optional archive extraction.
+- **Queue** opens the **Scheduler** dialog to configure per-queue concurrency
+  limits, pause or resume queue dispatch, and reorder, edit, or remove waiting
+  downloads (see [Queues and Scheduler](#queues-and-scheduler)).
 - **Social** discovers selectable non-DRM formats on supported social sites.
 - **Grabber** saves same-origin resources and can render pages through an
   installed Chrome/Chromium browser before link discovery.
@@ -193,6 +198,131 @@ Common entry points:
 For a system installation, use `sudo cmake --install build` after configuring
 the desired native-messaging options.
 
+## Queues and Scheduler
+
+qtIDM separates **scheduling and queue management** (`DownloadScheduler`) from
+**active transfer execution** (`CurlEpollDownloader`).
+
+### How It Works
+
+1. **Submission**: Confirming a standard HTTP, HTTPS, or FTP download in
+   **Download Options** (`Add URL`), **Batch Download** (`Links` import or
+   browser batch capture), **Site Grabber**, or a non-adaptive **Social**
+   extract submits a request to `DownloadScheduler`.
+   - Each entry gets a stable `scheduleId`, defaults to queue `Main` if left
+     blank, and defaults `Start at` to the current time (`Start now`).
+   - Resuming a paused, failed, or canceled standard download from the main
+     list also routes back through `DownloadScheduler` so queue limits and
+     metered-network rules still apply.
+2. **Dispatch loop**: `DownloadScheduler` checks pending entries every second
+   and immediately whenever items are scheduled or edited, queue settings
+   change, metered-network state changes, or an active transfer completes,
+   pauses, fails, or cancels.
+3. **Eligibility checks**: An entry starts only when:
+   - the network is unmetered (or **Options** → **Metered networks** is set to
+     **Allow downloads**),
+   - `scheduledAt` is at or before the current time,
+   - if **Restrict execution time** is enabled, the current weekday (`Mo`–`Su`)
+     and local time fall inside `[Allowed from, Allowed until)` (overnight
+     windows such as `22:00:00` to `06:00:00` are supported),
+   - **Dispatch downloads from this queue** is enabled for its queue,
+   - active transfers in that queue are below **Concurrent downloads** (or the
+     limit is `Unlimited` / `0`), and
+   - any Secret Service credential (`secret-tool`) lookup succeeds.
+4. **Ordering**: Eligible items sort by **priority** descending (`-100` to
+   `100`), then **scheduled time** ascending, and finally by their position in
+   the pending queue table (**Move Up** / **Move Down**).
+5. **Handoff and repeat**: Once dispatched, an entry moves out of the
+   scheduler into `CurlEpollDownloader` and the main download list. If **Repeat
+   every** is greater than `0`, the next occurrence is scheduled forward past
+   the current time and appended back to the queue.
+6. **Slot backfill and completion automation**: When a scheduled download ends
+   or pauses, its queue slot is released and the next eligible entry dispatches
+   automatically. On completion, `DownloadScheduler` runs configured
+   post-download actions in order: move to **Move after completion** (applying
+   file-conflict policy), launch **After completion** without a shell
+   (substituting `{file}`, `{dir}`, and `{url}`), extract supported archives
+   via 7-Zip (with optional archive deletion), and optionally remove the
+   completed list entry.
+
+### Why the Scheduler Table May Be Empty
+
+Clicking the **Queue** toolbar icon opens the **Scheduler** dialog, which only
+lists downloads **currently waiting to start**. With default settings (`Main`
+queue, **Dispatch downloads from this queue** checked, and **Concurrent
+downloads** set to `Unlimited` or a high cap such as `64`), downloads added
+with **Start now** dispatch immediately to the main window list and do not
+remain in the **Scheduler** table.
+
+Downloads stay in the **Scheduler** table while any of these apply:
+
+- **Dispatch downloads from this queue** is unchecked for that queue.
+- All **Concurrent downloads** slots for that queue are occupied.
+- **Start at** is in the future, or **Schedule window** is currently closed.
+- **Options** → **Metered networks** is holding new work on a metered
+  connection.
+
+### Using the Scheduler Dialog
+
+- **Queue controls (top)**:
+  - **Queue**: Choose `Main` or a custom queue name (matched
+    case-insensitively).
+  - **Concurrent downloads**: Set `0` (`Unlimited`) or `1`–`64`.
+  - **State (`Dispatch downloads from this queue`)**: Uncheck to pause starting
+    new work from this queue without interrupting active transfers.
+  - **Save** *(bottom-right)*: Saves **Concurrent downloads** and **State** for
+    the queue selected at the top and keeps the dialog open. (**Save** does not
+    apply the **Selected ...** row fields below.)
+- **Pending entries & editor (middle and bottom)**: Select a row in the
+  `Queue | Priority | Scheduled | URL` table to populate the editor:
+  - **Selected queue** (editable; type a new name to move/create a queue),
+    **Selected priority** (`-100` to `100`), and **Selected start**
+    (`yyyy-MM-dd HH:mm:ss`).
+  - **Move Up** / **Move Down**: Reorders pending rows for priority/time tie
+    breaking.
+  - **Apply Entry Changes**: Applies **Selected queue**, **Selected priority**,
+    and **Selected start** to the selected row.
+  - **Remove**: Removes the waiting entry before dispatch.
+  - **Close**: Closes the dialog (saved queue settings and applied row edits
+    are preserved).
+
+### Common Workflows
+
+- **Download sequentially (or N at a time)**: Open **Queue**, set **Concurrent
+  downloads** to `1` (or `2`, etc.), click **Save**, then **Close**. Add
+  multiple URLs (`Add`, `Links` import, or browser batch): the first starts
+  immediately while the rest wait in **Scheduler** and start automatically as
+  slots free up.
+- **Build a queue now, start later**: Open **Queue**, uncheck **Dispatch
+  downloads from this queue**, click **Save**, then **Close**. Add downloads
+  (they accumulate in **Scheduler** where you can reorder, prioritize, or remove
+  them), then re-check **Dispatch downloads from this queue** and click **Save**
+  when ready.
+- **Create a separate named queue (e.g., `Night`)**: Enter the custom queue
+  name in **Download Options** or **Batch Download** (`Queue:`), or move a
+  waiting entry via **Selected queue** + **Apply Entry Changes** in
+  **Scheduler**. Reopening **Scheduler** lists the new queue in the top
+  **Queue** dropdown with its own independent concurrency limit and dispatch
+  toggle.
+- **Metered-network behavior**: Configure **Options** → **Metered networks**
+  (`Allow downloads`, `Hold new downloads`, or `Pause active and hold new
+  downloads`). **Options** → **Concurrent downloads** also acts as a shortcut
+  for the `Main` queue's concurrency limit.
+
+### Persistence & Limitations
+
+- Queue settings and pending scheduled requests persist in
+  `scheduled-downloads.json` inside qtIDM's Qt application-data directory
+  (vault-backed passwords are never written to JSON); dispatched transfers are
+  stored in `downloads.sqlite3`.
+- **Download Options** exposes `Queue`, `Priority`, `Repeat every`, `Start at`,
+  and `Schedule window`; **Batch Download** exposes shared `Queue` and
+  `Schedule window` settings (waiting batch entries can be reprioritized or
+  rescheduled individually in **Scheduler**).
+- Adaptive HLS/DASH and combined audio+video streams routed to `MediaDownloader`
+  bypass `DownloadScheduler`, so scheduled start times, time windows, and
+  post-download scheduler automation are not available for adaptive media jobs.
+
 ## Test
 
 ```bash
@@ -203,8 +333,8 @@ The automated suite covers persistence, scheduling, queue controls, segmented
 and resumed transfers, retries, checksums, conflict policies, per-host limits,
 metered-network dispatch, archive safety and extraction, credential-vault
 transport, social metadata and DRM filtering, adaptive-media handling,
-ZIP/ZIP64 parsing, packaging metadata, JavaScript-rendered site grabbing, and
-performance smoke tests. The downloader and browser-extension integration
+ZIP/ZIP64 parsing, main window UI behavior, packaging metadata,
+JavaScript-rendered site grabbing, and performance smoke tests. The downloader and browser-extension integration
 suites start localhost HTTP fixture servers, so restricted sandboxes must
 permit localhost port binding.
 
@@ -245,7 +375,7 @@ Build and test the Debian package:
 
 ```bash
 sh packaging/build-deb.sh
-sudo apt-get install -y ./dist/qtidm_0.2.8-1_amd64.deb
+sudo apt-get install -y ./dist/qtidm_0.3.0-1_amd64.deb
 qtIDM --version
 ```
 
@@ -267,7 +397,7 @@ chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
 sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
 sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
 APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.2.8-x86_64.AppImage --version
+APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.3.0-x86_64.AppImage --version
 ```
 
 The script writes exactly one versioned AppImage to `dist/`. The checksums pin
@@ -280,7 +410,7 @@ Build and test the Flatpak bundle:
 ```bash
 sh packaging/release/version-info.sh
 sh packaging/release/build-flatpak-bundle.sh
-flatpak install --user -y dist/qtIDM-0.2.8.flatpak
+flatpak install --user -y dist/qtIDM-0.3.0.flatpak
 flatpak run io.qtidm.Qtidm --version
 ```
 
@@ -334,7 +464,7 @@ The application and browser integrations have independent version tracks:
 
 | Component | Current version | Authoritative files |
 | --- | --- | --- |
-| qtIDM application and release tag | `0.2.8` / `v0.2.8` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
+| qtIDM application and release tag | `0.3.0` / `v0.3.0` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
 | Chrome and Firefox extensions | `0.4.0` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
 
 The two checked-in browser manifest versions must always match each other, but
