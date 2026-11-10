@@ -241,6 +241,13 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/slow.bin"):
             self.send_range(SLOW_SIZE, head_only, accept_range=True, slow=True)
             return
+        if self.path.startswith("/stall-headers.bin"):
+            range_header = self.headers.get("Range")
+            if not head_only and range_header != "bytes=0-0":
+                time.sleep(2.5)
+                return
+            self.send_range(SIZE, head_only, accept_range=True)
+            return
         if self.path.startswith("/crash-test.bin"):
             self.send_range(CRASH_TEST_SIZE, head_only, accept_range=True, slow=True)
             return

@@ -8,12 +8,15 @@
 #include <QMutex>
 #include <QQueue>
 #include <QSet>
+#include <QStringList>
+#include <QWaitCondition>
 #include <atomic>
 #include <curl/curl.h>
 #include <functional>
 #include <memory>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 namespace qtidm {
 
@@ -72,19 +75,32 @@ private:
     static size_t writeCallback(char* ptr, size_t size, size_t nmemb, void* userdata);
     static int progressCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t, curl_off_t);
 
+    struct ProbedRequest {
+        QueuedRequest queued;
+        qint64 total = -1;
+        bool rangeSupported = false;
+        QString probedEntityTag;
+        QString probedLastModified;
+        QString error;
+    };
+
     void run();
+    void runProbeWorker();
     void wake();
-    void addPendingTransfers();
+    void addProbedTransfers();
     void addDueRetries();
     void applyRateLimits();
-    void addTransfer(QueuedRequest queued);
+    void addProbedTransfer(ProbedRequest probed);
     void addSegmentTransfer(const std::shared_ptr<DownloadBatch>& batch, int segmentIndex, int attempt = 0, bool forceHttp1 = false);
-    void startQueuedSegments(const std::shared_ptr<DownloadBatch>& batch);
     bool splitActiveSegment(const std::shared_ptr<DownloadBatch>& batch);
     void refillQueuedSegments();
+    void emitBatchProgress();
+    void failBatch(const std::shared_ptr<DownloadBatch>& batch, const QString& message);
+    bool isPendingOrProbing(const QString& id) const;
     int activeConnectionsForHost(const QString& host) const;
     qint64 probeSize(DownloadRequest& request, bool* rangeSupported,
-                     QString* entityTag, QString* lastModified, QString* error = nullptr);
+                     QString* entityTag, QString* lastModified, QString* error = nullptr,
+                     const QString& downloadId = {});
     void applyControlRequests();
     void applyAcknowledgedCheckpoints();
     void checkCompleted();
@@ -100,18 +116,27 @@ private:
     std::atomic<qint64> sessionBytesReceived_ = 0;
     std::atomic<qint64> alternateSpeedLimit_ = 0;
     std::jthread thread_;
-    QMutex pendingMutex_;
+    std::vector<std::jthread> probeThreads_;
+    mutable QMutex pendingMutex_;
+    QWaitCondition pendingCv_;
     QQueue<QueuedRequest> pending_;
+    QSet<QString> probingIds_;
+    mutable QMutex probedMutex_;
+    QQueue<ProbedRequest> probed_;
     QMutex controlMutex_;
     QHash<QString, DownloadStatus> controls_;
+    QSet<QString> canceledIds_;
+    QHash<QString, DownloadStatus> deferredControls_;
     CURLM* multi_ = nullptr;
     int epollFd_ = -1;
     int wakeFd_ = -1;
+    qint64 curlTimeoutDeadlineMs_ = -1;
     std::unordered_map<CURL*, std::unique_ptr<SegmentTransfer>> transfers_;
     std::unordered_map<curl_socket_t, int> sockets_;
     std::unordered_map<curl_socket_t, uint32_t> socketGenerations_;
     uint32_t currentGeneration_ = 0;
     QHash<QString, std::shared_ptr<DownloadBatch>> batches_;
+    QStringList batchOrder_;
     struct DelayedRetry {
         qint64 dueAtMs = 0;
         std::shared_ptr<DownloadBatch> batch;

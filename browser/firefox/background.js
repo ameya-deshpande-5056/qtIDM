@@ -719,8 +719,12 @@ async function prepareBrowserDownload(url) {
   return response.prepared === true;
 }
 
-async function sendBatchToHost(urls, tab) {
-  const response = await nativeRequest({ downloads: await Promise.all(urls.map((url) => makeDownloadEntry(url, tab, tab?.url || ""))) });
+async function sendBatchToHost(urls, tab, referrer = "") {
+  const uniqueUrls = [...new Set((urls || []).filter((url) => /^(?:https?|ftp):/i.test(url)))].slice(0, 100);
+  if (!uniqueUrls.length) {
+    throw new Error("No downloadable HTTP, HTTPS, or FTP links were found in the selection.");
+  }
+  const response = await nativeRequest({ downloads: await Promise.all(uniqueUrls.map((url) => makeDownloadEntry(url, tab, referrer || tab?.url || ""))) });
   if (!response || !response.ok || response.accepted !== true) {
     throw new Error(response?.message || "The qtIDM native host did not acknowledge the batch.");
   }
@@ -730,15 +734,16 @@ browser.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "qtidm-all-links" || info.menuItemId === "qtidm-selected-links") {
     const selected = info.menuItemId === "qtidm-selected-links";
     const code = selected
-      ? `(() => { const wrapper=document.createElement('div'); const selection=window.getSelection(); for(let i=0;selection&&i<selection.rangeCount;++i) wrapper.append(selection.getRangeAt(i).cloneContents()); return [...new Set([...wrapper.querySelectorAll('a[href]')].map(e=>e.href).filter(url=>/^(?:https?|ftp):/i.test(url)))].slice(0,100); })()`
-      : `(() => [...new Set([...document.querySelectorAll('a[href],img[src]')].map(e=>e.href||e.src).filter(url=>/^(?:https?|ftp):/i.test(url)))].slice(0,100))()`;
-    browser.tabs.executeScript(tab.id, { frameId: info.frameId, code })
-      .then((results) => sendBatchToHost(results.flat(), tab)).catch((error) => showError(error.message));
+      ? `(() => { const readHref = (e) => (typeof e?.href === 'string' ? e.href : e?.href?.baseVal) || ''; const links = []; const selection = window.getSelection(); for (let i = 0; selection && i < selection.rangeCount; ++i) { const range = selection.getRangeAt(i); if (range.collapsed) continue; const wrapper = document.createElement('div'); wrapper.append(range.cloneContents()); for (const e of wrapper.querySelectorAll('a[href]')) links.push(readHref(e)); const anc = range.commonAncestorContainer?.nodeType === 1 ? range.commonAncestorContainer : range.commonAncestorContainer?.parentElement; const enc = anc?.closest?.('a[href]'); if (enc) links.push(readHref(enc)); } return [...new Set(links.filter((url) => /^(?:https?|ftp):/i.test(url)))].slice(0, 100); })()`
+      : `(() => [...new Set([...document.querySelectorAll('a[href],img[src]')].map((e) => (typeof e.href === 'string' ? e.href : e.href?.baseVal) || e.src || '').filter((url) => /^(?:https?|ftp):/i.test(url)))].slice(0, 100))()`;
+    const options = typeof info.frameId === "number" && info.frameId >= 0 ? { frameId: info.frameId, code } : { code };
+    browser.tabs.executeScript(tab.id, options)
+      .then((results) => sendBatchToHost(results.flat(), tab, info.frameUrl || tab?.url || "")).catch((error) => showError(error.message));
     return;
   }
   const url = info.linkUrl || info.srcUrl || info.pageUrl;
   if (url) {
-    sendToHost(url, tab).catch((error) => showError(error.message));
+    sendToHost(url, tab, info.frameUrl || tab?.url || "").catch((error) => showError(error.message));
   }
 });
 

@@ -87,7 +87,8 @@ QString ThemeManager::styleSheet() const
             "QHeaderView::section{background:#2b2d31;color:#f1f3f4;border:0;border-right:1px solid #3c4043;padding:4px;}"
             "QStatusBar{background:#2b2d31;color:#f1f3f4;border-top:1px solid #3c4043;}"
             "QMenu{background:#2b2d31;color:#f1f3f4;border:1px solid #5f6368;}"
-            "QMenu::item:selected{background:#3c4043;}");
+            "QMenu::item:selected{background:#3c4043;}"
+            "QToolTip{background:#2b2d31;color:#f1f3f4;border:1px solid #5f6368;padding:3px 5px;}");
     }
     return QStringLiteral(
         "QMainWindow,QDialog{background:#f0f0f0;color:#111;}"
@@ -96,7 +97,8 @@ QString ThemeManager::styleSheet() const
         "QToolButton:hover{background:#e6f0ff;border-color:#7da2ce;}"
         "QTreeWidget,QTableWidget{background:#fff;color:#111;gridline-color:#d7d7d7;border:1px solid #c8c8c8;}"
         "QHeaderView::section{background:#f3f3f3;color:#111;border:0;border-right:1px solid #c8c8c8;padding:4px;}"
-        "QStatusBar{background:#f6f6f6;color:#111;border-top:1px solid #c8c8c8;}");
+        "QStatusBar{background:#f6f6f6;color:#111;border-top:1px solid #c8c8c8;}"
+        "QToolTip{background:#fffef5;color:#111;border:1px solid #999;padding:3px 5px;}");
 }
 
 ThemeMode ThemeManager::detectSystemTheme()

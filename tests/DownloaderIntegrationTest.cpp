@@ -413,12 +413,35 @@ private slots:
         request.url = QUrl(QStringLiteral("http://127.0.0.1:%1/flaky.bin").arg(port_));
         request.targetPath = dir.path() + QStringLiteral("/flaky.bin");
         request.segments = 1;
+        request.dynamicSegmentation = false;
         request.maxRetries = 3;
         request.retryBaseDelayMs = 10;
         const auto id = downloader.enqueue(request);
 
         QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 15000));
         downloader.stop();
+
+        int connectingIdx = -1;
+        int downloadingAfterConnectingIdx = -1;
+        int completedIdx = -1;
+        for (int i = 0; i < statusSpy.size(); ++i) {
+            const auto& args = statusSpy.at(i);
+            if (args.first().toString() != id) {
+                continue;
+            }
+            const auto status = args.at(1).value<qtidm::DownloadStatus>();
+            if (status == qtidm::DownloadStatus::Connecting && connectingIdx < 0) {
+                connectingIdx = i;
+            } else if (status == qtidm::DownloadStatus::Downloading && connectingIdx >= 0
+                       && downloadingAfterConnectingIdx < 0) {
+                downloadingAfterConnectingIdx = i;
+            } else if (status == qtidm::DownloadStatus::Completed) {
+                completedIdx = i;
+            }
+        }
+        QVERIFY(connectingIdx >= 0);
+        QVERIFY(downloadingAfterConnectingIdx > connectingIdx);
+        QVERIFY(completedIdx > downloadingAfterConnectingIdx);
 
         QFile file(request.targetPath);
         QVERIFY(file.open(QIODevice::ReadOnly));
@@ -1791,6 +1814,71 @@ void persistsDurableCheckpointsWithAcknowledgement()
         QCOMPARE(file.size(), fixtureSize);
         QCOMPARE(file.readAll(), expectedPayload(fixtureSize));
         QVERIFY(!QFileInfo::exists(request.targetPath + QStringLiteral(".part")));
+    }
+
+    void concurrentBatchSharesHostLimitAndReportsHeaderTimeoutAccurately()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::CurlEpollDownloader downloader;
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+        QSignalSpy connSpy(&downloader, &qtidm::CurlEpollDownloader::hostConnectionCountChanged);
+        downloader.start();
+
+        qtidm::DownloadRequest r1;
+        r1.url = QUrl(QStringLiteral("http://127.0.0.1:%1/slow.bin").arg(port_));
+        r1.targetPath = dir.path() + QStringLiteral("/batch1.bin");
+        r1.segments = 4;
+        r1.perHostConnectionLimit = 4;
+
+        qtidm::DownloadRequest r2;
+        r2.url = QUrl(QStringLiteral("http://127.0.0.1:%1/slow.bin").arg(port_));
+        r2.targetPath = dir.path() + QStringLiteral("/batch2.bin");
+        r2.segments = 4;
+        r2.perHostConnectionLimit = 4;
+
+        const auto id1 = downloader.enqueue(r1);
+        const auto id2 = downloader.enqueue(r2);
+        QVERIFY(waitForStatus(statusSpy, id1, qtidm::DownloadStatus::Completed, 20000));
+        QVERIFY(waitForStatus(statusSpy, id2, qtidm::DownloadStatus::Completed, 20000));
+
+        for (const auto& event : connSpy) {
+            QVERIFY2(event.at(1).toInt() <= 4,
+                     qPrintable(QStringLiteral("per-host connection count exceeded 4: %1").arg(event.at(1).toInt())));
+        }
+
+        statusSpy.clear();
+        qtidm::DownloadRequest stalled;
+        stalled.url = QUrl(QStringLiteral("http://127.0.0.1:%1/stall-headers.bin").arg(port_));
+        stalled.targetPath = dir.path() + QStringLiteral("/stalled.bin");
+        stalled.segments = 4;
+        stalled.lowSpeedTimeoutSeconds = 1;
+        stalled.maxRetries = 1;
+        stalled.retryBaseDelayMs = 10;
+
+        const auto stalledId = downloader.enqueue(stalled);
+        QString errorMsg;
+        QVERIFY(waitForStatus(statusSpy, stalledId, qtidm::DownloadStatus::Failed, 15000, &errorMsg));
+        QVERIFY2(errorMsg.contains(QStringLiteral("Timeout")),
+                 qPrintable(QStringLiteral("Expected timeout error, got: %1").arg(errorMsg)));
+        QTest::qWait(200);
+
+        int failedIndex = -1;
+        int failedCount = 0;
+        for (int i = 0; i < statusSpy.size(); ++i) {
+            if (statusSpy.at(i).at(0).toString() == stalledId) {
+                const auto st = statusSpy.at(i).at(1).value<qtidm::DownloadStatus>();
+                if (st == qtidm::DownloadStatus::Failed) {
+                    failedIndex = i;
+                    failedCount++;
+                } else if (failedIndex >= 0) {
+                    QFAIL("Received non-Failed status update after batch failure");
+                }
+            }
+        }
+        QCOMPARE(failedCount, 1);
+        downloader.stop();
     }
 
 

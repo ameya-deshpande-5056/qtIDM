@@ -341,6 +341,32 @@ add_test(NAME qtIDM_crash_injection_tests
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/crash_injection_test.py
 )
 set_tests_properties(qtIDM_crash_injection_tests PROPERTIES TIMEOUT 60)
+
+add_executable(qtIDM_main_window_tests
+    tests/MainWindowTest.cpp
+    resources.qrc
+    ${QTIDM_SOURCES}
+)
+target_include_directories(qtIDM_main_window_tests PRIVATE src)
+target_compile_definitions(qtIDM_main_window_tests PRIVATE
+    QTIDM_VERSION="${PROJECT_VERSION}"
+    QTIDM_BUILD_TIMESTAMP="${QTIDM_BUILD_TIMESTAMP}"
+    QTIDM_PROJECT_URL="${QTIDM_PROJECT_URL}"
+)
+target_link_libraries(qtIDM_main_window_tests PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::DBus
+    Qt6::Test
+    CURL::libcurl
+    SQLite::SQLite3
+    Threads::Threads
+)
+add_test(NAME qtIDM_main_window_tests COMMAND qtIDM_main_window_tests)
+set_tests_properties(qtIDM_main_window_tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
 endif()
 
 install(TARGETS qtIDM qtIDM-native-host RUNTIME DESTINATION bin)

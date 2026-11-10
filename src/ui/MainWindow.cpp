@@ -7,6 +7,7 @@
 #include "integration/ImportExportService.h"
 #include "ui/SegmentGrid.h"
 
+#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
@@ -18,11 +19,13 @@
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QEvent>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHeaderView>
+#include <QHelpEvent>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
@@ -30,6 +33,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMimeDatabase>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -42,7 +46,11 @@
 #include <QStatusBar>
 #include <QSet>
 #include <QSettings>
+#include <QStyle>
+#include <QStyledItemDelegate>
 #include <QTextStream>
+#include <QToolTip>
+#include <limits>
 #include <QToolBar>
 #include <QToolButton>
 #include <QTimeEdit>
@@ -221,6 +229,77 @@ QIcon staticActionIcon(const QString& name)
 {
     return QIcon(QStringLiteral(":/qtidm/icons/actions/%1.png").arg(name));
 }
+
+enum DownloadColumn {
+    IdColumn = 0,
+    FileNameColumn = 1,
+    SizeColumn = 2,
+    StatusColumn = 3,
+    ProgressColumn = 4,
+    SpeedColumn = 5,
+    DateAddedColumn = 6,
+    EtaColumn = 7,
+    SaveToColumn = 8,
+    DownloadColumnCount = 9
+};
+
+class SortableTableItem final : public QTableWidgetItem {
+public:
+    using QTableWidgetItem::QTableWidgetItem;
+
+    bool operator<(const QTableWidgetItem& other) const override
+    {
+        const auto left = data(Qt::UserRole);
+        const auto right = other.data(Qt::UserRole);
+        if (left.isValid() && right.isValid()) {
+            return left.toLongLong() < right.toLongLong();
+        }
+        return QTableWidgetItem::operator<(other);
+    }
+};
+
+class ElidedTooltipDelegate final : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    bool helpEvent(QHelpEvent* event, QAbstractItemView* view,
+                   const QStyleOptionViewItem& option, const QModelIndex& index) override
+    {
+        if (!event || !view || event->type() != QEvent::ToolTip || !index.isValid()) {
+            return QStyledItemDelegate::helpEvent(event, view, option, index);
+        }
+        const QString explicitTip = index.data(Qt::ToolTipRole).toString();
+        if (!explicitTip.isEmpty()) {
+            QToolTip::showText(event->globalPos(), explicitTip, view->viewport(), option.rect);
+            return true;
+        }
+        const QString text = index.data(Qt::DisplayRole).toString();
+        if (text.isEmpty()) {
+            QToolTip::hideText();
+            event->ignore();
+            return true;
+        }
+        QStyleOptionViewItem opt = option;
+        initStyleOption(&opt, index);
+        const QWidget* widget = opt.widget;
+        const QStyle* style = widget ? widget->style() : QApplication::style();
+        const QRect textRect = style->subElementRect(QStyle::SE_ItemViewItemText, &opt, widget);
+        const int margin = style->pixelMetric(QStyle::PM_FocusFrameHMargin, &opt, widget) + 1;
+        const int availableWidth = qMax(0, textRect.width() - 2 * margin);
+        const auto elideMode = opt.textElideMode != Qt::ElideNone
+            ? opt.textElideMode
+            : view->textElideMode();
+        const bool isElided = elideMode != Qt::ElideNone
+            && opt.fontMetrics.elidedText(text, elideMode, availableWidth) != text;
+        if (isElided) {
+            QToolTip::showText(event->globalPos(), text, view->viewport(), opt.rect);
+        } else {
+            QToolTip::hideText();
+            event->ignore();
+        }
+        return true;
+    }
+};
 }
 
 MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& scheduler, DownloadRepository& repository, ThemeManager& themeManager, QWidget* parent)
@@ -295,6 +374,7 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
                 const auto it = std::find_if(records.cbegin(), records.cend(), [&id](const DownloadRecord& record) {
                     return record.id == id;
                 });
+                const QUrl recordUrl = it != records.cend() ? it->url : QUrl {};
                 if (it != records.cend()) {
                     auto updated = *it;
                     updated.targetPath = targetPath;
@@ -304,7 +384,17 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
                 }
                 const int row = rowForId(id);
                 if (row >= 0) {
-                    downloads_->item(row, 2)->setText(targetPath);
+                    const bool sortingEnabled = downloads_->isSortingEnabled();
+                    downloads_->setSortingEnabled(false);
+                    const auto fileName = displayFileName(targetPath, recordUrl);
+                    if (auto* fileItem = downloads_->item(row, FileNameColumn)) {
+                        fileItem->setText(fileName);
+                        fileItem->setIcon(fileIconForPath(targetPath));
+                    }
+                    if (auto* saveItem = downloads_->item(row, SaveToColumn)) {
+                        saveItem->setText(targetPath);
+                    }
+                    downloads_->setSortingEnabled(sortingEnabled);
                     refreshDownloadDetailsFor(id);
                 }
             });
@@ -325,6 +415,7 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
         repository_.removeDownload(id);
         uncommittedSegmentErrors_.remove(id);
         latestSegments_.remove(id);
+        lastStatuses_.remove(id);
         const int row = rowForId(id);
         if (row >= 0) {
             downloads_->removeRow(row);
@@ -929,13 +1020,15 @@ bool MainWindow::addUrls(QStringList urls, QVariantMap headers)
 
 void MainWindow::raiseAndActivate()
 {
-    showNormal();
+    setWindowState((windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
+    show();
     raise();
     activateWindow();
 }
 
 void MainWindow::onDownloadAdded(const DownloadRecord& record)
 {
+    lastStatuses_.insert(record.id, record.status);
     transferMetrics_.insert(record.id, TransferMetric {
         .lastReceived = record.completedBytes,
         .lastSampleMs = qMax<qint64>(1, transferClock_.elapsed()),
@@ -948,6 +1041,9 @@ void MainWindow::onDownloadAdded(const DownloadRecord& record)
     downloads_->setSortingEnabled(false);
     repository_.upsertDownload(record);
     int row = rowForId(record.id);
+    const bool wasSelected = row >= 0
+        && downloads_->selectionModel()
+        && downloads_->selectionModel()->isRowSelected(row, downloads_->rootIndex());
     if (row < 0) {
         row = downloads_->rowCount();
         downloads_->insertRow(row);
@@ -955,35 +1051,72 @@ void MainWindow::onDownloadAdded(const DownloadRecord& record)
     auto* idItem = new QTableWidgetItem(record.id);
     idItem->setData(Qt::UserRole, record.category);
     idItem->setData(Qt::UserRole + 1, statusText(record.status));
-    downloads_->setItem(row, 0, idItem);
-    downloads_->setItem(row, 1, new QTableWidgetItem(record.url.toString()));
-    downloads_->setItem(row, 2, new QTableWidgetItem(record.targetPath));
-    downloads_->setItem(row, 3, new QTableWidgetItem(statusText(record.status)));
+    idItem->setData(Qt::UserRole + 2, record.url.toString());
+    downloads_->setItem(row, IdColumn, idItem);
+
+    const auto fileName = displayFileName(record.targetPath, record.url);
+    auto* fileItem = new QTableWidgetItem(fileIconForPath(record.targetPath), fileName);
+    downloads_->setItem(row, FileNameColumn, fileItem);
+
+    auto* sizeItem = new SortableTableItem(formatBytes(record.totalBytes));
+    sizeItem->setData(Qt::UserRole, static_cast<qint64>(record.totalBytes));
+    downloads_->setItem(row, SizeColumn, sizeItem);
+
+    downloads_->setItem(row, StatusColumn, new QTableWidgetItem(statusText(record.status)));
+
     const int percent = record.totalBytes > 0 ? static_cast<int>((record.completedBytes * 100) / record.totalBytes) : 0;
-    downloads_->setItem(row, 4, new QTableWidgetItem(QString::number(percent) + QLatin1Char('%')));
-    downloads_->setItem(row, 5, new QTableWidgetItem(formatBytes(record.totalBytes)));
-    downloads_->setItem(row, 6, new QTableWidgetItem(QStringLiteral("0 B/s")));
-    downloads_->setItem(row, 7, new QTableWidgetItem(QStringLiteral("—")));
-    auto* grid = new SegmentGrid(downloads_);
-    grid->setSegments(record.segments);
-    downloads_->setCellWidget(row, 8, grid);
+    auto* progressItem = new SortableTableItem(QString::number(percent) + QLatin1Char('%'));
+    progressItem->setData(Qt::UserRole, percent);
+    downloads_->setItem(row, ProgressColumn, progressItem);
+
+    auto* speedItem = new SortableTableItem(QStringLiteral("0 B/s"));
+    speedItem->setData(Qt::UserRole, qint64(0));
+    downloads_->setItem(row, SpeedColumn, speedItem);
+
+    const auto createdLocal = record.createdAt.isValid()
+        ? record.createdAt.toLocalTime()
+        : QDateTime::currentDateTime();
+    auto* dateAddedItem = new SortableTableItem(
+        createdLocal.toString(QStringLiteral("MMM dd HH:mm:ss yyyy")));
+    dateAddedItem->setData(Qt::UserRole, createdLocal.toMSecsSinceEpoch());
+    downloads_->setItem(row, DateAddedColumn, dateAddedItem);
+
+    auto* etaItem = new SortableTableItem(QStringLiteral("—"));
+    etaItem->setData(Qt::UserRole, std::numeric_limits<qint64>::max());
+    downloads_->setItem(row, EtaColumn, etaItem);
+
+    auto* saveToItem = new QTableWidgetItem(record.targetPath);
+    downloads_->setItem(row, SaveToColumn, saveToItem);
+
     downloads_->setSortingEnabled(sortingEnabled);
+    if (wasSelected) {
+        const int updatedRow = rowForId(record.id);
+        if (updatedRow >= 0) {
+            downloads_->selectRow(updatedRow);
+        }
+    }
     applyCategoryFilter();
     updateDownloadActionStates();
+    refreshDownloadDetailsFor(record.id);
     statusBar()->showMessage(QStringLiteral("Download started"), 2000);
 }
 
 void MainWindow::onProgressChanged(const QString& id, qint64 received, qint64 total, double bytesPerSecond)
 {
     Q_UNUSED(bytesPerSecond);
+    if (lastStatuses_.contains(id) && !isActiveStatus(lastStatuses_.value(id))) {
+        return;
+    }
     const qint64 now = transferClock_.elapsed();
     auto& metric = transferMetrics_[id];
+    qint64 receivedDelta = 0;
     if (metric.lastSampleMs <= 0) {
         metric.lastReceived = received;
         metric.lastSampleMs = now;
+        receivedDelta = qMax<qint64>(0, received);
     } else {
         const qint64 elapsedMs = now - metric.lastSampleMs;
-        const qint64 receivedDelta = qMax<qint64>(0, received - metric.lastReceived);
+        receivedDelta = qMax<qint64>(0, received - metric.lastReceived);
         if (elapsedMs > 0) {
             const double sample = receivedDelta * 1000.0 / elapsedMs;
             constexpr double smoothingWindowMs = 5000.0;
@@ -1007,30 +1140,71 @@ void MainWindow::onProgressChanged(const QString& id, qint64 received, qint64 to
     }
     activeTransfers_.insert(id);
 
-    repository_.updateProgress(id, received, total, total > 0 && received >= total ? DownloadStatus::Completed : DownloadStatus::Downloading);
+    const bool hadTrackedStatus = lastStatuses_.contains(id);
+    const auto previousStatus = lastStatuses_.value(id, DownloadStatus::Downloading);
+    const auto effectiveStatus = (receivedDelta > 0 || previousStatus == DownloadStatus::Queued)
+        ? DownloadStatus::Downloading
+        : previousStatus;
+    const bool statusChanged = !hadTrackedStatus || effectiveStatus != previousStatus;
+
+    repository_.updateProgress(id, received, total, effectiveStatus);
+    if (statusChanged) {
+        lastStatuses_.insert(id, effectiveStatus);
+        if (effectiveStatus == DownloadStatus::Downloading) {
+            statusMessages_.remove(id);
+        }
+    }
+
     const int row = rowForId(id);
     if (row < 0) {
         updateSessionStatus();
         return;
     }
+    if (statusChanged) {
+        applyRowStatusUi(row, effectiveStatus);
+    }
     const bool refreshVisibleMetrics = now - metric.lastUiUpdateMs >= 750
         || (total > 0 && received >= total);
     if (!refreshVisibleMetrics) {
+        if (statusChanged) {
+            refreshDownloadDetailsFor(id);
+            updateSessionStatus();
+        }
         return;
     }
     metric.lastUiUpdateMs = now;
     const double displaySpeed = metric.hasSpeed ? metric.smoothedBytesPerSecond : 0.0;
     const bool sortingEnabled = downloads_->isSortingEnabled();
     downloads_->setSortingEnabled(false);
-    const int percent = total > 0 ? static_cast<int>((received * 100) / total) : 0;
-    downloads_->item(row, 4)->setText(QString::number(percent) + QLatin1Char('%'));
-    downloads_->item(row, 5)->setText(formatBytes(total));
-    downloads_->item(row, 6)->setText(formatBytes(static_cast<qint64>(displaySpeed)) + QStringLiteral("/s"));
-    const auto eta = total > received && displaySpeed > 0
-        ? static_cast<qint64>((total - received) / displaySpeed) : -1;
-    downloads_->item(row, 7)->setText(formatDuration(eta));
+    const int currentRow = statusChanged ? rowForId(id) : row;
+    if (currentRow >= 0) {
+        const int percent = total > 0 ? static_cast<int>((received * 100) / total) : 0;
+        if (auto* progressItem = downloads_->item(currentRow, ProgressColumn)) {
+            progressItem->setText(QString::number(percent) + QLatin1Char('%'));
+            progressItem->setData(Qt::UserRole, percent);
+        }
+        if (auto* sizeItem = downloads_->item(currentRow, SizeColumn)) {
+            sizeItem->setText(formatBytes(total));
+            sizeItem->setData(Qt::UserRole, total);
+        }
+        const auto speedBytes = static_cast<qint64>(displaySpeed);
+        if (auto* speedItem = downloads_->item(currentRow, SpeedColumn)) {
+            speedItem->setText(formatBytes(speedBytes) + QStringLiteral("/s"));
+            speedItem->setData(Qt::UserRole, speedBytes);
+        }
+        const auto eta = total > received && displaySpeed > 0
+            ? static_cast<qint64>((total - received) / displaySpeed) : -1;
+        if (auto* etaItem = downloads_->item(currentRow, EtaColumn)) {
+            etaItem->setText(formatDuration(eta));
+            etaItem->setData(Qt::UserRole, eta >= 0 ? eta : std::numeric_limits<qint64>::max());
+        }
+    }
     downloads_->setSortingEnabled(sortingEnabled);
-    refreshDownloadProgressDetails(id, received, total, displaySpeed);
+    if (statusChanged) {
+        refreshDownloadDetailsFor(id);
+    } else {
+        refreshDownloadProgressDetails(id, effectiveStatus, received, total, displaySpeed);
+    }
     updateSessionStatus();
 }
 
@@ -1038,12 +1212,6 @@ void MainWindow::onSegmentsChanged(const QString& id, QVector<SegmentInfo> segme
 {
     latestSegments_.insert(id, segments);
     const int row = rowForId(id);
-    if (row >= 0) {
-        auto* grid = qobject_cast<SegmentGrid*>(downloads_->cellWidget(row, 8));
-        if (grid) {
-            grid->setSegments(segments);
-        }
-    }
     if (!repository_.checkpoint(id, segments)) {
         uncommittedSegmentErrors_.insert(id);
         qWarning("Failed to persist updated segments for download %s: %s",
@@ -1078,6 +1246,7 @@ void MainWindow::onStatusChanged(const QString& id, DownloadStatus status, const
     }
 
     repository_.updateStatus(id, effectiveStatus);
+    lastStatuses_.insert(id, effectiveStatus);
     if (effectiveMessage.isEmpty()) {
         statusMessages_.remove(id);
     } else {
@@ -1086,19 +1255,8 @@ void MainWindow::onStatusChanged(const QString& id, DownloadStatus status, const
     const int row = rowForId(id);
     QString targetName;
     if (row >= 0) {
-        const bool sortingEnabled = downloads_->isSortingEnabled();
-        downloads_->setSortingEnabled(false);
-        targetName = QFileInfo(downloads_->item(row, 2)->text()).fileName();
-        downloads_->item(row, 3)->setText(statusText(effectiveStatus));
-        downloads_->item(row, 0)->setData(Qt::UserRole + 1, statusText(effectiveStatus));
-        if (!isActiveStatus(effectiveStatus)) {
-            downloads_->item(row, 6)->setText(QStringLiteral("0 B/s"));
-            downloads_->item(row, 7)->setText(QStringLiteral("—"));
-        }
-        downloads_->setSortingEnabled(sortingEnabled);
-        applyCategoryFilter();
+        targetName = applyRowStatusUi(row, effectiveStatus);
         refreshDownloadDetailsFor(id);
-        updateDownloadActionStates();
     }
     if (isActiveStatus(effectiveStatus)) {
         activeTransfers_.insert(id);
@@ -1185,6 +1343,38 @@ void MainWindow::updateDownloadActionStates()
                 : QStringLiteral("Select one download to edit"));
 }
 
+QString MainWindow::applyRowStatusUi(int row, DownloadStatus status)
+{
+    const bool sortingEnabled = downloads_->isSortingEnabled();
+    downloads_->setSortingEnabled(false);
+    const QString targetName = downloads_->item(row, FileNameColumn)
+        ? downloads_->item(row, FileNameColumn)->text()
+        : (downloads_->item(row, SaveToColumn)
+            ? QFileInfo(downloads_->item(row, SaveToColumn)->text()).fileName()
+            : QString {});
+    const QString text = statusText(status);
+    if (auto* statusItem = downloads_->item(row, StatusColumn)) {
+        statusItem->setText(text);
+    }
+    if (auto* idItem = downloads_->item(row, IdColumn)) {
+        idItem->setData(Qt::UserRole + 1, text);
+    }
+    if (!isActiveStatus(status)) {
+        if (auto* speedItem = downloads_->item(row, SpeedColumn)) {
+            speedItem->setText(QStringLiteral("0 B/s"));
+            speedItem->setData(Qt::UserRole, qint64(0));
+        }
+        if (auto* etaItem = downloads_->item(row, EtaColumn)) {
+            etaItem->setText(QStringLiteral("—"));
+            etaItem->setData(Qt::UserRole, std::numeric_limits<qint64>::max());
+        }
+    }
+    downloads_->setSortingEnabled(sortingEnabled);
+    applyCategoryFilter();
+    updateDownloadActionStates();
+    return targetName;
+}
+
 void MainWindow::refreshDownloadDetailsFor(const QString& id)
 {
     const auto rows = selectedRows();
@@ -1193,8 +1383,8 @@ void MainWindow::refreshDownloadDetailsFor(const QString& id)
     }
 }
 
-void MainWindow::refreshDownloadProgressDetails(const QString& id, qint64 received,
-                                                qint64 total, double bytesPerSecond)
+void MainWindow::refreshDownloadProgressDetails(const QString& id, DownloadStatus status,
+                                                qint64 received, qint64 total, double bytesPerSecond)
 {
     const auto rows = selectedRows();
     if (rows.size() != 1 || downloads_->item(rows.first(), 0)->text() != id) {
@@ -1204,6 +1394,7 @@ void MainWindow::refreshDownloadProgressDetails(const QString& id, qint64 receiv
     const auto eta = total > received && bytesPerSecond > 0
         ? static_cast<qint64>((total - received) / bytesPerSecond) : -1;
     const QHash<QString, QString> values {
+        { QStringLiteral("Status"), statusText(status) },
         { QStringLiteral("Progress"),
           QStringLiteral("%1 of %2 (%3%)")
               .arg(formatBytes(received), formatBytes(total)).arg(percent) },
@@ -1264,8 +1455,8 @@ void MainWindow::refreshDownloadDetails()
                 QStringLiteral("%1 of %2 (%3%)")
                     .arg(formatBytes(record.completedBytes), formatBytes(record.totalBytes))
                     .arg(percent));
-    addProperty(generalDetails_, QStringLiteral("Download speed"), downloads_->item(row, 6)->text());
-    addProperty(generalDetails_, QStringLiteral("ETA"), downloads_->item(row, 7)->text());
+    addProperty(generalDetails_, QStringLiteral("Download speed"), downloads_->item(row, SpeedColumn)->text());
+    addProperty(generalDetails_, QStringLiteral("ETA"), downloads_->item(row, EtaColumn)->text());
     addProperty(generalDetails_, QStringLiteral("Source URL"),
                 record.url.toString(QUrl::FullyEncoded));
     addProperty(generalDetails_, QStringLiteral("Destination"), record.targetPath);
@@ -1425,8 +1616,11 @@ void MainWindow::exportLinks()
     }
     QTextStream stream(&file);
     for (const int row : rows) {
-        if (const auto* item = downloads_->item(row, 1)) {
-            stream << item->text() << '\n';
+        if (const auto* item = downloads_->item(row, IdColumn)) {
+            const auto url = item->data(Qt::UserRole + 2).toString();
+            if (!url.isEmpty()) {
+                stream << url << '\n';
+            }
         }
     }
     stream.flush();
@@ -1992,7 +2186,7 @@ void MainWindow::resumeSelected()
         request.category = record.category;
         request.expectedTotalBytes = record.totalBytes;
         request.resumeSegments = record.segments;
-        request.segments = record.segments.isEmpty() ? 8 : record.segments.size();
+        request.segments = record.request.segments > 0 ? record.request.segments : 8;
         applyRequestDefaults(request);
         scheduler_.schedule(std::move(request));
     }
@@ -2048,8 +2242,8 @@ void MainWindow::deleteSelected()
     }
     std::sort(rows.begin(), rows.end(), std::greater<int>());
     for (const int row : rows) {
-        const auto id = downloads_->item(row, 0)->text();
-        const auto path = downloads_->item(row, 2)->text();
+        const auto id = downloads_->item(row, IdColumn)->text();
+        const auto path = downloads_->item(row, SaveToColumn)->text();
         if (mediaDownloader_.contains(id)) {
             mediaDownloader_.cancel(id);
         } else {
@@ -2058,6 +2252,7 @@ void MainWindow::deleteSelected()
         repository_.removeDownload(id);
         uncommittedSegmentErrors_.remove(id);
         latestSegments_.remove(id);
+        lastStatuses_.remove(id);
         if (deleteFiles->isChecked()) {
             QFile::remove(path);
             QFile::remove(path + QStringLiteral(".part"));
@@ -2071,7 +2266,7 @@ void MainWindow::openSelectedFile()
 {
     const auto rows = selectedRows();
     if (!rows.isEmpty()) {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(downloads_->item(rows.first(), 2)->text()));
+        QDesktopServices::openUrl(QUrl::fromLocalFile(downloads_->item(rows.first(), SaveToColumn)->text()));
     }
 }
 
@@ -2079,7 +2274,7 @@ void MainWindow::openSelectedFolder()
 {
     const auto rows = selectedRows();
     if (!rows.isEmpty()) {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(downloads_->item(rows.first(), 2)->text()).absolutePath()));
+        QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(downloads_->item(rows.first(), SaveToColumn)->text()).absolutePath()));
     }
 }
 
@@ -2087,7 +2282,7 @@ void MainWindow::copySelectedUrl()
 {
     const auto rows = selectedRows();
     if (!rows.isEmpty()) {
-        QApplication::clipboard()->setText(downloads_->item(rows.first(), 1)->text());
+        QApplication::clipboard()->setText(downloads_->item(rows.first(), IdColumn)->data(Qt::UserRole + 2).toString());
     }
 }
 
@@ -2095,7 +2290,7 @@ void MainWindow::copySelectedPath()
 {
     const auto rows = selectedRows();
     if (!rows.isEmpty()) {
-        QApplication::clipboard()->setText(downloads_->item(rows.first(), 2)->text());
+        QApplication::clipboard()->setText(downloads_->item(rows.first(), SaveToColumn)->text());
     }
 }
 
@@ -2105,7 +2300,7 @@ void MainWindow::calculateSelectedChecksum()
     if (rows.isEmpty()) {
         return;
     }
-    const auto path = downloads_->item(rows.first(), 2)->text();
+    const auto path = downloads_->item(rows.first(), SaveToColumn)->text();
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
         QMessageBox::warning(this, QStringLiteral("Calculate Checksum"),
@@ -2146,7 +2341,9 @@ void MainWindow::clearFinished()
     }
     std::sort(rows.begin(), rows.end(), std::greater<int>());
     for (const int row : rows) {
-        repository_.removeDownload(downloads_->item(row, 0)->text());
+        const auto id = downloads_->item(row, 0)->text();
+        repository_.removeDownload(id);
+        lastStatuses_.remove(id);
         downloads_->removeRow(row);
     }
     updateDownloadActionStates();
@@ -2322,8 +2519,8 @@ void MainWindow::propertiesSelected()
         QMessageBox::warning(this, QStringLiteral("Edit Download Properties"), repository_.lastError());
         return;
     }
-    downloads_->item(row, 1)->setText(replacement.toString());
-    downloads_->item(row, 0)->setData(Qt::UserRole, updated.category);
+    downloads_->item(row, IdColumn)->setData(Qt::UserRole, updated.category);
+    downloads_->item(row, IdColumn)->setData(Qt::UserRole + 2, replacement.toString());
     applyCategoryFilter();
     refreshDownloadDetails();
     statusBar()->showMessage(QStringLiteral("Download properties updated; use Start to resume"), 5000);
@@ -2425,7 +2622,9 @@ void MainWindow::buildLayout()
     navigationSplitter_ = new QSplitter(Qt::Horizontal, central);
     navigationSplitter_->setHandleWidth(3);
     navigationSplitter_->setOpaqueResize(true);
+    auto* tooltipDelegate = new ElidedTooltipDelegate(this);
     categories_ = new QTreeWidget;
+    categories_->setItemDelegate(tooltipDelegate);
     categories_->setHeaderHidden(true);
     categories_->addTopLevelItem(new QTreeWidgetItem(QStringList { QStringLiteral("All Downloads") }));
     categories_->addTopLevelItem(new QTreeWidgetItem(QStringList { QStringLiteral("General") }));
@@ -2445,15 +2644,28 @@ void MainWindow::buildLayout()
     downloadSplitter_->setHandleWidth(3);
     downloadSplitter_->setOpaqueResize(true);
     downloads_ = new QTableWidget;
-    downloads_->setColumnCount(9);
-    downloads_->setHorizontalHeaderLabels({ QStringLiteral("ID"), QStringLiteral("Source URL"), QStringLiteral("Save To"),
-        QStringLiteral("Status"), QStringLiteral("Progress"), QStringLiteral("Size"),
-        QStringLiteral("Download Speed"), QStringLiteral("ETA"), QStringLiteral("Segments") });
-    downloads_->setColumnHidden(0, true);
+    downloads_->setColumnCount(DownloadColumnCount);
+    downloads_->setHorizontalHeaderLabels({
+        QStringLiteral("ID"),
+        QStringLiteral("File Name"),
+        QStringLiteral("Size"),
+        QStringLiteral("Status"),
+        QStringLiteral("Progress"),
+        QStringLiteral("Download Speed"),
+        QStringLiteral("Date Added"),
+        QStringLiteral("ETA"),
+        QStringLiteral("Save To")
+    });
+    downloads_->setColumnHidden(IdColumn, true);
     downloads_->setSelectionBehavior(QAbstractItemView::SelectRows);
     downloads_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     downloads_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     downloads_->setAlternatingRowColors(true);
+    downloads_->setWordWrap(false);
+    downloads_->setTextElideMode(Qt::ElideRight);
+    downloads_->verticalHeader()->setVisible(false);
+    downloads_->verticalHeader()->setDefaultSectionSize(
+        qMax(24, downloads_->fontMetrics().height() + 8));
     downloads_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(downloads_, &QTableWidget::customContextMenuRequested, this, [this](const QPoint& point) {
         if (const auto* item = downloads_->itemAt(point); item && !item->isSelected()) {
@@ -2478,15 +2690,24 @@ void MainWindow::buildLayout()
         refreshDownloadDetails();
         updateDownloadActionStates();
     });
-    downloads_->horizontalHeader()->setStretchLastSection(true);
-    downloads_->horizontalHeader()->resizeSection(1, 260);
-    downloads_->horizontalHeader()->resizeSection(2, 320);
-    downloads_->horizontalHeader()->resizeSection(8, 180);
+    auto* header = downloads_->horizontalHeader();
+    header->setSectionResizeMode(QHeaderView::Interactive);
+    header->setStretchLastSection(false);
+    header->resizeSection(FileNameColumn, 240);
+    header->resizeSection(SizeColumn, 80);
+    header->resizeSection(StatusColumn, 90);
+    header->resizeSection(ProgressColumn, 70);
+    header->resizeSection(SpeedColumn, 105);
+    header->resizeSection(DateAddedColumn, 145);
+    header->resizeSection(EtaColumn, 75);
+    header->resizeSection(SaveToColumn, 200);
+    downloads_->setItemDelegate(tooltipDelegate);
+    downloads_->viewport()->installEventFilter(this);
 
     detailsTabs_ = new QTabWidget;
     detailsTabs_->setDocumentMode(true);
     detailsTabs_->setMinimumHeight(170);
-    const auto makeDetailsTree = [] {
+    const auto makeDetailsTree = [tooltipDelegate] {
         auto* view = new QTreeWidget;
         view->setColumnCount(2);
         view->setHeaderLabels({ QStringLiteral("Property"), QStringLiteral("Value") });
@@ -2494,6 +2715,9 @@ void MainWindow::buildLayout()
         view->setAlternatingRowColors(true);
         view->setEditTriggers(QAbstractItemView::NoEditTriggers);
         view->setSelectionMode(QAbstractItemView::SingleSelection);
+        view->setWordWrap(false);
+        view->setTextElideMode(Qt::ElideRight);
+        view->setItemDelegate(tooltipDelegate);
         view->header()->resizeSection(0, 175);
         view->header()->setStretchLastSection(true);
         return view;
@@ -2518,6 +2742,9 @@ void MainWindow::buildLayout()
     segmentDetails_->setSelectionBehavior(QAbstractItemView::SelectRows);
     segmentDetails_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     segmentDetails_->setAlternatingRowColors(true);
+    segmentDetails_->setWordWrap(false);
+    segmentDetails_->setTextElideMode(Qt::ElideRight);
+    segmentDetails_->setItemDelegate(tooltipDelegate);
     segmentDetails_->horizontalHeader()->setStretchLastSection(true);
     segmentDetails_->horizontalHeader()->resizeSection(0, 55);
     segmentDetails_->horizontalHeader()->resizeSection(1, 120);
@@ -2695,14 +2922,16 @@ void MainWindow::applyCategoryFilter()
         bool searchMismatch = false;
         if (!query.isEmpty()) {
             searchMismatch = true;
-            for (const int column : { 1, 2 }) {
+            for (const int column : { FileNameColumn, SaveToColumn }) {
                 const auto* item = downloads_->item(row, column);
                 if (item && item->text().contains(query, Qt::CaseInsensitive)) {
                     searchMismatch = false;
                     break;
                 }
             }
-            if (searchMismatch && category.contains(query, Qt::CaseInsensitive)) {
+            const auto sourceUrl = idItem ? idItem->data(Qt::UserRole + 2).toString() : QString {};
+            if (searchMismatch && (category.contains(query, Qt::CaseInsensitive)
+                                   || sourceUrl.contains(query, Qt::CaseInsensitive))) {
                 searchMismatch = false;
             }
         }
@@ -2721,6 +2950,7 @@ void MainWindow::applyCategoryFilter()
 void MainWindow::buildTray()
 {
     tray_ = new QSystemTrayIcon(QApplication::windowIcon(), this);
+    tray_->setToolTip(QStringLiteral("qtIDM"));
     auto* menu = new QMenu(this);
     menu->addAction(QStringLiteral("Open qtIDM"), this, &MainWindow::raiseAndActivate);
     menu->addAction(QStringLiteral("Add URL"), this, [this] { addUrl(); });
@@ -2730,6 +2960,13 @@ void MainWindow::buildTray()
         qApp->quit();
     });
     tray_->setContextMenu(menu);
+    connect(tray_, &QSystemTrayIcon::activated, this,
+            [this](QSystemTrayIcon::ActivationReason reason) {
+                if (reason == QSystemTrayIcon::Trigger
+                    || reason == QSystemTrayIcon::DoubleClick) {
+                    raiseAndActivate();
+                }
+            });
     tray_->show();
 }
 
@@ -2852,6 +3089,130 @@ QString MainWindow::statusText(DownloadStatus status) const
     case DownloadStatus::Canceled: return QStringLiteral("Canceled");
     }
     return QStringLiteral("Error");
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    if (downloads_ && watched == downloads_->viewport()
+        && (event->type() == QEvent::Resize || event->type() == QEvent::Show)) {
+        adjustDownloadColumnsForViewport();
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
+QString MainWindow::displayFileName(const QString& targetPath, const QUrl& url) const
+{
+    const auto name = QFileInfo(targetPath).fileName();
+    if (!name.isEmpty()) {
+        return name;
+    }
+    const auto urlName = url.fileName();
+    return !urlName.isEmpty() ? urlName : targetPath;
+}
+
+QIcon MainWindow::fileIconForPath(const QString& targetPath)
+{
+    const auto suffix = QFileInfo(targetPath).suffix().toLower();
+    if (const auto it = fileIconCache_.constFind(suffix); it != fileIconCache_.constEnd()) {
+        return it.value();
+    }
+    const QMimeDatabase mimeDb;
+    const auto mime = mimeDb.mimeTypeForFile(targetPath, QMimeDatabase::MatchExtension);
+    QIcon icon;
+    if (!mime.iconName().isEmpty()) {
+        icon = QIcon::fromTheme(mime.iconName());
+    }
+    if (icon.isNull() && !mime.genericIconName().isEmpty()) {
+        icon = QIcon::fromTheme(mime.genericIconName());
+    }
+    if (icon.isNull()) {
+        icon = QApplication::style()->standardIcon(QStyle::SP_FileIcon);
+    }
+    fileIconCache_.insert(suffix, icon);
+    return icon;
+}
+
+void MainWindow::adjustDownloadColumnsForViewport()
+{
+    if (!downloads_ || !downloads_->viewport() || !downloads_->isVisible() || adjustingDownloadColumns_) {
+        return;
+    }
+    const int vpWidth = downloads_->viewport()->width();
+    if (vpWidth <= 0) {
+        return;
+    }
+    QScopedValueRollback<bool> guard(adjustingDownloadColumns_, true);
+    auto* header = downloads_->horizontalHeader();
+
+    constexpr int minFileWidth = 110;
+    constexpr int minSaveWidth = 110;
+
+    if (lastDownloadsViewportWidth_ <= 0) {
+        int metricSum = 0;
+        for (const int col : { SizeColumn, StatusColumn, ProgressColumn, SpeedColumn, DateAddedColumn, EtaColumn }) {
+            metricSum += downloads_->columnWidth(col);
+        }
+        const int remaining = vpWidth - metricSum;
+        if (remaining >= minFileWidth + minSaveWidth) {
+            const int fileWidth = qRound(remaining * 0.62);
+            const int saveWidth = remaining - fileWidth;
+            header->resizeSection(FileNameColumn, fileWidth);
+            header->resizeSection(SaveToColumn, saveWidth);
+        } else {
+            header->resizeSection(FileNameColumn, qMax(minFileWidth, 200));
+            header->resizeSection(SaveToColumn, qMax(minSaveWidth, 160));
+        }
+        lastDownloadsViewportWidth_ = vpWidth;
+        return;
+    }
+
+    const int delta = vpWidth - lastDownloadsViewportWidth_;
+    lastDownloadsViewportWidth_ = vpWidth;
+    if (delta == 0) {
+        return;
+    }
+
+    const int curFile = downloads_->columnWidth(FileNameColumn);
+    const int curSave = downloads_->columnWidth(SaveToColumn);
+    int visibleSum = curFile + curSave;
+    for (const int col : { SizeColumn, StatusColumn, ProgressColumn, SpeedColumn, DateAddedColumn, EtaColumn }) {
+        visibleSum += downloads_->columnWidth(col);
+    }
+
+    if (delta > 0) {
+        const int fill = qMax(0, qMin(delta, vpWidth - visibleSum));
+        if (fill > 0) {
+            const int addFile = qRound(fill * 0.62);
+            const int addSave = fill - addFile;
+            header->resizeSection(FileNameColumn, curFile + addFile);
+            header->resizeSection(SaveToColumn, curSave + addSave);
+        }
+        return;
+    }
+
+    const int excess = qMax(0, visibleSum - vpWidth);
+    const int shrinkTotal = qMin(-delta, excess);
+    if (shrinkTotal <= 0) {
+        return;
+    }
+    int fileWidth = curFile;
+    int saveWidth = curSave;
+    int wantSave = qRound(shrinkTotal * 0.45);
+    int wantFile = shrinkTotal - wantSave;
+
+    const int takeSave1 = qMin(wantSave, qMax(0, saveWidth - minSaveWidth));
+    saveWidth -= takeSave1;
+    wantFile += (wantSave - takeSave1);
+
+    const int takeFile = qMin(wantFile, qMax(0, fileWidth - minFileWidth));
+    fileWidth -= takeFile;
+    const int leftover = wantFile - takeFile;
+
+    const int takeSave2 = qMin(leftover, qMax(0, saveWidth - minSaveWidth));
+    saveWidth -= takeSave2;
+
+    header->resizeSection(FileNameColumn, fileWidth);
+    header->resizeSection(SaveToColumn, saveWidth);
 }
 
 }

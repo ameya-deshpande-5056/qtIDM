@@ -16,6 +16,7 @@
 #include <QHash>
 #include <QLineEdit>
 #include <QElapsedTimer>
+#include <QIcon>
 #include <QSplitter>
 #include <QSet>
 #include <QSystemTrayIcon>
@@ -45,6 +46,7 @@ public slots:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private slots:
     void onDownloadAdded(const DownloadRecord& record);
@@ -84,14 +86,18 @@ private:
     void updateDownloadActionStates();
     void refreshDownloadDetails();
     void refreshDownloadDetailsFor(const QString& id);
-    void refreshDownloadProgressDetails(const QString& id, qint64 received,
-                                        qint64 total, double bytesPerSecond);
+    void refreshDownloadProgressDetails(const QString& id, DownloadStatus status,
+                                        qint64 received, qint64 total, double bytesPerSecond);
+    QString applyRowStatusUi(int row, DownloadStatus status);
     void updateSessionStatus();
     void setAlternateSpeedLimit(bool enabled, qint64 bytesPerSecond);
     QList<int> selectedRows() const;
     bool hasDuplicateUrl(const QUrl& url) const;
     int rowForId(const QString& id) const;
     QString statusText(DownloadStatus status) const;
+    QString displayFileName(const QString& targetPath, const QUrl& url) const;
+    QIcon fileIconForPath(const QString& targetPath);
+    void adjustDownloadColumnsForViewport();
 
     CurlEpollDownloader& downloader_;
     MediaDownloader mediaDownloader_;
@@ -114,6 +120,7 @@ private:
     QComboBox* statusFilter_ = nullptr;
     QSystemTrayIcon* tray_ = nullptr;
     QHash<QString, QString> statusMessages_;
+    QHash<QString, DownloadStatus> lastStatuses_;
     QAction* startAction_ = nullptr;
     QAction* pauseAction_ = nullptr;
     QAction* stopAction_ = nullptr;
@@ -138,6 +145,9 @@ private:
     qint64 sessionDownloadedBytes_ = 0;
     QMetaObject::Connection clipboardConnection_;
     QString lastClipboardUrl_;
+    QHash<QString, QIcon> fileIconCache_;
+    int lastDownloadsViewportWidth_ = 0;
+    bool adjustingDownloadColumns_ = false;
     bool browserRequestActive_ = false;
     bool quitting_ = false;
 };

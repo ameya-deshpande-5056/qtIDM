@@ -86,8 +86,20 @@ function browserApi(rootName) {
     tabs: {
       onRemoved: event(),
       async get() { return { url: "https://example.test/page" }; },
-      async query() { return [{ id: 101, active: true, url: "https://video.example.test/watch" }]; }
+      async query() { return [{ id: 101, active: true, url: "https://video.example.test/watch" }]; },
+      ...(rootName === "browser" ? {
+        async executeScript(_tabId, _options) {
+          return [["https://example.test/a.pdf", "https://example.test/b.pdf"]];
+        }
+      } : {})
     },
+    ...(rootName === "chrome" ? {
+      scripting: {
+        async executeScript() {
+          return [{ result: ["https://example.test/a.pdf", "https://example.test/b.pdf"] }];
+        }
+      }
+    } : {}),
     webRequest: {
       onBeforeRequest: event(),
       onBeforeSendHeaders: event(),
@@ -442,6 +454,25 @@ async function testVariant(relativePath, rootName) {
   );
   assert.equal(downloadEntry.headers._qtidmMimeType, "audio/opus", "makeDownloadEntry must pass _qtidmMimeType");
   assert.equal(downloadEntry.headers._qtidmMediaType, "Audio", "makeDownloadEntry must pass _qtidmMediaType");
+
+  // Selected links batch dispatch & empty selection error handling
+  mock.nativeMessages.length = 0;
+  for (const listener of mock.api.contextMenus.onClicked.listeners) {
+    listener(
+      { menuItemId: "qtidm-selected-links", frameId: 0, frameUrl: "https://example.test/frame" },
+      { id: 7, url: "https://example.test/page" }
+    );
+  }
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const batchMsg = mock.nativeMessages.at(-1);
+  assert.ok(Array.isArray(batchMsg?.downloads) && batchMsg.downloads.length === 2, "qtidm-selected-links must dispatch selected URLs as a batch");
+  assert.equal(batchMsg.downloads[0].url, "https://example.test/a.pdf");
+  assert.equal(batchMsg.downloads[1].url, "https://example.test/b.pdf");
+  assert.equal(batchMsg.downloads[0].headers.Referer, "https://example.test/frame");
+  await assert.rejects(
+    context.sendBatchToHost([], { url: "https://example.test/page" }),
+    /No downloadable HTTP, HTTPS, or FTP links were found in the selection/
+  );
 }
 
 Promise.all([

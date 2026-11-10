@@ -5,6 +5,7 @@ GenericName=Download Manager
 Comment=Linux-native download manager
 Exec=qtIDM %u
 Icon=io.qtidm.Qtidm
+StartupWMClass=qtIDM
 Terminal=false
 Categories=Network;FileTransfer;
 MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/ftp;

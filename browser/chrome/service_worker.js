@@ -748,8 +748,12 @@ async function prepareBrowserDownload(url) {
   return response.prepared === true;
 }
 
-async function sendBatchToHost(urls, tab) {
-  const downloads = await Promise.all(urls.map((url) => makeDownloadEntry(url, tab, tab?.url || "")));
+async function sendBatchToHost(urls, tab, referrer = "") {
+  const uniqueUrls = [...new Set((urls || []).filter((url) => /^(?:https?|ftp):/i.test(url)))].slice(0, 100);
+  if (!uniqueUrls.length) {
+    throw new Error("No downloadable HTTP, HTTPS, or FTP links were found in the selection.");
+  }
+  const downloads = await Promise.all(uniqueUrls.map((url) => makeDownloadEntry(url, tab, referrer || tab?.url || "")));
   const response = await nativeRequest({
     downloads
   });
@@ -761,27 +765,45 @@ async function sendBatchToHost(urls, tab) {
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "qtidm-all-links" || info.menuItemId === "qtidm-selected-links") {
     const selected = info.menuItemId === "qtidm-selected-links";
+    const target = typeof info.frameId === "number" && info.frameId >= 0
+      ? { tabId: tab.id, frameIds: [info.frameId] }
+      : { tabId: tab.id };
     chrome.scripting.executeScript({
-      target: { tabId: tab.id, frameIds: [info.frameId] },
+      target,
       func: (selectionOnly) => {
-        const root = selectionOnly ? (() => {
-          const wrapper = document.createElement("div");
+        const readHref = (element) => (typeof element?.href === "string" ? element.href : element?.href?.baseVal) || "";
+        const links = [];
+        if (selectionOnly) {
           const selection = window.getSelection();
-          for (let i = 0; selection && i < selection.rangeCount; ++i) wrapper.append(selection.getRangeAt(i).cloneContents());
-          return wrapper;
-        })() : document;
-        const links = [...root.querySelectorAll("a[href]"), ...(!selectionOnly ? root.querySelectorAll("img[src]") : [])]
-          .map((element) => element.href || element.src).filter((url) => /^(?:https?|ftp):/i.test(url));
-        return [...new Set(links)].slice(0, 100);
+          for (let i = 0; selection && i < selection.rangeCount; ++i) {
+            const range = selection.getRangeAt(i);
+            if (range.collapsed) continue;
+            const wrapper = document.createElement("div");
+            wrapper.append(range.cloneContents());
+            for (const element of wrapper.querySelectorAll("a[href]")) {
+              links.push(readHref(element));
+            }
+            const ancestor = range.commonAncestorContainer?.nodeType === 1
+              ? range.commonAncestorContainer
+              : range.commonAncestorContainer?.parentElement;
+            const enclosing = ancestor?.closest?.("a[href]");
+            if (enclosing) links.push(readHref(enclosing));
+          }
+        } else {
+          for (const element of document.querySelectorAll("a[href], img[src]")) {
+            links.push(readHref(element) || element.src || "");
+          }
+        }
+        return [...new Set(links.filter((url) => /^(?:https?|ftp):/i.test(url)))].slice(0, 100);
       },
       args: [selected]
-    }).then((results) => sendBatchToHost(results.flatMap((result) => result.result || []), tab)
+    }).then((results) => sendBatchToHost(results.flatMap((result) => result.result || []), tab, info.frameUrl || tab?.url || "")
       .catch((error) => showError(error.message))).catch((error) => showError(error.message));
     return;
   }
   const url = info.linkUrl || info.srcUrl || info.pageUrl;
   if (url) {
-    sendToHost(url, tab).catch((error) => showError(error.message));
+    sendToHost(url, tab, info.frameUrl || tab?.url || "").catch((error) => showError(error.message));
   }
 });
 
