@@ -96,6 +96,7 @@ See [Queues and Scheduler](#queues-and-scheduler) below for dialog usage, workfl
 
 - Qt6 Widgets UI with category filtering, download properties, segment visualization, and system tray integration; clicking the tray icon restores hidden or minimized windows, and closing the window keeps qtIDM running in the tray with an active-download confirmation before quitting.
 - Search and status filtering, MIME file icons, numeric/date column sorting, viewport-responsive columns with elided-text tooltips, multi-row actions, automatic categories, file/folder actions, and desktop notifications.
+- Integrated update checker querying GitHub Releases and external tool versions (`yt-dlp`, Deno, FFmpeg, 7-Zip), with optional startup check prompts, one-click dependency upgrades, and live output streaming.
 - New single-URL downloads default to created category folders under `~/Downloads` (`Videos`, `Music`, `Images`, `Programs`, `Documents`, `Compressed`, or `Others`); the destination remains editable before confirmation.
 - Batch URL editor that creates multiple downloads without opening one dialog per URL.
 - Clipboard monitoring for HTTP and HTTPS links.
@@ -142,6 +143,7 @@ them when available:
 | 7-Zip (`7zz` or `7z`) | Automatic archive extraction |
 | `secret-tool` from libsecret | Desktop Secret Service credential storage |
 | `yt-dlp` | Maintained social-site format extraction (supports Python `secretstorage` for Chromium cookie decryption) |
+| Deno | Standalone JavaScript runtime for solving YouTube player challenges in `yt-dlp` |
 | Chrome or Chromium | JavaScript-rendered site grabbing and Chrome extension testing |
 | NetworkManager | Automatic metered-network state detection |
 
@@ -195,6 +197,9 @@ Common entry points:
   installed Chrome/Chromium browser before link discovery.
 - **Options** configures download defaults, session quotas, metered-network
   behavior, and archive automation.
+- **Updates** (toolbar button or `Help` -> `Check for Updates…`) checks for new
+  qtIDM releases on GitHub and inspects external dependencies (`yt-dlp`, Deno,
+  FFmpeg, 7-Zip), offering in-app upgrades with live logs.
 - **`--data DIR`** (or `QTIDM_DATA_DIR`) keeps the settings, database, logs and
   discovery file in `DIR`. This makes a copy portable and lets it run beside an
   installed qtIDM: the extra instance publishes its own D-Bus name, so the two
@@ -204,6 +209,15 @@ Common entry points:
 
 For a system installation, use `sudo cmake --install build` after configuring
 the desired native-messaging options.
+
+### Checking for Updates
+
+qtIDM includes an integrated application and dependency update checker:
+
+- **Manual Check**: Click **Updates** in the main toolbar, choose `Help` -> `Check for Updates…`, or click `Check for Updates…` in the **About** or **Options** dialogs.
+- **Startup Check**: An optional background check runs at application launch (configurable via `Options` -> `Updates` or the update dialog). When an update is found, qtIDM presents a prompt allowing you to review release notes and apply updates or choose "Remind Me Later". When everything is current, the startup check is completely silent.
+- **Application Releases**: Compares the installed version against the newest release published on GitHub, showing changelog notes and direct access to download packages.
+- **Dependency Upgrades**: Automatically inspects local versions and queries upstream releases for tools like `yt-dlp` and `Deno`, providing 1-click in-app upgrades with real-time log output.
 
 ## Command Line and Automation
 
