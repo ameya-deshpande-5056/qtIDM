@@ -1,7 +1,7 @@
 # The build script rewrites Version from CMakeLists.txt; keep it in step by hand
 # only when building this spec directly with rpmbuild.
 Name:           qtidm
-Version:        0.3.2
+Version:        0.3.3
 Release:        1%{?dist}
 Summary:        Fast, native Internet Download Manager for Linux
 
@@ -67,6 +67,9 @@ Firefox integration, and a D-Bus automation interface driven by qtidm-cli.
 %config(noreplace) /etc/chromium/native-messaging-hosts/io.qtidm.native.json
 
 %changelog
+* Sun Nov 15 2026 qtIDM Maintainers <maintainers@example.invalid> - 0.3.3-1
+- Multi-architecture packaging across all formats and Deno runtime bundling for YouTube.
+
 * Sun Nov 15 2026 qtIDM Maintainers <maintainers@example.invalid> - 0.3.2-1
 - Build for arm64 (aarch64) as well as amd64 (x86_64).
 

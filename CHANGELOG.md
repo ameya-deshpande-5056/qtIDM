@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.3
+
+- Added multi-architecture release packaging for `arm64` (`aarch64`) alongside `amd64` (`x86_64`) across Debian (`.deb`), AppImage (`.AppImage`), and Flatpak (`.flatpak`) bundles, matching existing Fedora RPM and Arch Linux package support.
+- `packaging/build-deb.sh` now accepts `--arch amd64|arm64`, passing `-a` to `dpkg-buildpackage` for cross or native architecture builds.
+- `packaging/build-appimage.sh` now accepts `--arch amd64|arm64` and `--toolchain`, validates architecture-specific continuous `linuxdeploy` and `linuxdeploy-plugin-qt` binaries, and produces `qtIDM-<version>-<arch>.AppImage`.
+- `packaging/build-flatpak.sh` and `packaging/release/build-flatpak-bundle.sh` now accept `--arch`, staging architecture-specific archive dependencies and outputting `qtIDM-<version>-<arch>.flatpak`.
+- Bundled the `deno` standalone JavaScript runtime into Flatpak (`/app/bin/deno`) and AppImage (`$APPDIR/usr/bin/deno`) packages to resolve `yt-dlp` YouTube player challenge solver requirements without relying on host system packages.
+- Added dynamic release-time resolution in CI and Flatpak staging to bundle the newest upstream release of Deno on the fly without hardcoded version pins, computing archive SHA-256 checksums dynamically.
+- Added `deno | nodejs` to Debian package `Suggests`, `deno` to Arch Linux `optdepends`, and `nodejs` to Fedora RPM `Suggests`.
+- Overhauled `.github/workflows/build-release.yml` with a modular parallel job matrix (`build-test`, `package-deb-appimage-flatpak`, `package-rpm`, `package-arch`, and `publish-release`) leveraging GitHub's native `ubuntu-24.04-arm` runners for native ARM64 compilation and packaging.
+- Updated `packaging/release/update-linuxdeploy-hashes.sh` to track continuous multi-arch hashes for linuxdeploy and Flatpak dependencies.
+- Extended `tests/PackagingMetadataTest.cpp` to validate multi-arch script flags, Flatpak and AppImage Deno bundling, and release workflow job structure.
+
 ## 0.3.2
 
 - `packaging/build-rpm.sh` and `packaging/build-arch.sh` now take `--arch amd64|arm64`, defaulting to the architecture of the machine they run on, and `--toolchain FILE` for cross builds. Fedora RPMs (`x86_64`/`aarch64`) and Arch `pkg.tar.zst`/`pkg.tar.xz` packages (`x86_64`/`aarch64`) can therefore be produced for arm64 as well as amd64. A target that differs from the host without a toolchain file is refused instead of being built with the host compilers and mislabelled.

@@ -30,6 +30,16 @@
   <launchable type="desktop-id">io.qtidm.Qtidm.desktop</launchable>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.3.3" date="2026-11-15">
+      <description>
+        <p>
+          Adds multi-architecture packaging (arm64 and amd64) across Debian,
+          AppImage, and Flatpak; bundles Deno into AppImage and Flatpak packages
+          for YouTube challenge solving; and expands CI with native ARM64 runners
+          and automated package smoke testing.
+        </p>
+      </description>
+    </release>
     <release version="0.3.2" date="2026-11-15">
       <description>
         <p>
