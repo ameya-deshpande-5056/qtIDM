@@ -46,8 +46,8 @@ modules:
       - install -Dm644 License.txt /app/share/licenses/7zip/License.txt
     sources:
       - type: archive
-        url: https://github.com/ip7z/7zip/releases/download/26.05/7z2605-linux-x64.tar.xz
-        sha256: 22cf82fcc6eb7474f1d5bb4f02c0f8ebd573a718089d6833dc30f8350a3b232e
+        url: https://github.com/ip7z/7zip/releases/download/26.06/7z2606-linux-x64.tar.xz
+        sha256: 2b539cf067b2ad48e1baa5093dbaa8818b73542d1222a0ffde9dc5f2922ea62e
         strip-components: 0
 
   - name: yt-dlp
