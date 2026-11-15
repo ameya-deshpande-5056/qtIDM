@@ -12,6 +12,10 @@
 - Overhauled `.github/workflows/build-release.yml` with a modular parallel job matrix (`build-test`, `package-deb-appimage-flatpak`, `package-rpm`, `package-arch`, and `publish-release`) leveraging GitHub's native `ubuntu-24.04-arm` runners for native ARM64 compilation and packaging.
 - Updated `packaging/release/update-linuxdeploy-hashes.sh` to track continuous multi-arch hashes for linuxdeploy and Flatpak dependencies.
 - Extended `tests/PackagingMetadataTest.cpp` to validate multi-arch script flags, Flatpak and AppImage Deno bundling, and release workflow job structure.
+- Added an in-app update checker (`UpdateChecker` and `UpdateDialog`) that queries the GitHub releases API for new qtIDM releases and checks installed versions against upstream releases for external dependencies (`yt-dlp`, `Deno`, `FFmpeg`, `7-Zip`).
+- Added an automatic background update check on application startup that prompts the user when new versions are available and offers one-click review and updating.
+- Added a dedicated "Updates" toolbar button, "Check for Updates…" under the Help menu, and update check triggers in both the Options and About dialogs.
+- Supported direct in-app dependency upgrades for `yt-dlp` and `Deno` with live streaming terminal output and status refreshing upon completion.
 
 ## 0.3.2
 

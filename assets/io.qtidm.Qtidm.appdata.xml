@@ -35,8 +35,9 @@
         <p>
           Adds multi-architecture packaging (arm64 and amd64) across Debian,
           AppImage, and Flatpak; bundles Deno into AppImage and Flatpak packages
-          for YouTube challenge solving; and expands CI with native ARM64 runners
-          and automated package smoke testing.
+          for YouTube challenge solving; adds an in-app application and dependency
+          update checker with startup prompts and direct tool upgrades; and
+          expands CI with native ARM64 runners and package smoke testing.
         </p>
       </description>
     </release>

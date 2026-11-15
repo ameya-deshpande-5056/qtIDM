@@ -119,9 +119,11 @@ set(QTIDM_UI_SOURCES
     src/integration/ImportExportService.cpp
     src/integration/MeteredNetworkMonitor.cpp
     src/integration/SocialMediaExtractor.cpp
+    src/integration/UpdateChecker.cpp
     src/theme/ThemeManager.cpp
     src/ui/MainWindow.cpp
     src/ui/SegmentGrid.cpp
+    src/ui/UpdateDialog.cpp
 )
 
 add_executable(qtIDM
@@ -314,6 +316,18 @@ add_executable(qtIDM_social_media_extractor_tests
 target_include_directories(qtIDM_social_media_extractor_tests PRIVATE src)
 target_link_libraries(qtIDM_social_media_extractor_tests PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME qtIDM_social_media_extractor_tests COMMAND qtIDM_social_media_extractor_tests)
+
+add_executable(qtIDM_update_checker_tests
+    tests/UpdateCheckerTest.cpp
+    src/integration/UpdateChecker.cpp
+    src/integration/SocialMediaExtractor.cpp
+)
+target_include_directories(qtIDM_update_checker_tests PRIVATE src)
+target_compile_definitions(qtIDM_update_checker_tests PRIVATE
+    QTIDM_VERSION="${PROJECT_VERSION}"
+)
+target_link_libraries(qtIDM_update_checker_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl)
+add_test(NAME qtIDM_update_checker_tests COMMAND qtIDM_update_checker_tests)
 
 add_executable(qtIDM_downloader_integration_tests
     tests/DownloaderIntegrationTest.cpp

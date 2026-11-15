@@ -6,6 +6,7 @@
 #include "integration/CredentialVault.h"
 #include "integration/MeteredNetworkMonitor.h"
 #include "integration/SocialMediaExtractor.h"
+#include "integration/UpdateChecker.h"
 #include "storage/DownloadRepository.h"
 #include "theme/ThemeManager.h"
 
@@ -57,6 +58,7 @@ public slots:
     // Re-queues transfers that were queued, connecting or downloading when the
     // application last stopped, so a crash or quit does not strand them.
     void resumeInterruptedDownloads();
+    void checkForUpdates(bool silentIfUpToDate = false);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -114,11 +116,17 @@ private:
     QIcon fileIconForPath(const QString& targetPath);
     void adjustDownloadColumnsForViewport();
 
+    void checkUpdatesAtStartup();
+    void onUpdateCheckFinished(const qtidm::UpdateCheckResult& result, bool silentIfUpToDate);
+    void onUpdateCheckFailed(const QString& errorMessage, bool silentIfUpToDate);
+    void showUpdateDialog(const qtidm::UpdateCheckResult& result);
+
     CurlEpollDownloader& downloader_;
     MediaDownloader mediaDownloader_;
     CredentialVault credentialVault_;
     MeteredNetworkMonitor networkMonitor_;
     SocialMediaExtractor socialMediaExtractor_;
+    UpdateChecker updateChecker_;
     DownloadScheduler& scheduler_;
     DownloadRepository& repository_;
     ThemeManager& themeManager_;
@@ -141,6 +149,7 @@ private:
     QAction* stopAction_ = nullptr;
     QAction* deleteAction_ = nullptr;
     QAction* editAction_ = nullptr;
+    QAction* updatesAction_ = nullptr;
     QLabel* sessionRateLabel_ = nullptr;
     QLabel* sessionSizeLabel_ = nullptr;
     QToolButton* alternateLimitButton_ = nullptr;

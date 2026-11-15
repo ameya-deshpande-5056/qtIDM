@@ -6,6 +6,7 @@
 #include "core/ZipPreview.h"
 #include "integration/ImportExportService.h"
 #include "ui/SegmentGrid.h"
+#include "ui/UpdateDialog.h"
 
 #include <QAbstractItemView>
 #include <QAction>
@@ -309,6 +310,7 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
     , credentialVault_()
     , networkMonitor_()
     , socialMediaExtractor_()
+    , updateChecker_(this)
     , scheduler_(scheduler)
     , repository_(repository)
     , themeManager_(themeManager)
@@ -422,6 +424,10 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
             updateDownloadActionStates();
         }
     });
+
+    connect(&updateChecker_, &UpdateChecker::checkFinished, this, &MainWindow::onUpdateCheckFinished);
+    connect(&updateChecker_, &UpdateChecker::checkFailed, this, &MainWindow::onUpdateCheckFailed);
+    QTimer::singleShot(2000, this, [this] { checkUpdatesAtStartup(); });
 }
 
 bool MainWindow::addUrl(QString url, QVariantMap headers)
@@ -2070,6 +2076,21 @@ void MainWindow::showOptions()
     form->addRow(QStringLiteral("Credential vault:"), credentialVaultStatus);
     form->addRow(QStringLiteral("Integration:"), clipboardMonitor);
     form->addRow(QStringLiteral("Notifications:"), notifications);
+
+    auto* checkUpdatesAtStartup = new QCheckBox(QStringLiteral("Check for updates automatically at startup"));
+    checkUpdatesAtStartup->setChecked(settings.value(QStringLiteral("updates/checkAtStartup"), true).toBool());
+    auto* checkUpdatesRow = new QWidget;
+    auto* checkUpdatesLayout = new QHBoxLayout(checkUpdatesRow);
+    checkUpdatesLayout->setContentsMargins(0, 0, 0, 0);
+    auto* checkNowBtn = new QPushButton(QStringLiteral("Check Now…"));
+    connect(checkNowBtn, &QPushButton::clicked, &dialog, [this, &dialog] {
+        dialog.close();
+        checkForUpdates(false);
+    });
+    checkUpdatesLayout->addWidget(checkUpdatesAtStartup, 1);
+    checkUpdatesLayout->addWidget(checkNowBtn);
+    form->addRow(QStringLiteral("Updates:"), checkUpdatesRow);
+
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     form->addWidget(buttons);
@@ -2093,6 +2114,7 @@ void MainWindow::showOptions()
     settings.setValue(QStringLiteral("downloads/defaultDeleteArchives"), defaultDeleteArchives->isChecked());
     settings.setValue(QStringLiteral("integration/clipboardMonitor"), clipboardMonitor->isChecked());
     settings.setValue(QStringLiteral("notifications/enabled"), notifications->isChecked());
+    settings.setValue(QStringLiteral("updates/checkAtStartup"), checkUpdatesAtStartup->isChecked());
     scheduler_.setQueueConcurrency(QStringLiteral("Main"), concurrentDownloads->value());
     scheduler_.setMeteredNetworkPolicy(static_cast<MeteredNetworkPolicy>(meteredPolicy->currentData().toInt()));
     configureClipboardMonitor();
@@ -2153,9 +2175,90 @@ void MainWindow::showAbout()
     layout->addLayout(content);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close);
+    auto* checkUpdatesBtn = new QPushButton(staticActionIcon(QStringLiteral("updates")), QStringLiteral("Check for Updates…"));
+    connect(checkUpdatesBtn, &QPushButton::clicked, &dialog, [this, &dialog] {
+        dialog.close();
+        checkForUpdates(false);
+    });
+    buttons->addButton(checkUpdatesBtn, QDialogButtonBox::ActionRole);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     layout->addWidget(buttons);
     dialog.setMinimumWidth(600);
+    dialog.exec();
+}
+
+void MainWindow::checkUpdatesAtStartup()
+{
+    QSettings settings;
+    if (settings.value(QStringLiteral("updates/checkAtStartup"), true).toBool()) {
+        checkForUpdates(true);
+    }
+}
+
+void MainWindow::checkForUpdates(bool silentIfUpToDate)
+{
+    if (!silentIfUpToDate) {
+        statusBar()->showMessage(QStringLiteral("Checking for updates…"), 5000);
+        if (updatesAction_) {
+            updatesAction_->setEnabled(false);
+        }
+    }
+    updateChecker_.checkForUpdates(silentIfUpToDate);
+}
+
+void MainWindow::onUpdateCheckFinished(const qtidm::UpdateCheckResult& result, bool silentIfUpToDate)
+{
+    if (updatesAction_) {
+        updatesAction_->setEnabled(true);
+    }
+
+    if (silentIfUpToDate) {
+        if (result.hasAnyUpdates()) {
+            QMessageBox prompt(this);
+            prompt.setWindowTitle(QStringLiteral("Updates Available"));
+            prompt.setIcon(QMessageBox::Information);
+            prompt.setText(QStringLiteral("<b>Updates are available for qtIDM and its components.</b>"));
+            prompt.setInformativeText(result.summary() + QStringLiteral("\n\nWould you like to review and update now?"));
+            auto* updateBtn = prompt.addButton(QStringLiteral("Review & Update…"), QMessageBox::AcceptRole);
+            prompt.addButton(QStringLiteral("Remind Me Later"), QMessageBox::RejectRole);
+            prompt.setDefaultButton(updateBtn);
+            prompt.exec();
+            if (prompt.clickedButton() == updateBtn) {
+                showUpdateDialog(result);
+            }
+        }
+    } else {
+        if (result.hasAnyUpdates()) {
+            statusBar()->showMessage(QStringLiteral("Updates are available!"), 5000);
+            showUpdateDialog(result);
+        } else if (result.checkSucceeded) {
+            statusBar()->showMessage(QStringLiteral("qtIDM is up to date."), 5000);
+            QMessageBox::information(this, QStringLiteral("Check for Updates"),
+                QStringLiteral("qtIDM (%1) and all installed dependencies are up to date!")
+                    .arg(QCoreApplication::applicationVersion()));
+        } else {
+            statusBar()->showMessage(QStringLiteral("Could not check for updates."), 5000);
+            QMessageBox::warning(this, QStringLiteral("Check for Updates"),
+                QStringLiteral("Could not check for updates:\n%1").arg(result.errorMessage));
+        }
+    }
+}
+
+void MainWindow::onUpdateCheckFailed(const QString& errorMessage, bool silentIfUpToDate)
+{
+    if (updatesAction_) {
+        updatesAction_->setEnabled(true);
+    }
+    if (!silentIfUpToDate) {
+        statusBar()->showMessage(QStringLiteral("Update check failed."), 5000);
+        QMessageBox::warning(this, QStringLiteral("Check for Updates"),
+            QStringLiteral("Could not check for updates:\n%1").arg(errorMessage));
+    }
+}
+
+void MainWindow::showUpdateDialog(const qtidm::UpdateCheckResult& result)
+{
+    UpdateDialog dialog(result, &updateChecker_, this);
     dialog.exec();
 }
 
@@ -2629,6 +2732,9 @@ void MainWindow::buildActions()
     toolbar->addSeparator();
     toolbar->addAction(staticActionIcon(QStringLiteral("options")),
                        QStringLiteral("Options"), this, &MainWindow::showOptions);
+    updatesAction_ = toolbar->addAction(staticActionIcon(QStringLiteral("updates")),
+                                        QStringLiteral("Updates"), this, [this] { checkForUpdates(false); });
+    updatesAction_->setToolTip(QStringLiteral("Check for application and dependency updates"));
     toolbar->addAction(staticActionIcon(QStringLiteral("about")),
                        QStringLiteral("About"), this, &MainWindow::showAbout);
 
@@ -2658,6 +2764,13 @@ void MainWindow::buildActions()
     downloadMenu->addActions({ startAction_, pauseAction_, stopAction_, deleteAction_, editAction_ });
     downloadMenu->addSeparator();
     downloadMenu->addAction(QStringLiteral("Clear finished…"), this, &MainWindow::clearFinished);
+
+    auto* helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
+    helpMenu->addAction(staticActionIcon(QStringLiteral("updates")),
+                        QStringLiteral("&Check for Updates…"), this, [this] { checkForUpdates(false); });
+    helpMenu->addSeparator();
+    helpMenu->addAction(staticActionIcon(QStringLiteral("about")),
+                        QStringLiteral("&About qtIDM"), this, &MainWindow::showAbout);
 }
 
 void MainWindow::buildLayout()
