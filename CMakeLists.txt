@@ -82,24 +82,43 @@ if(QTIDM_ENABLE_NATIVE_TUNING)
     add_compile_options(-march=native)
 endif()
 
-set(QTIDM_SOURCES
+# Widgets-free half of qtIDM: the download engine, persistence, the scheduler
+# and the automation surface. Shared by the application, qtidm-cli and the
+# automation tests so every caller exercises the same code.
+set(QTIDM_AUTOMATION_SOURCES
+    src/app/AutomationIpc.cpp
     src/app/Logger.cpp
     src/app/Paths.cpp
-    src/app/SingleInstance.cpp
-    src/core/DownloadTypes.cpp
+    src/core/ArchiveExtractor.cpp
     src/core/CurlEpollDownloader.cpp
     src/core/DownloadScheduler.cpp
-    src/core/ArchiveExtractor.cpp
-    src/core/SiteGrabber.cpp
+    src/core/DownloadTypes.cpp
+    src/core/SparseFileWriter.cpp
+    src/integration/AutomationApi.cpp
+    src/integration/CredentialVault.cpp
+    src/storage/DownloadRepository.cpp
+)
+
+add_library(qtidm_automation STATIC ${QTIDM_AUTOMATION_SOURCES})
+
+target_include_directories(qtidm_automation PUBLIC src)
+target_link_libraries(qtidm_automation PUBLIC
+    Qt6::Core
+    Qt6::DBus
+    CURL::libcurl
+    SQLite::SQLite3
+    Threads::Threads
+)
+
+set(QTIDM_UI_SOURCES
+    src/app/SingleInstance.cpp
     src/core/MediaDownloader.cpp
     src/core/MediaStreamProxy.cpp
-    src/core/SparseFileWriter.cpp
+    src/core/SiteGrabber.cpp
     src/core/ZipPreview.cpp
     src/integration/ImportExportService.cpp
-    src/integration/CredentialVault.cpp
     src/integration/MeteredNetworkMonitor.cpp
     src/integration/SocialMediaExtractor.cpp
-    src/storage/DownloadRepository.cpp
     src/theme/ThemeManager.cpp
     src/ui/MainWindow.cpp
     src/ui/SegmentGrid.cpp
@@ -108,7 +127,7 @@ set(QTIDM_SOURCES
 add_executable(qtIDM
     src/main.cpp
     resources.qrc
-    ${QTIDM_SOURCES}
+    ${QTIDM_UI_SOURCES}
 )
 
 target_include_directories(qtIDM PRIVATE src)
@@ -118,14 +137,23 @@ target_compile_definitions(qtIDM PRIVATE
     QTIDM_PROJECT_URL="${QTIDM_PROJECT_URL}"
 )
 target_link_libraries(qtIDM PRIVATE
-    Qt6::Core
+    qtidm_automation
     Qt6::Gui
     Qt6::Widgets
-    Qt6::DBus
-    CURL::libcurl
-    SQLite::SQLite3
-    Threads::Threads
 )
+
+# Command-line client for the automation channel. It links the widgets-free
+# library only, so it runs with no display, no tray and no GUI dependency.
+add_executable(qtidm-cli
+    src/cli/main.cpp
+    src/cli/AutomationClient.cpp
+)
+
+target_include_directories(qtidm-cli PRIVATE src)
+target_compile_definitions(qtidm-cli PRIVATE
+    QTIDM_VERSION="${PROJECT_VERSION}"
+)
+target_link_libraries(qtidm-cli PRIVATE qtidm_automation)
 
 add_executable(qtIDM-native-host
     src/integration/NativeMessagingHost.cpp
@@ -139,6 +167,13 @@ target_link_libraries(qtIDM-native-host PRIVATE Qt6::Core Qt6::DBus)
 if(QTIDM_BUILD_TESTS)
 enable_testing()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+add_executable(qtIDM_automation_tests
+    tests/AutomationApiTest.cpp
+)
+
+target_link_libraries(qtIDM_automation_tests PRIVATE qtidm_automation Qt6::Test)
+add_test(NAME qtIDM_automation_tests COMMAND qtIDM_automation_tests)
 
 add_executable(qtIDM_core_tests
     tests/DownloadRepositoryTest.cpp
@@ -345,7 +380,7 @@ set_tests_properties(qtIDM_crash_injection_tests PROPERTIES TIMEOUT 60)
 add_executable(qtIDM_main_window_tests
     tests/MainWindowTest.cpp
     resources.qrc
-    ${QTIDM_SOURCES}
+    ${QTIDM_UI_SOURCES}
 )
 target_include_directories(qtIDM_main_window_tests PRIVATE src)
 target_compile_definitions(qtIDM_main_window_tests PRIVATE
@@ -354,14 +389,10 @@ target_compile_definitions(qtIDM_main_window_tests PRIVATE
     QTIDM_PROJECT_URL="${QTIDM_PROJECT_URL}"
 )
 target_link_libraries(qtIDM_main_window_tests PRIVATE
-    Qt6::Core
+    qtidm_automation
     Qt6::Gui
     Qt6::Widgets
-    Qt6::DBus
     Qt6::Test
-    CURL::libcurl
-    SQLite::SQLite3
-    Threads::Threads
 )
 add_test(NAME qtIDM_main_window_tests COMMAND qtIDM_main_window_tests)
 set_tests_properties(qtIDM_main_window_tests PROPERTIES
@@ -369,7 +400,7 @@ set_tests_properties(qtIDM_main_window_tests PROPERTIES
 )
 endif()
 
-install(TARGETS qtIDM qtIDM-native-host RUNTIME DESTINATION bin)
+install(TARGETS qtIDM qtIDM-native-host qtidm-cli RUNTIME DESTINATION bin)
 install(FILES assets/io.qtidm.Qtidm.desktop DESTINATION share/applications)
 install(FILES assets/io.qtidm.Qtidm.svg DESTINATION share/icons/hicolor/scalable/apps)
 foreach(QTIDM_ICON_SIZE 16 32 48 64 128 256 512)

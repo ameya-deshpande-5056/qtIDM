@@ -1,8 +1,10 @@
 #include "app/Paths.h"
+#include "app/AutomationIpc.h"
 #include "app/Logger.h"
 #include "app/SingleInstance.h"
 #include "core/CurlEpollDownloader.h"
 #include "core/DownloadScheduler.h"
+#include "integration/AutomationApi.h"
 #include "storage/DownloadRepository.h"
 #include "theme/ThemeManager.h"
 #include "ui/MainWindow.h"
@@ -15,6 +17,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <cstdio>
+#include <optional>
 
 int main(int argc, char** argv)
 {
@@ -61,6 +64,11 @@ int main(int argc, char** argv)
     qtidm::CurlEpollDownloader downloader;
     qtidm::DownloadScheduler scheduler(downloader);
     scheduler.load();
+    // The automation channel is answered outside the window so scripts can drive
+    // the same engine, scheduler and repository the desktop list uses.
+    qtidm::AutomationApi automation(downloader, scheduler, repository);
+    qtidm::AutomationIpc automationIpc;
+    automationIpc.start();
     qtidm::ThemeManager themeManager;
     qtidm::MainWindow window(downloader, scheduler, repository, themeManager);
     QObject::connect(&scheduler, &qtidm::DownloadScheduler::completionCommandRequested,
@@ -73,6 +81,23 @@ int main(int argc, char** argv)
     singleInstance.setUrlsHandler([&window](QStringList urls, QVariantMap headers) { return window.addUrls(std::move(urls), std::move(headers)); });
     singleInstance.setDownloadsHandler([&window](QVariantList downloads) { return window.addBrowserDownloads(std::move(downloads)); });
     singleInstance.setSocialMediaHandler([&window](QString url) { return window.extractSocialMediaUrl(QUrl::fromUserInput(url)); });
+    singleInstance.setAutomationHandler([&automation](const QString& verb, const QStringList& arguments) {
+        return automation.handleVerb(verb, arguments);
+    });
+    // Media (HLS/DASH/yt-dlp) jobs live in the window, so it owns them; anything
+    // it does not recognise falls through to the download engine.
+    automation.setMediaHandler([&window](const QString& id, qtidm::AutomationApi::MediaAction action)
+                                   -> std::optional<bool> {
+        switch (action) {
+        case qtidm::AutomationApi::MediaAction::Pause:
+            return window.controlMediaDownload(id, qtidm::MainWindow::DownloadControl::Pause);
+        case qtidm::AutomationApi::MediaAction::Start:
+            return window.controlMediaDownload(id, qtidm::MainWindow::DownloadControl::Start);
+        case qtidm::AutomationApi::MediaAction::Cancel:
+            return window.controlMediaDownload(id, qtidm::MainWindow::DownloadControl::Cancel);
+        }
+        return std::nullopt;
+    });
 
     downloader.start();
     window.show();
@@ -82,6 +107,7 @@ int main(int argc, char** argv)
         }
     });
     const int rc = app.exec();
+    automationIpc.stop();
     downloader.stop();
     return rc;
 }

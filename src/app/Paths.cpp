@@ -4,14 +4,19 @@
 
 namespace qtidm {
 
+// These are deliberately derived from the generic locations plus a fixed name
+// rather than from the application name: qtidm-cli, the native messaging host
+// and the application itself must all resolve the same directory.
 QString Paths::configDir()
 {
-    return QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + QStringLiteral("/qtIDM");
+    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
+        + QStringLiteral("/qtIDM");
 }
 
 QString Paths::dataDir()
 {
-    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
+        + QStringLiteral("/qtIDM");
 }
 
 QString Paths::databasePath()

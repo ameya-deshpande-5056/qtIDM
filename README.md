@@ -22,6 +22,7 @@
   <a href="#features">Features</a> •
   <a href="#screenshots">Screenshots</a> •
   <a href="#browser-companion-extension-chrome--firefox">Browser Extensions</a> •
+  <a href="#command-line-and-automation">Automation</a> •
   <a href="#build">Build</a> •
   <a href="#packaging">Packaging</a>
 </p>
@@ -107,6 +108,7 @@ See [Queues and Scheduler](#queues-and-scheduler) below for dialog usage, workfl
 - D-Bus single-instance URL forwarding.
 - Dynamic light/dark theme tracking through the desktop portal with desktop-environment fallbacks.
 - Persistent diagnostic logging in the Qt application-data directory.
+- Session D-Bus automation interface and `qtidm-cli` for scripted control of a running instance.
 
 ### Browser Integration
 
@@ -197,6 +199,68 @@ Common entry points:
 
 For a system installation, use `sudo cmake --install build` after configuring
 the desired native-messaging options.
+
+## Command Line and Automation
+
+A running qtIDM publishes a session D-Bus interface, so scripts can list and
+control its downloads without touching the window. The service is the same one
+used for single-instance URL forwarding.
+
+### `qtidm-cli`
+
+`qtidm-cli` talks to the running application over the session bus. It links only
+the widgets-free automation library, so it needs no display, tray, or GUI
+dependency.
+
+```bash
+qtidm-cli list                          # downloads and queues, human readable
+qtidm-cli --json list                   # the same answer as JSON
+qtidm-cli pause 4f1c…
+qtidm-cli start 4f1c… 9ab2…
+qtidm-cli remove 4f1c…                  # drop from the list, keep the file
+qtidm-cli delete 9ab2…                  # drop it and delete the file and .part
+qtidm-cli stop-queue Main               # hold a queue without stopping transfers
+qtidm-cli start-queue Main
+```
+
+| Command | What it does |
+| --- | --- |
+| `list` / `status` | Downloads and queues, including the `Main` queue even when nothing is queued |
+| `pause <id>...` | Pause active downloads |
+| `start <id>...` | Start or resume paused, failed, or canceled downloads |
+| `remove <id>...` | Remove entries, keeping their files |
+| `delete <id>...` | Remove entries and delete their file and `.part` file |
+| `start-queue <name>` | Let a queue dispatch downloads |
+| `stop-queue <name>` | Hold a queue without interrupting active transfers |
+
+`--json` prints the exact JSON answer. `--data <dir>` points the client at
+another data directory. Exit status is `0` for a completed command, `1` for a
+failure (including an error answer), and `2` for a usage error.
+
+### D-Bus interface
+
+Service `io.qtidm.Qtidm`, object `/io/qtidm/Qtidm/Application`, interface
+`io.qtidm.Qtidm.Application`. Every control verb returns a JSON string.
+
+| Method | Answer |
+| --- | --- |
+| `ListDownloads()` | `{"downloads":[…],"speed":…,"queues":[…],"free":…}` |
+| `PauseDownloads(ids)`, `StartDownloads(ids)`, `RemoveDownloads(ids)`, `DeleteDownloads(ids)` | `{"action":…,"done":[…],"skipped":[{"id":…,"why":…}]}` |
+| `StartQueue(name)`, `StopQueue(name)` | `{"queue":…,"running":…}`, or `{"error":…,"code":"unknown-queue"}` |
+
+`AddUrl`, `AddUrls`, `AddDownloadsJson`, `ExtractSocialMedia`, and `Activate`
+remain the intake verbs. Skip reasons are the same over every transport:
+`unknown id`, `not active`, `not resumable`, `already complete`,
+`already queued`, `media control failed`.
+
+A running instance writes `ipc.json` (token, process id, version, and channel
+names) to its data directory, readable by its owner only, so other programs can
+discover the channel. The token is reserved for a future loopback transport;
+`port` is currently `null`.
+
+Adaptive HLS/DASH and social-media jobs are owned by the window's media
+downloader, and these verbs drive them as well, so `pause`, `start`, and
+`delete` behave the same for a transfer and for a media job.
 
 ## Queues and Scheduler
 
@@ -334,7 +398,8 @@ and resumed transfers, retries, checksums, conflict policies, per-host limits,
 metered-network dispatch, archive safety and extraction, credential-vault
 transport, social metadata and DRM filtering, adaptive-media handling,
 ZIP/ZIP64 parsing, main window UI behavior, packaging metadata,
-JavaScript-rendered site grabbing, and performance smoke tests. The downloader and browser-extension integration
+JavaScript-rendered site grabbing, automation answers and the `ipc.json`
+discovery file, and performance smoke tests. The downloader and browser-extension integration
 suites start localhost HTTP fixture servers, so restricted sandboxes must
 permit localhost port binding.
 

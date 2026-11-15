@@ -1,14 +1,22 @@
 #include "app/SingleInstance.h"
 
+#include "app/AutomationNames.h"
+
 #include <QDBusConnection>
 #include <QDBusInterface>
 #include <QJsonArray>
 #include <QJsonDocument>
 
 namespace {
-constexpr auto serviceName = "io.qtidm.Qtidm";
-constexpr auto objectPath = "/io/qtidm/Qtidm/Application";
-constexpr auto interfaceName = "io.qtidm.Qtidm.Application";
+constexpr auto serviceName = qtidm::automation::service;
+constexpr auto objectPath = qtidm::automation::objectPath;
+constexpr auto interfaceName = qtidm::automation::interface;
+
+QString unavailableAutomation()
+{
+    return QStringLiteral("{\"error\":\"The qtIDM automation API is not available in this process.\","
+                          "\"code\":\"unavailable\"}");
+}
 }
 
 namespace qtidm {
@@ -66,6 +74,11 @@ void SingleInstance::setSocialMediaHandler(std::function<bool(QString)> handler)
     socialMediaHandler_ = std::move(handler);
 }
 
+void SingleInstance::setAutomationHandler(AutomationHandler handler)
+{
+    automationHandler_ = std::move(handler);
+}
+
 void SingleInstance::Activate()
 {
     emit activateRequested();
@@ -107,6 +120,43 @@ bool SingleInstance::AddDownloadsJson(const QString& downloadsJson)
 bool SingleInstance::ExtractSocialMedia(const QString& url)
 {
     return socialMediaHandler_ ? socialMediaHandler_(url) : false;
+}
+
+QString SingleInstance::ListDownloads()
+{
+    return automationHandler_ ? automationHandler_(QStringLiteral("list"), {}) : unavailableAutomation();
+}
+
+QString SingleInstance::PauseDownloads(const QStringList& ids)
+{
+    return automationHandler_ ? automationHandler_(QStringLiteral("pause"), ids) : unavailableAutomation();
+}
+
+QString SingleInstance::StartDownloads(const QStringList& ids)
+{
+    return automationHandler_ ? automationHandler_(QStringLiteral("start"), ids) : unavailableAutomation();
+}
+
+QString SingleInstance::RemoveDownloads(const QStringList& ids)
+{
+    return automationHandler_ ? automationHandler_(QStringLiteral("remove"), ids) : unavailableAutomation();
+}
+
+QString SingleInstance::DeleteDownloads(const QStringList& ids)
+{
+    return automationHandler_ ? automationHandler_(QStringLiteral("delete"), ids) : unavailableAutomation();
+}
+
+QString SingleInstance::StartQueue(const QString& queueName)
+{
+    return automationHandler_ ? automationHandler_(QStringLiteral("start-queue"), { queueName })
+                              : unavailableAutomation();
+}
+
+QString SingleInstance::StopQueue(const QString& queueName)
+{
+    return automationHandler_ ? automationHandler_(QStringLiteral("stop-queue"), { queueName })
+                              : unavailableAutomation();
 }
 
 }

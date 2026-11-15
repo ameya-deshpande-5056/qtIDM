@@ -24,7 +24,9 @@ private slots:
             QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/assets/io.qtidm.Qtidm.desktop"),
             QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/assets/io.qtidm.Qtidm.appdata.xml"),
             QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/packaging/flatpak/io.qtidm.Qtidm.yml"),
-            QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/src/app/SingleInstance.cpp"),
+            // The D-Bus service name lives in one place now that qtidm-cli and
+            // the discovery file must agree with it.
+            QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/src/app/AutomationNames.h"),
             QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/src/main.cpp")
         };
         for (const auto& path : paths) {

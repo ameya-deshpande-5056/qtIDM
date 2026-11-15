@@ -2159,6 +2159,46 @@ void MainWindow::showAbout()
     dialog.exec();
 }
 
+std::optional<bool> MainWindow::controlMediaDownload(const QString& id, DownloadControl control)
+{
+    const auto records = repository_.listDownloads();
+    const auto it = std::find_if(records.cbegin(), records.cend(), [&id](const DownloadRecord& record) {
+        return record.id == id;
+    });
+    if (it == records.cend()) {
+        return std::nullopt;
+    }
+    const bool running = mediaDownloader_.contains(id);
+    if (!running && !MediaDownloader::supports(
+            it->url, it->request.headers.value(QStringLiteral("_qtidmMediaType")).toString())) {
+        return std::nullopt;
+    }
+    switch (control) {
+    case DownloadControl::Pause:
+        if (!isActiveStatus(it->status)) {
+            return false;
+        }
+        mediaDownloader_.pause(id);
+        return true;
+    case DownloadControl::Start:
+        if (!isResumableStatus(it->status)) {
+            return false;
+        }
+        if (running) {
+            mediaDownloader_.resume(id);
+        } else {
+            mediaDownloader_.enqueue(it->url, it->targetPath, it->request.headers, it->id);
+        }
+        return true;
+    case DownloadControl::Cancel:
+        if (running) {
+            mediaDownloader_.cancel(id);
+        }
+        return true;
+    }
+    return std::nullopt;
+}
+
 void MainWindow::resumeSelected()
 {
     const auto records = repository_.listDownloads();

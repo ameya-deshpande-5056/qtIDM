@@ -80,6 +80,24 @@ desktop autostart/service management. Tagged builds bundle a private-key-signed
 Chrome CRX and an unlisted Mozilla-signed Firefox XPI; Debian releases also
 register the local CRX with Google Chrome.
 
+## Automation
+
+| Capability | qtIDM state |
+| --- | --- |
+| Session D-Bus service (`io.qtidm.Qtidm.Application`) | Implemented; also carries single-instance URL forwarding |
+| Download list as JSON (`ListDownloads`) | Implemented; id, file, url, path, status, size, downloaded, speed, added, category, queue, plus total speed, queues, and free space |
+| Pause (`PauseDownloads`) | Implemented for active transfers and media jobs |
+| Start/resume (`StartDownloads`) | Implemented; rebuilds the request, forces `Start now`, and refuses a duplicate queue entry |
+| Remove (`RemoveDownloads`) and delete (`DeleteDownloads`) | Implemented; `delete` also removes the file and `.part` file |
+| Per-id results | Implemented as `done` and `skipped` with a reason (`unknown id`, `not active`, `not resumable`, `already complete`, `already queued`, `media control failed`) |
+| Queue dispatch control (`StartQueue`, `StopQueue`) | Implemented per named queue; `Main` is always addressable and always listed |
+| Adaptive HLS/DASH and social-media jobs | Implemented through the window's media downloader, so pause, start, and delete behave like a normal transfer |
+| Discovery file (`ipc.json`) | Implemented with a per-start token and owner-only permissions |
+| `qtidm-cli` | Implemented: `list`, `pause`, `start`, `remove`, `delete`, `start-queue`, `stop-queue`, `--json`, `--data` |
+| Adding downloads from `qtidm-cli` | Not implemented; use the D-Bus `AddUrl`, `AddUrls`, or `AddDownloadsJson` verbs |
+| Loopback HTTP automation transport | Not implemented; `ipc.json` reserves `port` for it |
+| MCP server for AI assistants | Not implemented |
+
 ## Scope and remaining work
 
 - BitTorrent support is outside the project scope.

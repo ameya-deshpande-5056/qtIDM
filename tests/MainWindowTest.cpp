@@ -70,6 +70,50 @@ private slots:
         qRegisterMetaType<QVector<qtidm::SegmentInfo>>("QVector<SegmentInfo>");
     }
 
+    void mediaControlOnlyClaimsMediaDownloads()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::DownloadRepository repository;
+        QVERIFY(repository.open(dir.filePath(QStringLiteral("downloads.sqlite3"))));
+        QVERIFY(repository.migrate());
+        qtidm::CurlEpollDownloader downloader;
+        qtidm::DownloadScheduler scheduler(downloader);
+        qtidm::ThemeManager themeManager;
+        qtidm::MainWindow window(downloader, scheduler, repository, themeManager);
+
+        qtidm::DownloadRecord record;
+        record.id = QStringLiteral("plain");
+        record.url = QUrl(QStringLiteral("https://example.com/file.zip"));
+        record.targetPath = dir.filePath(QStringLiteral("file.zip"));
+        record.status = qtidm::DownloadStatus::Downloading;
+        record.createdAt = QDateTime::currentDateTimeUtc();
+        record.updatedAt = record.createdAt;
+        record.request.url = record.url;
+        QVERIFY(repository.upsertDownload(record));
+
+        // A plain transfer is not the window's to control; the engine handles it.
+        QVERIFY(!window.controlMediaDownload(record.id, qtidm::MainWindow::DownloadControl::Pause)
+                     .has_value());
+        QVERIFY(!window.controlMediaDownload(QStringLiteral("missing"),
+                                            qtidm::MainWindow::DownloadControl::Pause)
+                     .has_value());
+
+        record.id = QStringLiteral("stream");
+        record.url = QUrl(QStringLiteral("https://example.com/live.m3u8"));
+        record.targetPath = dir.filePath(QStringLiteral("live.ts"));
+        record.status = qtidm::DownloadStatus::Completed;
+        record.request.url = record.url;
+        QVERIFY(repository.upsertDownload(record));
+
+        // Recognised as media, but a finished job cannot be resumed.
+        const auto start = window.controlMediaDownload(record.id,
+                                                       qtidm::MainWindow::DownloadControl::Start);
+        QVERIFY(start.has_value());
+        QCOMPARE(*start, false);
+    }
+
     void tableAndDetailsStatusStaySynchronized()
     {
         QTemporaryDir dir;

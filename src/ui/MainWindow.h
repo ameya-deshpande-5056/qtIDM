@@ -23,6 +23,7 @@
 #include <QTableWidget>
 #include <QTabWidget>
 #include <QTreeWidget>
+#include <optional>
 
 class QLabel;
 class QToolButton;
@@ -35,6 +36,16 @@ class MainWindow final : public QMainWindow {
     Q_OBJECT
 public:
     MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& scheduler, DownloadRepository& repository, ThemeManager& themeManager, QWidget* parent = nullptr);
+
+    // How the automation channel drives a media (HLS/DASH/yt-dlp) download.
+    enum class DownloadControl {
+        Pause,
+        Start,
+        Cancel
+    };
+    // std::nullopt when the id is not a media download, so the caller can use the
+    // standard engine instead.
+    std::optional<bool> controlMediaDownload(const QString& id, DownloadControl control);
 
 public slots:
     bool addUrl(QString url = {}, QVariantMap headers = {});

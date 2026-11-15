@@ -51,6 +51,40 @@ private slots:
         QVERIFY(instance.ExtractSocialMedia(QStringLiteral("https://www.youtube.com/watch?v=example")));
         QCOMPARE(receivedUrl, QStringLiteral("https://www.youtube.com/watch?v=example"));
     }
+
+    void reportsUnavailableAutomation()
+    {
+        SingleInstance instance;
+        const auto answer = instance.ListDownloads();
+        QVERIFY(answer.contains(QStringLiteral("\"error\"")));
+        QVERIFY(answer.contains(QStringLiteral("unavailable")));
+        QVERIFY(instance.PauseDownloads({}).contains(QStringLiteral("unavailable")));
+    }
+
+    void dispatchesAutomationVerbs()
+    {
+        SingleInstance instance;
+        QString verb;
+        QStringList arguments;
+        instance.setAutomationHandler([&verb, &arguments](const QString& receivedVerb,
+                                                          const QStringList& receivedArguments) {
+            verb = receivedVerb;
+            arguments = receivedArguments;
+            return QStringLiteral("{\"ok\":true}");
+        });
+
+        QCOMPARE(instance.PauseDownloads({ QStringLiteral("a"), QStringLiteral("b") }),
+                 QStringLiteral("{\"ok\":true}"));
+        QCOMPARE(verb, QStringLiteral("pause"));
+        QCOMPARE(arguments, QStringList({ QStringLiteral("a"), QStringLiteral("b") }));
+
+        instance.StartQueue(QStringLiteral("Night"));
+        QCOMPARE(verb, QStringLiteral("start-queue"));
+        QCOMPARE(arguments, QStringList { QStringLiteral("Night") });
+
+        instance.DeleteDownloads({ QStringLiteral("c") });
+        QCOMPARE(verb, QStringLiteral("delete"));
+    }
 };
 
 QTEST_GUILESS_MAIN(SingleInstanceTest)
