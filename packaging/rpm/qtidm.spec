@@ -1,7 +1,7 @@
 # The build script rewrites Version from CMakeLists.txt; keep it in step by hand
 # only when building this spec directly with rpmbuild.
 Name:           qtidm
-Version:        0.3.1
+Version:        0.3.2
 Release:        1%{?dist}
 Summary:        Fast, native Internet Download Manager for Linux
 
@@ -9,9 +9,9 @@ License:        MIT
 URL:            https://github.com/ameya-deshpande-5056/qtIDM
 Source0:        %{name}-%{version}.tar.gz
 
-# The bundled helper packaging and the release artifacts are x86-64 only.
-BuildArch:      x86_64
-ExclusiveArch:  x86_64
+# Built natively on either architecture, or cross-built with
+# build-rpm.sh --arch/--toolchain, which also sets --target.
+ExclusiveArch:  x86_64 aarch64
 
 BuildRequires:  cmake
 BuildRequires:  ninja-build
@@ -38,6 +38,9 @@ Firefox integration, and a D-Bus automation interface driven by qtidm-cli.
 
 %build
 %cmake -G Ninja \
+%if %{defined qtidm_toolchain}
+    -DCMAKE_TOOLCHAIN_FILE=%{qtidm_toolchain} \
+%endif
     -DCMAKE_BUILD_TYPE=Release \
     -DQTIDM_BUILD_TESTS=OFF \
     -DQTIDM_INSTALL_NATIVE_MESSAGING_HOSTS=ON
@@ -63,6 +66,9 @@ Firefox integration, and a D-Bus automation interface driven by qtidm-cli.
 %config(noreplace) /etc/chromium/native-messaging-hosts/io.qtidm.native.json
 
 %changelog
+* Sun Nov 15 2026 qtIDM Maintainers <maintainers@example.invalid> - 0.3.2-1
+- Build for arm64 (aarch64) as well as amd64 (x86_64).
+
 * Sun Nov 15 2026 qtIDM Maintainers <maintainers@example.invalid> - 0.3.1-1
 - Automation channel and qtidm-cli, portable data directory, startup resume of
   interrupted transfers, and RPM packaging.

@@ -6,6 +6,20 @@ packaging_workspace() {
     mktemp -d "${TMPDIR:-/tmp}/${prefix}.XXXXXX"
 }
 
+# Normalizes an architecture name to the two spellings the RPM and Arch
+# packages use: x86_64 for amd64 and aarch64 for arm64. Fails for anything else.
+packaging_normalize_arch() {
+    case "$1" in
+        amd64|x86_64|x64) echo x86_64 ;;
+        arm64|aarch64) echo aarch64 ;;
+        *) return 1 ;;
+    esac
+}
+
+packaging_host_arch() {
+    packaging_normalize_arch "$(uname -m)" 2>/dev/null || true
+}
+
 assert_not_home_workspace() {
     workspace="$1"
     case "$workspace" in

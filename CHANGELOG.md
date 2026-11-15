@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- `packaging/build-rpm.sh` and `packaging/build-arch.sh` now take `--arch amd64|arm64`, defaulting to the architecture of the machine they run on, and `--toolchain FILE` for cross builds. Fedora RPMs (`x86_64`/`aarch64`) and Arch `pkg.tar.zst`/`pkg.tar.xz` packages (`x86_64`/`aarch64`) can therefore be produced for arm64 as well as amd64. A target that differs from the host without a toolchain file is refused instead of being built with the host compilers and mislabelled.
+- `packaging/rpm/qtidm.spec` replaces `BuildArch`/`ExclusiveArch: x86_64` with `ExclusiveArch: x86_64 aarch64` and passes `qtidm_toolchain` to CMake only when `build-rpm.sh --toolchain` defines it; `packaging/arch/PKGBUILD` lists both architectures, forwards `QTIDM_CMAKE_TOOLCHAIN_FILE` to CMake, and takes its architecture from the `CARCH` the script sets.
+- Added `packaging_normalize_arch` and `packaging_host_arch` to `packaging/common.sh` so both scripts accept the `amd64`/`x86_64` and `arm64`/`aarch64` spellings and reject anything else rather than guessing, and added `distroPackagingSupportsBothArchitectures` to the packaging tests.
+
 ## 0.3.1
 
 - Added a widgets-free automation surface (`src/integration/AutomationApi.{h,cpp}`) that drives the real engine, scheduler and repository: `listJson()`, `pauseJson()`, `startJson()`, `removeJson()`, `deleteJson()`, `startQueueJson()`, `stopQueueJson()`, and `handleVerb()` dispatch. Every answer is a JSON object with `done` and `skipped` entries carrying a reason (`unknown id`, `not active`, `not resumable`, `already complete`, `already queued`, `media control failed`).

@@ -105,6 +105,36 @@ private slots:
                  qPrintable(version));
     }
 
+    void distroPackagingSupportsBothArchitectures()
+    {
+        // Fedora and Arch package amd64 and arm64; the scripts pick the host
+        // architecture by default and take --arch for the other one.
+        const auto read = [](const QString& path) {
+            QFile file(path);
+            if (!file.open(QIODevice::ReadOnly)) {
+                return QString();
+            }
+            return QString::fromUtf8(file.readAll());
+        };
+        const auto source = QStringLiteral(QTIDM_SOURCE_DIR) + QLatin1Char('/');
+
+        const auto spec = read(source + QStringLiteral("packaging/rpm/qtidm.spec"));
+        QVERIFY(spec.contains(QStringLiteral("ExclusiveArch:  x86_64 aarch64")));
+        QVERIFY(spec.contains(QStringLiteral("qtidm_toolchain")));
+
+        const auto pkgbuild = read(source + QStringLiteral("packaging/arch/PKGBUILD"));
+        QVERIFY(pkgbuild.contains(QStringLiteral("arch=('x86_64' 'aarch64')")));
+        QVERIFY(pkgbuild.contains(QStringLiteral("QTIDM_CMAKE_TOOLCHAIN_FILE")));
+
+        for (const auto& script : { QStringLiteral("packaging/build-rpm.sh"),
+                                    QStringLiteral("packaging/build-arch.sh") }) {
+            const auto data = read(source + script);
+            QVERIFY2(data.contains(QStringLiteral("--arch")), qPrintable(script));
+            QVERIFY2(data.contains(QStringLiteral("--toolchain")), qPrintable(script));
+            QVERIFY2(data.contains(QStringLiteral("packaging_normalize_arch")), qPrintable(script));
+        }
+    }
+
     void rpmPackagingShipsEveryBinary()
     {
         // %files is an explicit list: a binary missing from it fails the build or

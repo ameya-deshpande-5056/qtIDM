@@ -458,7 +458,7 @@ Build and test the Debian package:
 
 ```bash
 sh packaging/build-deb.sh
-sudo apt-get install -y ./dist/qtidm_0.3.1-1_amd64.deb
+sudo apt-get install -y ./dist/qtidm_0.3.2-1_amd64.deb
 qtIDM --version
 ```
 
@@ -480,7 +480,7 @@ chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
 sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
 sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
 APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.3.1-x86_64.AppImage --version
+APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.3.2-x86_64.AppImage --version
 ```
 
 The script writes exactly one versioned AppImage to `dist/`. The checksums pin
@@ -493,7 +493,7 @@ Build and test the Flatpak bundle:
 ```bash
 sh packaging/release/version-info.sh
 sh packaging/release/build-flatpak-bundle.sh
-flatpak install --user -y dist/qtIDM-0.3.1.flatpak
+flatpak install --user -y dist/qtIDM-0.3.2.flatpak
 flatpak run io.qtidm.Qtidm --version
 ```
 
@@ -506,31 +506,41 @@ Build and test the RPM (Fedora):
 
 ```bash
 sudo dnf install -y rpm-build cmake ninja-build gcc-c++ qt6-qtbase-devel libcurl-devel sqlite-devel
-sh packaging/build-rpm.sh
-sudo dnf install -y ./dist/qtidm-0.3.1-1.fc40.x86_64.rpm
+sh packaging/build-rpm.sh                    # the machine's own architecture
+sh packaging/build-rpm.sh --arch arm64       # arm64, on an arm64 machine
+sudo dnf install -y ./dist/qtidm-0.3.2-1.fc40.x86_64.rpm
 qtIDM --version
 qtidm-cli --version
 ```
 
-`packaging/rpm/qtidm.spec` declares `BuildArch: x86_64` and the script passes
-`--target x86_64`, so the package is built for amd64 only, as the bundled helper
-artifacts are. Artifacts are written to `dist/`; the `Version:` line is rewritten
-from `CMakeLists.txt` during the build.
+`packaging/rpm/qtidm.spec` declares `ExclusiveArch: x86_64 aarch64` and the
+script passes `--target` for the selected architecture, so one spec produces
+either `qtidm-0.3.2-1.fc40.x86_64.rpm` or `qtidm-0.3.2-1.fc40.aarch64.rpm`.
+`--arch` defaults to the machine's own architecture; asking for the other one on
+an amd64 host also needs `--toolchain FILE` pointing at an aarch64 CMake
+toolchain file, and without one the script refuses rather than mislabelling the
+package. Artifacts are written to `dist/`; the `Version:` line is rewritten from
+`CMakeLists.txt` during the build.
 
 Build and test the Arch package:
 
 ```bash
 sudo pacman -S --needed base-devel cmake ninja qt6-base curl sqlite
-sh packaging/build-arch.sh                 # dist/qtidm-0.3.1-1-x86_64.pkg.tar.zst
+sh packaging/build-arch.sh                 # dist/qtidm-0.3.2-1-x86_64.pkg.tar.zst
 sh packaging/build-arch.sh --pkg-ext xz    # the same package as .pkg.tar.xz
-sudo pacman -U ./dist/qtidm-0.3.1-1-x86_64.pkg.tar.zst
+sh packaging/build-arch.sh --arch arm64    # dist/qtidm-0.3.2-1-aarch64.pkg.tar.zst
+sudo pacman -U ./dist/qtidm-0.3.2-1-x86_64.pkg.tar.zst
 qtIDM --version
 qtidm-cli --version
 ```
 
 `packaging/arch/PKGBUILD` builds and installs through CMake, so it ships every
 installed target (`qtIDM`, `qtIDM-native-host`, `qtidm-cli`) with no file list to
-keep in step, and `arch=('x86_64')` states the supported architecture. The two
+keep in step, and `arch=('x86_64' 'aarch64')` states the supported
+architectures; the script passes the selected one through `CARCH`, so a build
+produces `qtidm-0.3.2-1-x86_64.pkg.tar.zst` or
+`qtidm-0.3.2-1-aarch64.pkg.tar.zst`. `--arch` defaults to the machine's own
+architecture, and building the other one needs `--toolchain FILE`. The two
 native-messaging manifests under `/etc` are declared as `backup` files, and
 `makepkg` refuses to run as root. `--pkg-ext` picks the compression: `zst`
 (Arch's default) or `xz`.
@@ -580,7 +590,7 @@ The application and browser integrations have independent version tracks:
 
 | Component | Current version | Authoritative files |
 | --- | --- | --- |
-| qtIDM application and release tag | `0.3.1` / `v0.3.1` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
+| qtIDM application and release tag | `0.3.2` / `v0.3.2` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
 | Chrome and Firefox extensions | `0.4.0` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
 
 The two checked-in browser manifest versions must always match each other, but
