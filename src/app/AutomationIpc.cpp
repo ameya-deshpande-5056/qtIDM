@@ -17,6 +17,15 @@ AutomationIpc::AutomationIpc(QString directory)
 {
 }
 
+QString AutomationIpc::channelServiceName()
+{
+    const auto suffix = Paths::instanceSuffix();
+    if (suffix.isEmpty()) {
+        return QString::fromLatin1(serviceName);
+    }
+    return QString::fromLatin1(serviceName) + QLatin1Char('.') + suffix;
+}
+
 bool AutomationIpc::start()
 {
     const auto directory = directory_.isEmpty() ? Paths::dataDir() : directory_;
@@ -33,7 +42,7 @@ bool AutomationIpc::start()
     const QJsonObject document {
         { QStringLiteral("token"), token_ },
         { QStringLiteral("pid"), static_cast<qint64>(QCoreApplication::applicationPid()) },
-        { QStringLiteral("service"), QString::fromLatin1(serviceName) },
+        { QStringLiteral("service"), channelServiceName() },
         { QStringLiteral("object"), QString::fromLatin1(objectPath) },
         { QStringLiteral("interface"), QString::fromLatin1(interfaceName) },
         // Reserved for the loopback HTTP transport; the D-Bus channel needs no port.

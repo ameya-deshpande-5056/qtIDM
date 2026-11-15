@@ -7,6 +7,8 @@
 #include <QDBusMessage>
 #include <QFile>
 #include <QJsonDocument>
+#include <QJsonObject>
+#include <QRegularExpression>
 
 namespace qtidm {
 
@@ -19,6 +21,7 @@ bool AutomationClient::resolve(QString* error) const
 {
     if (!resolved_) {
         resolved_ = true;
+        service_ = QString::fromLatin1(AutomationIpc::serviceName);
         const auto directory = directory_.isEmpty() ? Paths::dataDir() : directory_;
         discoveryPath_ = directory + QLatin1Char('/') + QString::fromLatin1(AutomationIpc::fileName);
         QFile file(discoveryPath_);
@@ -26,8 +29,20 @@ bool AutomationClient::resolve(QString* error) const
             resolveError_ = QStringLiteral("qtIDM is not running (%1 is missing).").arg(discoveryPath_);
         } else if (!file.open(QIODevice::ReadOnly)) {
             resolveError_ = QStringLiteral("Cannot read %1: %2").arg(discoveryPath_, file.errorString());
-        } else if (!QJsonDocument::fromJson(file.readAll()).isObject()) {
+        } else if (const auto document = QJsonDocument::fromJson(file.readAll()); !document.isObject()) {
             resolveError_ = QStringLiteral("%1 is not a valid qtIDM discovery file.").arg(discoveryPath_);
+        } else if (const auto published = document.object().value(QStringLiteral("service")).toString();
+                   !published.isEmpty()) {
+            // A portable instance publishes its own bus name; accept only the
+            // canonical name or that name with this project's instance suffix.
+            static const QRegularExpression allowed(
+                QStringLiteral("^io\\.qtidm\\.Qtidm(\\.[0-9a-f]{8})?$"));
+            if (!allowed.match(published).hasMatch()) {
+                resolveError_ = QStringLiteral("%1 names an unexpected D-Bus service (%2).")
+                                    .arg(discoveryPath_, published);
+            } else {
+                service_ = published;
+            }
         }
     }
     if (!resolveError_.isEmpty()) {
@@ -54,7 +69,7 @@ QString AutomationClient::call(const QString& method, const QVariantList& argume
         }
         return {};
     }
-    auto message = QDBusMessage::createMethodCall(QString::fromLatin1(AutomationIpc::serviceName),
+    auto message = QDBusMessage::createMethodCall(service_,
                                                   QString::fromLatin1(AutomationIpc::objectPath),
                                                   QString::fromLatin1(AutomationIpc::interfaceName),
                                                   method);

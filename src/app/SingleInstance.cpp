@@ -8,7 +8,6 @@
 #include <QJsonDocument>
 
 namespace {
-constexpr auto serviceName = qtidm::automation::service;
 constexpr auto objectPath = qtidm::automation::objectPath;
 constexpr auto interfaceName = qtidm::automation::interface;
 
@@ -21,15 +20,17 @@ QString unavailableAutomation()
 
 namespace qtidm {
 
-SingleInstance::SingleInstance(QObject* parent)
+SingleInstance::SingleInstance(QString serviceName, QObject* parent)
     : QObject(parent)
+    , serviceName_(serviceName.isEmpty() ? QString::fromLatin1(qtidm::automation::service)
+                                         : std::move(serviceName))
 {
 }
 
 bool SingleInstance::acquire()
 {
     auto bus = QDBusConnection::sessionBus();
-    if (!bus.registerService(QString::fromLatin1(serviceName))) {
+    if (!bus.registerService(serviceName_)) {
         return false;
     }
     return bus.registerObject(QString::fromLatin1(objectPath), this, QDBusConnection::ExportAllSlots);
@@ -37,7 +38,7 @@ bool SingleInstance::acquire()
 
 bool SingleInstance::notifyExistingInstance(const QStringList& urls)
 {
-    QDBusInterface iface(QString::fromLatin1(serviceName),
+    QDBusInterface iface(serviceName_,
                          QString::fromLatin1(objectPath),
                          QString::fromLatin1(interfaceName),
                          QDBusConnection::sessionBus());

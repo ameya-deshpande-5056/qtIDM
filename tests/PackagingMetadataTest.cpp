@@ -2,6 +2,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QtTest/QtTest>
 
 class PackagingMetadataTest final : public QObject {
@@ -75,6 +76,65 @@ private slots:
                      qPrintable(runtimePath));
             QVERIFY2(resources.contains(runtimePath), qPrintable(runtimePath));
         }
+    }
+
+    void distroPackagingTracksTheProjectVersion()
+    {
+        QFile cmakeFile(QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/CMakeLists.txt"));
+        QVERIFY(cmakeFile.open(QIODevice::ReadOnly));
+        const auto cmakeData = QString::fromUtf8(cmakeFile.readAll());
+        const QRegularExpression projectExpression(
+            QStringLiteral("project\\(qtIDM VERSION ([0-9]+\\.[0-9]+\\.[0-9]+)"));
+        const auto match = projectExpression.match(cmakeData);
+        QVERIFY(match.hasMatch());
+        const auto version = match.captured(1);
+
+        // The RPM and Arch scripts rewrite these at build time; the checked-in
+        // values must still follow the project version for anyone building
+        // directly with rpmbuild or makepkg.
+        QFile spec(QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/packaging/rpm/qtidm.spec"));
+        QVERIFY(spec.open(QIODevice::ReadOnly));
+        const auto specData = QString::fromUtf8(spec.readAll());
+        QVERIFY2(specData.contains(QStringLiteral("Version:        %1").arg(version)),
+                 qPrintable(version));
+
+        QFile pkgbuild(QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/packaging/arch/PKGBUILD"));
+        QVERIFY(pkgbuild.open(QIODevice::ReadOnly));
+        const auto pkgbuildData = QString::fromUtf8(pkgbuild.readAll());
+        QVERIFY2(pkgbuildData.contains(QStringLiteral("pkgver=%1").arg(version)),
+                 qPrintable(version));
+    }
+
+    void rpmPackagingShipsEveryBinary()
+    {
+        // %files is an explicit list: a binary missing from it fails the build or
+        // ships a package without the tool.
+        QFile file(QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/packaging/rpm/qtidm.spec"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto data = QString::fromUtf8(file.readAll());
+        for (const auto& binary : { "/usr/bin/qtIDM", "/usr/bin/qtIDM-native-host", "/usr/bin/qtidm-cli" }) {
+            QVERIFY2(data.contains(QLatin1String(binary)), binary);
+        }
+    }
+
+    void debianPackagingInstallsEveryBinary()
+    {
+        // packaging/debian/install is an explicit list: a binary missing from it
+        // is simply dropped from the package.
+        QFile file(QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/packaging/debian/install"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto data = QString::fromUtf8(file.readAll());
+        for (const auto& binary : { "usr/bin/qtIDM", "usr/bin/qtIDM-native-host", "usr/bin/qtidm-cli" }) {
+            QVERIFY2(data.contains(QLatin1String(binary)), binary);
+        }
+    }
+
+    void appImageLauncherExposesTheCli()
+    {
+        QFile file(QStringLiteral(QTIDM_SOURCE_DIR) + QStringLiteral("/packaging/appimage/AppRun"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto data = QString::fromUtf8(file.readAll());
+        QVERIFY(data.contains(QStringLiteral("qtidm-cli")));
     }
 
     void browserNativeManifestsAreValidJson()

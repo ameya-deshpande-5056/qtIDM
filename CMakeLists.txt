@@ -175,6 +175,13 @@ add_executable(qtIDM_automation_tests
 target_link_libraries(qtIDM_automation_tests PRIVATE qtidm_automation Qt6::Test)
 add_test(NAME qtIDM_automation_tests COMMAND qtIDM_automation_tests)
 
+add_executable(qtIDM_paths_tests
+    tests/PathsTest.cpp
+)
+
+target_link_libraries(qtIDM_paths_tests PRIVATE qtidm_automation Qt6::Test)
+add_test(NAME qtIDM_paths_tests COMMAND qtIDM_paths_tests)
+
 add_executable(qtIDM_core_tests
     tests/DownloadRepositoryTest.cpp
     src/core/DownloadTypes.cpp

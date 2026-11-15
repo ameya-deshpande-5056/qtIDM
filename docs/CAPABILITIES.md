@@ -12,7 +12,7 @@ Firefox integrations.
 | HTTP, HTTPS, FTP | Implemented |
 | Multipart transfer, dynamic part refill, up to 32 connections | Implemented |
 | Pause, resume, cancel, retry, `Retry-After` | Implemented |
-| Persistent resume after restart | Implemented, including request headers, authentication, proxy, checksum, timeout, and retry options |
+| Persistent resume after restart | Implemented, including request headers, authentication, proxy, checksum, timeout, and retry options; transfers left queued, connecting, or downloading at exit are re-queued automatically on the next start |
 | Per-download and per-host connection limits | Implemented |
 | Global/queue concurrent download limits | Implemented |
 | Per-download and default speed limits | Implemented |
@@ -92,7 +92,8 @@ register the local CRX with Google Chrome.
 | Per-id results | Implemented as `done` and `skipped` with a reason (`unknown id`, `not active`, `not resumable`, `already complete`, `already queued`, `media control failed`) |
 | Queue dispatch control (`StartQueue`, `StopQueue`) | Implemented per named queue; `Main` is always addressable and always listed |
 | Adaptive HLS/DASH and social-media jobs | Implemented through the window's media downloader, so pause, start, and delete behave like a normal transfer |
-| Discovery file (`ipc.json`) | Implemented with a per-start token and owner-only permissions |
+| Discovery file (`ipc.json`) | Implemented with a per-start token, owner-only permissions, and the session bus name it publishes (suffixed for a portable copy) |
+| Alternate data directory (portable mode) | Implemented through `--data DIR` and `QTIDM_DATA_DIR`; settings, database, logs and `ipc.json` move together, and the instance takes its own D-Bus name so it can run beside an installed copy |
 | `qtidm-cli` | Implemented: `list`, `pause`, `start`, `remove`, `delete`, `start-queue`, `stop-queue`, `--json`, `--data` |
 | Adding downloads from `qtidm-cli` | Not implemented; use the D-Bus `AddUrl`, `AddUrls`, or `AddDownloadsJson` verbs |
 | Loopback HTTP automation transport | Not implemented; `ipc.json` reserves `port` for it |

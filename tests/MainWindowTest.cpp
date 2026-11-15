@@ -70,6 +70,53 @@ private slots:
         qRegisterMetaType<QVector<qtidm::SegmentInfo>>("QVector<SegmentInfo>");
     }
 
+    void resumeInterruptedDownloadsRequeuesActiveTransfers()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        qtidm::DownloadRepository repository;
+        QVERIFY(repository.open(dir.filePath(QStringLiteral("downloads.sqlite3"))));
+        QVERIFY(repository.migrate());
+        qtidm::CurlEpollDownloader downloader;
+        qtidm::DownloadScheduler scheduler(downloader);
+        // Hold the queue so nothing probes the network from a test.
+        scheduler.setQueueEnabled(QStringLiteral("Main"), false);
+        qtidm::ThemeManager themeManager;
+        qtidm::MainWindow window(downloader, scheduler, repository, themeManager);
+
+        const auto add = [&repository, &dir](const QString& id, qtidm::DownloadStatus status) {
+            qtidm::DownloadRecord record;
+            record.id = id;
+            record.url = QUrl(QStringLiteral("https://example.com/") + id + QStringLiteral(".bin"));
+            record.targetPath = dir.filePath(id + QStringLiteral(".bin"));
+            record.status = status;
+            record.createdAt = QDateTime::currentDateTimeUtc();
+            record.updatedAt = record.createdAt;
+            record.request.url = record.url;
+            record.request.targetPath = record.targetPath;
+            return repository.upsertDownload(record);
+        };
+        QVERIFY(add(QStringLiteral("downloading"), qtidm::DownloadStatus::Downloading));
+        QVERIFY(add(QStringLiteral("connecting"), qtidm::DownloadStatus::Connecting));
+        QVERIFY(add(QStringLiteral("queued"), qtidm::DownloadStatus::Queued));
+        // Only mid-flight transfers are picked up again.
+        QVERIFY(add(QStringLiteral("paused"), qtidm::DownloadStatus::Paused));
+        QVERIFY(add(QStringLiteral("done"), qtidm::DownloadStatus::Completed));
+        QVERIFY(add(QStringLiteral("failed"), qtidm::DownloadStatus::Failed));
+
+        window.resumeInterruptedDownloads();
+
+        QStringList requeued;
+        for (const auto& request : scheduler.queued()) {
+            requeued.append(request.existingId);
+        }
+        requeued.sort();
+        QCOMPARE(requeued, QStringList({ QStringLiteral("connecting"),
+                                         QStringLiteral("downloading"),
+                                         QStringLiteral("queued") }));
+    }
+
     void mediaControlOnlyClaimsMediaDownloads()
     {
         QTemporaryDir dir;

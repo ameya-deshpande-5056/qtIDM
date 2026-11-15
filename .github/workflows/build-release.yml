@@ -166,6 +166,8 @@ jobs:
           sudo apt-get install -y ./dist/*.deb
           xvfb-run -a qtIDM --version
           test -x /usr/bin/qtIDM-native-host
+          test -x /usr/bin/qtidm-cli
+          qtidm-cli --version
           test -f /usr/lib/mozilla/native-messaging-hosts/io.qtidm.native.json
           test -f /etc/opt/chrome/native-messaging-hosts/io.qtidm.native.json
           test -f /etc/chromium/native-messaging-hosts/io.qtidm.native.json
@@ -205,6 +207,10 @@ jobs:
         run: |
           chmod +x "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage"
           xvfb-run -a "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage" --version
+          APPIMAGE="$(realpath "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage")"
+          # The bundled qtidm-cli is reachable by invoking the AppImage under that name.
+          ln -sf "$APPIMAGE" qtidm-cli
+          ./qtidm-cli --version | grep -q '^qtidm-cli '
           if [ -f browser/packages/qtidm-chrome.crx ]; then
             EXTRACT_DIR="$(mktemp -d)"
             APPIMAGE="$(realpath "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage")"
@@ -228,6 +234,7 @@ jobs:
           test -f "dist/qtIDM-${{ steps.version.outputs.version }}.flatpak"
           flatpak install --user -y "dist/qtIDM-${{ steps.version.outputs.version }}.flatpak"
           dbus-run-session -- xvfb-run -a flatpak run io.qtidm.Qtidm --version
+          flatpak run --command=qtidm-cli io.qtidm.Qtidm --version
           if [ -f browser/packages/qtidm-chrome.crx ]; then
             flatpak run --command=sh io.qtidm.Qtidm -c \
               'test -f /app/share/qtidm/browser/packages/qtidm-chrome.crx && test -f /app/share/qtidm/browser/packages/qtidm-firefox.xpi'

@@ -54,6 +54,9 @@ public slots:
     bool extractSocialMediaUrl(const QUrl& initialUrl = {});
     void extractSocialMedia();
     void raiseAndActivate();
+    // Re-queues transfers that were queued, connecting or downloading when the
+    // application last stopped, so a crash or quit does not strand them.
+    void resumeInterruptedDownloads();
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -89,6 +92,7 @@ private slots:
 private:
     void buildActions();
     void buildLayout();
+    void resumeRecord(const DownloadRecord& record);
     void buildTray();
     void loadPersistedDownloads();
     void configureClipboardMonitor();

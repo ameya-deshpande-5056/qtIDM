@@ -1,4 +1,11 @@
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
 export PATH="$HERE/usr/bin:${PATH:-/usr/bin:/bin}"
+# The AppImage runtime reports the name it was invoked by in ARGV0, which is how
+# a "'ln -s qtIDM-*.AppImage qtidm-cli' then './qtidm-cli list'" works.
+case "$(basename "${ARGV0:-$0}")" in
+qtidm-cli*)
+    exec "$HERE/usr/bin/qtidm-cli" "$@"
+    ;;
+esac
 exec "$HERE/usr/bin/qtIDM" "$@"

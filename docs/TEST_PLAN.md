@@ -74,11 +74,31 @@
   - Parse direct formats and HTTP headers from yt-dlp metadata.
   - Reject metadata explicitly marked as DRM-protected.
 
+- `qtIDM_automation_tests`
+  - List downloads and queues as JSON, including unknown sizes as `null`.
+  - Always report the `Main` queue, even on a scheduler that has never seen one.
+  - Pause active downloads and skip inactive, unknown and media ids with a reason.
+  - Start resumable downloads, force `Start now`, and refuse a duplicate queue entry.
+  - Remove entries while keeping files; delete entries together with the file and `.part`.
+  - Route media jobs through the supplied handler and fall back to the engine without one.
+  - Start, stop and reject unknown queues.
+  - Dispatch named verbs and reject an unknown verb.
+  - Write `ipc.json` with an owner-only token, rotate it per start, publish the channel name and remove the file on exit.
+
+- `qtIDM_paths_tests`
+  - Use the fixed project directory for the default locations.
+  - Redirect the database, log and config directories under a data-directory override.
+  - Derive a stable instance suffix that differs between directories.
+  - Restore the default locations when the override is cleared.
+
 - `qtIDM_packaging_metadata_tests`
   - Validate `.desktop` launch metadata.
   - Validate Chrome native messaging manifest JSON.
   - Validate Firefox native messaging manifest JSON.
   - Validate browser extension manifest JSON.
+  - Require the Debian `install` list to name every installed binary, `qtidm-cli` included.
+  - Require the AppImage `AppRun` to expose the bundled CLI.
+  - Require the RPM spec and Arch `PKGBUILD` to track the project version and ship every binary.
 
 - Browser packaging workflow
   - Exercise development and release orchestration with local signing-service test doubles.
@@ -117,6 +137,8 @@
   - Synchronize status and progress updates between the download table and details pane.
   - Restore hidden or minimized-maximized windows on system tray activation.
   - Verify updated download table columns, hidden-URL search/copy, dynamic column resizing, and elided-cell tooltips.
+  - Re-queue only the transfers that were mid-flight when the process stopped.
+  - Claim only media downloads for automation control, and refuse to resume a finished one.
 
 - `qtIDM_performance_smoke_tests`
   - Seed 10,000 persisted downloads.
@@ -142,6 +164,12 @@ ctest --test-dir build --output-on-failure
 - Tray menu opens app, adds URL, and quits.
 - System theme change updates light/dark stylesheet through portal D-Bus.
 - Single-instance D-Bus forwards URL to existing process.
+- D-Bus automation lists, pauses, resumes, removes and deletes downloads, and starts or holds a queue.
+- `qtidm-cli` mirrors each D-Bus verb, prints the same JSON with `--json`, and exits `1` on an error answer.
+- `qtidm-cli --data DIR` reaches a portable instance whose `ipc.json` publishes a suffixed bus name.
+- A portable copy (`--data DIR`) runs beside an installed instance; each keeps its own database, log and D-Bus name.
+- A transfer interrupted by a crash resumes automatically on the next start, honoring queue limits and metered policy.
+- HLS/DASH and social-media jobs pause, resume and delete through the automation verbs.
 - Chrome extension context-menu link capture sends URL, cookie, referrer, and user-agent.
 - Firefox extension context-menu link capture sends URL, cookie, referrer, and user-agent.
 - HTTPS download completes.
@@ -160,9 +188,11 @@ ctest --test-dir build --output-on-failure
 - Vault credentials store and load through the desktop Secret Service without appearing in persisted request JSON.
 - Successful supported archives extract automatically and unsafe archive members are rejected.
 - Supported social-site URLs expose selectable non-DRM formats through yt-dlp.
-- `.deb` installs, launches, and removes cleanly.
-- AppImage runs on a clean supported distribution.
-- Flatpak bundle installs, launches, and has network/session-bus access.
+- `.deb` installs, launches, and removes cleanly, and includes `/usr/bin/qtidm-cli`.
+- AppImage runs on a clean supported distribution, and the bundled CLI runs when the image is invoked as `qtidm-cli`.
+- Flatpak bundle installs, launches, has network/session-bus access, and reaches `qtidm-cli` through `flatpak run --command=qtidm-cli`.
+- RPM installs, launches, and removes cleanly on Fedora, and includes `qtidm-cli`.
+- Arch package installs, launches, and removes cleanly, as `.pkg.tar.zst` or `.pkg.tar.xz`.
 - GitHub tag `vX.Y.Z` matching `CMakeLists.txt` publishes release assets.
 - GitHub mismatched tag/version fails release workflow.
 
@@ -177,10 +207,10 @@ The single workflow `.github/workflows/build-release.yml` runs sequentially:
 5. Run scheduled performance smoke on weekly schedule.
 6. Prepare release metadata for tag/manual release.
 7. Build Debian package.
-8. Install and smoke-test Debian package.
+8. Install and smoke-test Debian package, including `qtidm-cli`.
 9. Build AppImage.
-10. Smoke-test AppImage.
+10. Smoke-test AppImage, including `qtidm-cli` through the packed image.
 11. Build Flatpak bundle.
-12. Install and smoke-test Flatpak bundle.
+12. Install and smoke-test Flatpak bundle, including `flatpak run --command=qtidm-cli`.
 13. Upload artifacts.
 14. Publish GitHub Release for version tags.

@@ -1,4 +1,5 @@
 #include "app/AutomationIpc.h"
+#include "app/Paths.h"
 #include "core/CurlEpollDownloader.h"
 #include "core/DownloadScheduler.h"
 #include "integration/AutomationApi.h"
@@ -110,6 +111,7 @@ private slots:
         downloader_.reset();
         repository_.reset();
         directory_.reset();
+        Paths::setDataDirectory({});
     }
 
     void listReportsDownloadsAndQueues()
@@ -376,6 +378,31 @@ private slots:
         QVERIFY(permissions.testFlag(QFile::WriteOwner));
         QVERIFY(!permissions.testFlag(QFile::ReadGroup));
         QVERIFY(!permissions.testFlag(QFile::ReadOther));
+    }
+
+    void ipcPublishesTheInstanceServiceName()
+    {
+        // A default instance keeps the canonical bus name.
+        QCOMPARE(AutomationIpc::channelServiceName(),
+                 QString::fromLatin1(AutomationIpc::serviceName));
+
+        QTemporaryDir portable;
+        QVERIFY(portable.isValid());
+        Paths::setDataDirectory(portable.path());
+        const auto expected = QString::fromLatin1(AutomationIpc::serviceName)
+            + QLatin1Char('.') + Paths::instanceSuffix();
+        QCOMPARE(AutomationIpc::channelServiceName(), expected);
+
+        AutomationIpc ipc;
+        QVERIFY2(ipc.start(), qPrintable(ipc.lastError()));
+        QFile file(ipc.path());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto published = QJsonDocument::fromJson(file.readAll())
+                                   .object().value(QStringLiteral("service")).toString();
+        file.close();
+        ipc.stop();
+
+        QCOMPARE(published, expected);
     }
 
     void ipcRotatesTheTokenAndRemovesTheFile()

@@ -19,6 +19,10 @@ public:
     // keeps its download database.
     explicit AutomationIpc(QString directory = {});
 
+    // The session bus name this process uses: the canonical name, or that name
+    // with the instance suffix when a data directory was chosen explicitly.
+    static QString channelServiceName();
+
     bool start();
     void stop();
 

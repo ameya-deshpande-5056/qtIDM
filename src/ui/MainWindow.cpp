@@ -2199,6 +2199,28 @@ std::optional<bool> MainWindow::controlMediaDownload(const QString& id, Download
     return std::nullopt;
 }
 
+void MainWindow::resumeRecord(const DownloadRecord& record)
+{
+    if (mediaDownloader_.contains(record.id)) {
+        mediaDownloader_.resume(record.id);
+        return;
+    }
+    if (MediaDownloader::supports(record.url)) {
+        mediaDownloader_.enqueue(record.url, record.targetPath, record.request.headers, record.id);
+        return;
+    }
+    DownloadRequest request = record.request;
+    request.existingId = record.id;
+    request.url = record.url;
+    request.targetPath = record.targetPath;
+    request.category = record.category;
+    request.expectedTotalBytes = record.totalBytes;
+    request.resumeSegments = record.segments;
+    request.segments = record.request.segments > 0 ? record.request.segments : 8;
+    applyRequestDefaults(request);
+    scheduler_.schedule(std::move(request));
+}
+
 void MainWindow::resumeSelected()
 {
     const auto records = repository_.listDownloads();
@@ -2208,27 +2230,24 @@ void MainWindow::resumeSelected()
         const auto it = std::find_if(records.cbegin(), records.cend(), [idItem](const DownloadRecord& record) {
             return record.id == idItem->text();
         });
-        if (it == records.cend()) continue;
-        const auto& record = *it;
-        if (!isResumableStatus(record.status)) continue;
-        if (mediaDownloader_.contains(record.id)) {
-            mediaDownloader_.resume(record.id);
+        if (it == records.cend() || !isResumableStatus(it->status)) continue;
+        resumeRecord(*it);
+    }
+}
+
+void MainWindow::resumeInterruptedDownloads()
+{
+    for (const auto& record : repository_.listDownloads()) {
+        // Only transfers that were mid-flight when the process stopped; paused,
+        // failed and completed entries keep whatever the user chose for them.
+        if (record.status != DownloadStatus::Queued && record.status != DownloadStatus::Connecting
+            && record.status != DownloadStatus::Downloading) {
             continue;
         }
-        if (MediaDownloader::supports(record.url)) {
-            mediaDownloader_.enqueue(record.url, record.targetPath, record.request.headers, record.id);
+        if (!record.url.isValid() || record.targetPath.isEmpty()) {
             continue;
         }
-        DownloadRequest request = record.request;
-        request.existingId = record.id;
-        request.url = record.url;
-        request.targetPath = record.targetPath;
-        request.category = record.category;
-        request.expectedTotalBytes = record.totalBytes;
-        request.resumeSegments = record.segments;
-        request.segments = record.request.segments > 0 ? record.request.segments : 8;
-        applyRequestDefaults(request);
-        scheduler_.schedule(std::move(request));
+        resumeRecord(record);
     }
 }
 

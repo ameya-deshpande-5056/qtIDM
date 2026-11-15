@@ -108,6 +108,7 @@ See [Queues and Scheduler](#queues-and-scheduler) below for dialog usage, workfl
 - D-Bus single-instance URL forwarding.
 - Dynamic light/dark theme tracking through the desktop portal with desktop-environment fallbacks.
 - Persistent diagnostic logging in the Qt application-data directory.
+- Transfers interrupted by a crash or a quit resume automatically on the next start.
 - Session D-Bus automation interface and `qtidm-cli` for scripted control of a running instance.
 
 ### Browser Integration
@@ -194,6 +195,10 @@ Common entry points:
   installed Chrome/Chromium browser before link discovery.
 - **Options** configures download defaults, session quotas, metered-network
   behavior, and archive automation.
+- **`--data DIR`** (or `QTIDM_DATA_DIR`) keeps the settings, database, logs and
+  discovery file in `DIR`. This makes a copy portable and lets it run beside an
+  installed qtIDM: the extra instance publishes its own D-Bus name, so the two
+  do not hand downloads to each other.
 - The Chrome and Firefox extensions can intercept downloads or submit captured
   media through the native messaging host.
 
@@ -234,8 +239,19 @@ qtidm-cli start-queue Main
 | `stop-queue <name>` | Hold a queue without interrupting active transfers |
 
 `--json` prints the exact JSON answer. `--data <dir>` points the client at
-another data directory. Exit status is `0` for a completed command, `1` for a
-failure (including an error answer), and `2` for a usage error.
+another data directory; the application accepts the same option, so a portable
+instance and its client always agree. Exit status is `0` for a completed
+command, `1` for a failure (including an error answer), and `2` for a usage
+error.
+
+The `.deb` installs `qtidm-cli` as `/usr/bin/qtidm-cli`. Inside the AppImage,
+invoke the image under that name:
+
+```bash
+ln -s qtIDM-<version>-x86_64.AppImage qtidm-cli && ./qtidm-cli list
+```
+
+Inside the Flatpak, use `flatpak run --command=qtidm-cli io.qtidm.Qtidm list`.
 
 ### D-Bus interface
 
@@ -398,8 +414,8 @@ and resumed transfers, retries, checksums, conflict policies, per-host limits,
 metered-network dispatch, archive safety and extraction, credential-vault
 transport, social metadata and DRM filtering, adaptive-media handling,
 ZIP/ZIP64 parsing, main window UI behavior, packaging metadata,
-JavaScript-rendered site grabbing, automation answers and the `ipc.json`
-discovery file, and performance smoke tests. The downloader and browser-extension integration
+JavaScript-rendered site grabbing, automation answers, the `ipc.json` discovery
+file, the portable data-directory override, and performance smoke tests. The downloader and browser-extension integration
 suites start localhost HTTP fixture servers, so restricted sandboxes must
 permit localhost port binding.
 
@@ -424,9 +440,11 @@ QTIDM_RUN_PERF_TESTS=1 ctest --test-dir build -R qtIDM_performance_smoke_tests -
 ## Packaging
 
 ```bash
-sh packaging/build-deb.sh
-sh packaging/build-appimage.sh
-sh packaging/build-flatpak.sh
+sh packaging/build-deb.sh        # Debian and Ubuntu, amd64
+sh packaging/build-appimage.sh   # portable AppImage, x86-64
+sh packaging/build-flatpak.sh    # Flatpak for the KDE 6.11 runtime
+sh packaging/build-rpm.sh        # Fedora and RHEL-family, x86_64
+sh packaging/build-arch.sh       # Arch Linux, x86_64 (.pkg.tar.zst)
 ```
 
 Local package prerequisites on Ubuntu:
@@ -483,6 +501,39 @@ The Flatpak targets the supported KDE 6.11 runtime, has write access only to the
 user's Downloads directory plus portal-selected files, and bundles FFmpeg
 through the runtime together with `secret-tool`, 7-Zip, and yt-dlp. The bundled
 7-Zip and yt-dlp helpers currently target the x86-64 release architecture.
+
+Build and test the RPM (Fedora):
+
+```bash
+sudo dnf install -y rpm-build cmake ninja-build gcc-c++ qt6-qtbase-devel libcurl-devel sqlite-devel
+sh packaging/build-rpm.sh
+sudo dnf install -y ./dist/qtidm-0.3.0-1.fc40.x86_64.rpm
+qtIDM --version
+qtidm-cli --version
+```
+
+`packaging/rpm/qtidm.spec` declares `BuildArch: x86_64` and the script passes
+`--target x86_64`, so the package is built for amd64 only, as the bundled helper
+artifacts are. Artifacts are written to `dist/`; the `Version:` line is rewritten
+from `CMakeLists.txt` during the build.
+
+Build and test the Arch package:
+
+```bash
+sudo pacman -S --needed base-devel cmake ninja qt6-base curl sqlite
+sh packaging/build-arch.sh                 # dist/qtidm-0.3.0-1-x86_64.pkg.tar.zst
+sh packaging/build-arch.sh --pkg-ext xz    # the same package as .pkg.tar.xz
+sudo pacman -U ./dist/qtidm-0.3.0-1-x86_64.pkg.tar.zst
+qtIDM --version
+qtidm-cli --version
+```
+
+`packaging/arch/PKGBUILD` builds and installs through CMake, so it ships every
+installed target (`qtIDM`, `qtIDM-native-host`, `qtidm-cli`) with no file list to
+keep in step, and `arch=('x86_64')` states the supported architecture. The two
+native-messaging manifests under `/etc` are declared as `backup` files, and
+`makepkg` refuses to run as root. `--pkg-ext` picks the compression: `zst`
+(Arch's default) or `xz`.
 
 ### Browser extension packages
 
@@ -692,6 +743,8 @@ The release `.deb` installs the signed files at:
 
 - DRM-protected media is intentionally unsupported.
 - BitTorrent is not implemented.
+- `qtidm-cli` lists and controls existing downloads but cannot add new ones; use
+  the D-Bus `AddUrl`, `AddUrls`, or `AddDownloadsJson` verbs, or the window.
 - Chrome release builds require the signing-key-derived extension ID through `QTIDM_CHROME_EXTENSION_ID`.
 - Flatpak does not install native messaging manifests into host browser directories; install a host package for browser integration.
 - JavaScript-rendered site grabbing requires an installed Chrome/Chromium-family browser; static grabbing remains available as a fallback.

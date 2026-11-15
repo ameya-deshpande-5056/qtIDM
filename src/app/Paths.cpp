@@ -1,22 +1,54 @@
 #include "app/Paths.h"
 
+#include <QCryptographicHash>
+#include <QDir>
 #include <QStandardPaths>
 
 namespace qtidm {
+
+namespace {
+QString dataDirectoryOverride;
+}
+
+void Paths::setDataDirectory(const QString& directory)
+{
+    dataDirectoryOverride = directory.trimmed();
+}
+
+QString Paths::dataDirOverride()
+{
+    return dataDirectoryOverride;
+}
 
 // These are deliberately derived from the generic locations plus a fixed name
 // rather than from the application name: qtidm-cli, the native messaging host
 // and the application itself must all resolve the same directory.
 QString Paths::configDir()
 {
+    if (!dataDirectoryOverride.isEmpty()) {
+        return dataDir() + QStringLiteral("/config");
+    }
     return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
         + QStringLiteral("/qtIDM");
 }
 
 QString Paths::dataDir()
 {
+    if (!dataDirectoryOverride.isEmpty()) {
+        return QDir(dataDirectoryOverride).absolutePath();
+    }
     return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)
         + QStringLiteral("/qtIDM");
+}
+
+QString Paths::instanceSuffix()
+{
+    if (dataDirectoryOverride.isEmpty()) {
+        return {};
+    }
+    // A stable digest, not qHash: it must match across processes.
+    const auto digest = QCryptographicHash::hash(dataDir().toUtf8(), QCryptographicHash::Sha1);
+    return QString::fromLatin1(digest.toHex().left(8));
 }
 
 QString Paths::databasePath()

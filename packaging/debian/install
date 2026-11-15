@@ -1,5 +1,6 @@
 usr/bin/qtIDM
 usr/bin/qtIDM-native-host
+usr/bin/qtidm-cli
 usr/share/applications/io.qtidm.Qtidm.desktop
 usr/share/icons/hicolor/scalable/apps/io.qtidm.Qtidm.svg
 usr/share/icons/hicolor/*/apps/io.qtidm.Qtidm.png

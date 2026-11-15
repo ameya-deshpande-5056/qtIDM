@@ -13,7 +13,9 @@ class SingleInstance final : public QObject {
     Q_OBJECT
     Q_CLASSINFO("D-Bus Interface", "io.qtidm.Qtidm.Application")
 public:
-    explicit SingleInstance(QObject* parent = nullptr);
+    // An empty service name uses the canonical one; a portable instance passes
+    // its own so it can run beside an installed copy.
+    explicit SingleInstance(QString serviceName = {}, QObject* parent = nullptr);
     bool acquire();
     bool notifyExistingInstance(const QStringList& urls);
     void setUrlHandler(std::function<bool(QString, QVariantMap)> handler);
@@ -46,6 +48,7 @@ signals:
     void urlsReceived(QStringList urls, QVariantMap headers);
 
 private:
+    QString serviceName_;
     std::function<bool(QString, QVariantMap)> urlHandler_;
     std::function<bool(QStringList, QVariantMap)> urlsHandler_;
     std::function<bool(QVariantList)> downloadsHandler_;

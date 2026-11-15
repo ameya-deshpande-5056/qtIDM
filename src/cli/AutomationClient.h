@@ -21,6 +21,7 @@ private:
     QString directory_;
     mutable bool resolved_ = false;
     mutable QString discoveryPath_;
+    mutable QString service_;
     mutable QString resolveError_;
 };
 

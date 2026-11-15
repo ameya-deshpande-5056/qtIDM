@@ -28,6 +28,23 @@ int main(int argc, char** argv)
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/qtidm/icons/application.png")));
     QApplication::setOrganizationName(QStringLiteral("qtIDM"));
     QApplication::setApplicationVersion(QStringLiteral(QTIDM_VERSION));
+    // A chosen data directory makes the copy portable and lets it run beside an
+    // installed instance, which is also why it changes the D-Bus name below.
+    QString dataDirectory;
+    const auto arguments = app.arguments();
+    for (int index = 1; index < arguments.size(); ++index) {
+        if (arguments.at(index) == QStringLiteral("--data")) {
+            dataDirectory = arguments.value(index + 1);
+        } else if (arguments.at(index).startsWith(QStringLiteral("--data="))) {
+            dataDirectory = arguments.at(index).mid(int(QStringLiteral("--data=").size()));
+        }
+    }
+    if (dataDirectory.isEmpty()) {
+        dataDirectory = qEnvironmentVariable("QTIDM_DATA_DIR");
+    }
+    if (!dataDirectory.isEmpty()) {
+        qtidm::Paths::setDataDirectory(dataDirectory);
+    }
     qtidm::Paths::ensureRuntimeDirs();
     qtidm::Logger::install();
     if (app.arguments().contains(QStringLiteral("--version"))) {
@@ -35,7 +52,9 @@ int main(int argc, char** argv)
         return 0;
     }
     if (app.arguments().contains(QStringLiteral("--help"))) {
-        std::printf("Usage: qtIDM [--help] [--version] [url...]\n");
+        std::printf("Usage: qtIDM [--help] [--version] [--data DIR] [url...]\n"
+                    "\n"
+                    "  --data DIR   Keep settings, database and logs in DIR (also QTIDM_DATA_DIR).\n");
         return 0;
     }
     qRegisterMetaType<qtidm::DownloadRecord>("qtidm::DownloadRecord");
@@ -49,7 +68,7 @@ int main(int argc, char** argv)
             startupArgs.append(arg);
         }
     }
-    qtidm::SingleInstance singleInstance;
+    qtidm::SingleInstance singleInstance(qtidm::AutomationIpc::channelServiceName());
     if (!singleInstance.acquire()) {
         singleInstance.notifyExistingInstance(startupArgs);
         return 0;
@@ -101,6 +120,9 @@ int main(int argc, char** argv)
 
     downloader.start();
     window.show();
+    // Transfers that were queued, connecting or downloading when the process
+    // last stopped are picked up here rather than left stranded in the list.
+    window.resumeInterruptedDownloads();
     QTimer::singleShot(0, &window, [&window, startupArgs] {
         for (const auto& arg : startupArgs) {
             window.addUrl(arg);
