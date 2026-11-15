@@ -188,29 +188,20 @@ ctest --test-dir build --output-on-failure
 - Vault credentials store and load through the desktop Secret Service without appearing in persisted request JSON.
 - Successful supported archives extract automatically and unsafe archive members are rejected.
 - Supported social-site URLs expose selectable non-DRM formats through yt-dlp.
-- `.deb` installs, launches, and removes cleanly, and includes `/usr/bin/qtidm-cli`.
-- AppImage runs on a clean supported distribution, and the bundled CLI runs when the image is invoked as `qtidm-cli`.
-- Flatpak bundle installs, launches, has network/session-bus access, and reaches `qtidm-cli` through `flatpak run --command=qtidm-cli`.
-- RPM installs, launches, and removes cleanly on Fedora, and includes `qtidm-cli`.
-- Arch package installs, launches, and removes cleanly, as `.pkg.tar.zst` or `.pkg.tar.xz`.
+- `.deb` installs, launches, and removes cleanly, and includes `/usr/bin/qtidm-cli` (tested on amd64 and arm64).
+- AppImage runs on a clean supported distribution, and the bundled CLI runs when the image is invoked as `qtidm-cli` (tested on amd64 and arm64).
+- Flatpak bundle installs, launches, has network/session-bus access, and reaches `qtidm-cli` through `flatpak run --command=qtidm-cli` (tested on amd64 and arm64).
+- RPM installs, launches, and removes cleanly on Fedora, and includes `qtidm-cli` (tested on amd64 and arm64).
+- Arch package installs, launches, and removes cleanly, as `.pkg.tar.zst` or `.pkg.tar.xz` (tested on amd64 and arm64).
 - GitHub tag `vX.Y.Z` matching `CMakeLists.txt` publishes release assets.
 - GitHub mismatched tag/version fails release workflow.
 
 ## GitHub Actions Flow
 
-The single workflow `.github/workflows/build-release.yml` runs sequentially:
+The workflow `.github/workflows/build-release.yml` runs:
 
-1. Install Linux dependencies.
-2. Configure.
-3. Build.
-4. Run all CTest tests.
-5. Run scheduled performance smoke on weekly schedule.
-6. Prepare release metadata for tag/manual release.
-7. Build Debian package.
-8. Install and smoke-test Debian package, including `qtidm-cli`.
-9. Build AppImage.
-10. Smoke-test AppImage, including `qtidm-cli` through the packed image.
-11. Build Flatpak bundle.
-12. Install and smoke-test Flatpak bundle, including `flatpak run --command=qtidm-cli`.
-13. Upload artifacts.
-14. Publish GitHub Release for version tags.
+1. `build-test`: Linux dependencies, CMake configure and build, CTest suite, packaging metadata validation, browser extension E2E, performance smoke, signed browser packages and changelog preparation.
+2. `package-deb-appimage-flatpak`: Matrix across `amd64` (`ubuntu-24.04`) and `arm64` (`ubuntu-24.04-arm`) building and smoke-testing Debian packages, AppImages, and Flatpak bundles.
+3. `package-rpm`: Matrix across `amd64` and `arm64` in Fedora 40 containers building and smoke-testing RPM packages.
+4. `package-arch`: Matrix across `amd64` and `arm64` in Arch Linux containers building and smoke-testing Arch packages.
+5. `publish-release`: Consolidates all package artifacts and publishes the GitHub Release with body generated from changelog.

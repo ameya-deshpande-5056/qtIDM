@@ -107,8 +107,8 @@ private slots:
 
     void distroPackagingSupportsBothArchitectures()
     {
-        // Fedora and Arch package amd64 and arm64; the scripts pick the host
-        // architecture by default and take --arch for the other one.
+        // Debian, Fedora, Arch, Flatpak and AppImage package amd64 and arm64;
+        // the scripts pick the host architecture by default and take --arch.
         const auto read = [](const QString& path) {
             QFile file(path);
             if (!file.open(QIODevice::ReadOnly)) {
@@ -126,11 +126,27 @@ private slots:
         QVERIFY(pkgbuild.contains(QStringLiteral("arch=('x86_64' 'aarch64')")));
         QVERIFY(pkgbuild.contains(QStringLiteral("QTIDM_CMAKE_TOOLCHAIN_FILE")));
 
+        const auto debianControl = read(source + QStringLiteral("packaging/debian/control"));
+        QVERIFY(debianControl.contains(QStringLiteral("Architecture: any")));
+
+        const auto flatpak = read(source + QStringLiteral("packaging/flatpak/io.qtidm.Qtidm.yml"));
+        QVERIFY(flatpak.contains(QStringLiteral("x86_64")));
+        QVERIFY(flatpak.contains(QStringLiteral("aarch64")));
+
         for (const auto& script : { QStringLiteral("packaging/build-rpm.sh"),
-                                    QStringLiteral("packaging/build-arch.sh") }) {
+                                    QStringLiteral("packaging/build-arch.sh"),
+                                    QStringLiteral("packaging/build-appimage.sh") }) {
             const auto data = read(source + script);
             QVERIFY2(data.contains(QStringLiteral("--arch")), qPrintable(script));
             QVERIFY2(data.contains(QStringLiteral("--toolchain")), qPrintable(script));
+            QVERIFY2(data.contains(QStringLiteral("packaging_normalize_arch")), qPrintable(script));
+        }
+
+        for (const auto& script : { QStringLiteral("packaging/build-deb.sh"),
+                                    QStringLiteral("packaging/build-flatpak.sh"),
+                                    QStringLiteral("packaging/release/build-flatpak-bundle.sh") }) {
+            const auto data = read(source + script);
+            QVERIFY2(data.contains(QStringLiteral("--arch")), qPrintable(script));
             QVERIFY2(data.contains(QStringLiteral("packaging_normalize_arch")), qPrintable(script));
         }
     }
@@ -247,6 +263,23 @@ private slots:
                  "the AppImage smoke link must not be created inside the checkout");
         QVERIFY(workflow.contains(QStringLiteral("SMOKE_DIR=\"$RUNNER_TEMP")));
         QVERIFY(workflow.contains(QStringLiteral("\"$SMOKE_DIR/qtidm-cli\" --version")));
+    }
+
+    void releaseWorkflowPackagesBothArchitectures()
+    {
+        QFile file(QStringLiteral(QTIDM_SOURCE_DIR)
+                   + QStringLiteral("/.github/workflows/build-release.yml"));
+        QVERIFY(file.exists());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto workflow = QString::fromUtf8(file.readAll());
+        // All 5 packaging targets (deb, rpm, arch, flatpak, appimage) must build
+        // for both amd64 and arm64 architectures.
+        QVERIFY(workflow.contains(QStringLiteral("ubuntu-24.04")));
+        QVERIFY(workflow.contains(QStringLiteral("ubuntu-24.04-arm")));
+        QVERIFY(workflow.contains(QStringLiteral("package-deb-appimage-flatpak")));
+        QVERIFY(workflow.contains(QStringLiteral("package-rpm")));
+        QVERIFY(workflow.contains(QStringLiteral("package-arch")));
+        QVERIFY(workflow.contains(QStringLiteral("publish-release")));
     }
 };
 

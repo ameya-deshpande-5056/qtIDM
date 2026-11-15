@@ -10,13 +10,84 @@ APPDIR="$BUILD_ROOT/AppDir"
 GENERATED="$BUILD_ROOT/output"
 OUTPUT="${QTIDM_APPIMAGE_OUTPUT_DIR:-$ROOT/dist}"
 VERSION="$(sh "$ROOT/packaging/release/version-info.sh")"
-ARTIFACT="$OUTPUT/qtIDM-$VERSION-x86_64.AppImage"
+REQUESTED_ARCH=""
+TOOLCHAIN=""
 trap 'rm -rf "$BUILD_ROOT"' EXIT HUP INT TERM
 
+usage() {
+    cat <<'EOF'
+Usage: sh packaging/build-appimage.sh [--arch amd64|arm64] [--toolchain FILE]
+
+  --arch        Target architecture (amd64/x86_64 or arm64/aarch64). Defaults to host architecture.
+  --toolchain   CMake toolchain file for cross builds.
+
+  QTIDM_APPIMAGE_OUTPUT_DIR   Directory for the finished AppImage (default: dist/).
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --arch)
+            REQUESTED_ARCH="${2:-}"
+            shift 2
+            ;;
+        --arch=*)
+            REQUESTED_ARCH="${1#--arch=}"
+            shift
+            ;;
+        --toolchain)
+            TOOLCHAIN="${2:-}"
+            shift 2
+            ;;
+        --toolchain=*)
+            TOOLCHAIN="${1#--toolchain=}"
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+HOST_ARCH="$(packaging_host_arch || true)"
+if [ -n "$REQUESTED_ARCH" ]; then
+    if ! TARGET_ARCH="$(packaging_normalize_arch "$REQUESTED_ARCH")"; then
+        echo "--arch must be amd64 or arm64, not '$REQUESTED_ARCH'." >&2
+        exit 2
+    fi
+else
+    TARGET_ARCH="$HOST_ARCH"
+fi
+if [ -z "$TARGET_ARCH" ]; then
+    echo "Cannot detect this machine's architecture; pass --arch amd64 or --arch arm64." >&2
+    exit 1
+fi
+
+if [ -n "$TOOLCHAIN" ] && [ ! -f "$TOOLCHAIN" ]; then
+    echo "Toolchain file not found: $TOOLCHAIN" >&2
+    exit 2
+fi
+if [ "$TARGET_ARCH" != "$HOST_ARCH" ] && [ -z "$TOOLCHAIN" ]; then
+    echo "Building $TARGET_ARCH AppImage on ${HOST_ARCH:-this machine} needs --toolchain FILE," >&2
+    echo "or run this script on a machine of that architecture." >&2
+    exit 1
+fi
+
+ARTIFACT="$OUTPUT/qtIDM-$VERSION-$TARGET_ARCH.AppImage"
 assert_not_home_workspace "$BUILD_ROOT"
 mkdir -p "$GENERATED" "$OUTPUT"
 
-cmake -S "$ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DQTIDM_BUILD_TESTS=OFF -DQTIDM_CHROME_EXTENSION_ID="${QTIDM_CHROME_EXTENSION_ID:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
+CMAKE_ARGS="-S $ROOT -B $BUILD -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DQTIDM_BUILD_TESTS=OFF -DQTIDM_CHROME_EXTENSION_ID=${QTIDM_CHROME_EXTENSION_ID:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
+if [ -n "$TOOLCHAIN" ]; then
+    CMAKE_ARGS="$CMAKE_ARGS -DCMAKE_TOOLCHAIN_FILE=$TOOLCHAIN"
+fi
+cmake $CMAKE_ARGS
 cmake --build "$BUILD"
 DESTDIR="$APPDIR" cmake --install "$BUILD"
 
@@ -62,9 +133,9 @@ ln -sf io.qtidm.Qtidm.png "$APPDIR/.DirIcon"
         --output appimage
 )
 
-GENERATED_APPIMAGE="$GENERATED/qtIDM-x86_64.AppImage"
+GENERATED_APPIMAGE="$GENERATED/qtIDM-$TARGET_ARCH.AppImage"
 if [ ! -f "$GENERATED_APPIMAGE" ]; then
-    echo "linuxdeploy did not produce the expected qtIDM-x86_64.AppImage artifact." >&2
+    echo "linuxdeploy did not produce the expected qtIDM-$TARGET_ARCH.AppImage artifact." >&2
     exit 1
 fi
 cp "$GENERATED_APPIMAGE" "$ARTIFACT"

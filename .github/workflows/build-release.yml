@@ -20,8 +20,10 @@ permissions:
   contents: write
 
 jobs:
-  build-release:
+  build-test:
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     env:
       DEV_CHROME_EXTENSION_ID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       QTIDM_CHROME_EXTENSION_ID: ${{ vars.QTIDM_CHROME_EXTENSION_ID }}
@@ -98,7 +100,7 @@ jobs:
 
       - name: Validate packaging metadata
         run: |
-          sh -n packaging/build-deb.sh packaging/build-appimage.sh packaging/build-flatpak.sh packaging/browser/ci-extension-version.sh packaging/release/build-flatpak-bundle.sh packaging/release/sync-tag-version.sh packaging/appimage/AppRun
+          sh -n packaging/build-deb.sh packaging/build-appimage.sh packaging/build-flatpak.sh packaging/browser/ci-extension-version.sh packaging/release/build-flatpak-bundle.sh packaging/release/sync-tag-version.sh packaging/appimage/AppRun packaging/build-rpm.sh packaging/build-arch.sh
           sh packaging/browser/ci-extension-version.sh 1 1 >/dev/null
           VERSION="$(sh packaging/release/version-info.sh)"
           sh packaging/release/sync-tag-version.sh "v$VERSION" >/dev/null
@@ -149,22 +151,83 @@ jobs:
           WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
         run: |
           sh packaging/browser/build-extensions.sh --mode release --output browser/packages
+          mkdir -p dist
           cp browser/packages/qtidm-chrome.zip "dist/qtIDM-browser-chrome-${{ steps.version.outputs.version }}.zip"
           cp browser/packages/qtidm-chrome.crx "dist/qtIDM-browser-chromium-${{ steps.version.outputs.version }}.crx"
           cp browser/packages/qtidm-firefox.xpi "dist/qtIDM-browser-firefox-${{ steps.version.outputs.version }}.xpi"
 
-      - name: Build Debian package
+      - name: Upload browser packages
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v6
+        with:
+          name: browser-packages
+          path: browser/packages/
+          if-no-files-found: ignore
+
+      - name: Upload common release metadata
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v6
+        with:
+          name: common-release-artifacts
+          path: |
+            dist/CHANGELOG-*.md
+            dist/qtIDM-browser-*
+          if-no-files-found: ignore
+
+  package-deb-appimage-flatpak:
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            target_arch: x86_64
+            runner: ubuntu-24.04
+            linuxdeploy_sha: df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5
+            plugin_sha: cfc1055b2b9dbc08412b579f20990b7b41a17b61beaa5847dc9477c96c9e9617
+          - arch: arm64
+            target_arch: aarch64
+            runner: ubuntu-24.04-arm
+            linuxdeploy_sha: f38e4d7cebf20d8073ec4e00e0a167ac146cd8585fe2f8fe82df27d74f2bd8e1
+            plugin_sha: d5b5a9020065cefda8c7af7c9500f686b23640eac50c88201a81752c6ee2e49c
+    runs-on: ${{ matrix.runner }}
+    env:
+      LINUXDEPLOY_SHA256: df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5
+      LINUXDEPLOY_PLUGIN_QT_SHA256: cfc1055b2b9dbc08412b579f20990b7b41a17b61beaa5847dc9477c96c9e9617
+      LINUXDEPLOY_ARM64_SHA256: f38e4d7cebf20d8073ec4e00e0a167ac146cd8585fe2f8fe82df27d74f2bd8e1
+      LINUXDEPLOY_PLUGIN_QT_ARM64_SHA256: d5b5a9020065cefda8c7af7c9500f686b23640eac50c88201a81752c6ee2e49c
+      DEV_CHROME_EXTENSION_ID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      QTIDM_CHROME_EXTENSION_ID: ${{ vars.QTIDM_CHROME_EXTENSION_ID }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Synchronize version from release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: sh packaging/release/sync-tag-version.sh --apply "$GITHUB_REF_NAME"
+
+      - name: Download browser packages
+        uses: actions/download-artifact@v6
+        continue-on-error: true
+        with:
+          name: browser-packages
+          path: browser/packages
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper devscripts appstream desktop-file-utils flatpak flatpak-builder libfuse2 ffmpeg 7zip libsecret-tools xvfb dbus-x11
+
+      - name: Build Debian package
         run: |
           chmod +x packaging/build-deb.sh
-          sh packaging/build-deb.sh
+          sh packaging/build-deb.sh --arch ${{ matrix.arch }}
 
       - name: Smoke Debian package
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: |
           test -n "$(find dist -type f -name '*.deb' -print -quit)"
           sudo apt-get install -y ./dist/*.deb
-          xvfb-run -a qtIDM --version
+          QT_QPA_PLATFORM=offscreen qtIDM --version
           test -x /usr/bin/qtIDM-native-host
           test -x /usr/bin/qtidm-cli
           qtidm-cli --version
@@ -174,89 +237,210 @@ jobs:
           if [ -f browser/packages/qtidm-chrome.crx ]; then
             test -f /usr/share/qtidm/browser/packages/qtidm-chrome.crx
             test -f /usr/share/qtidm/browser/packages/qtidm-firefox.xpi
-            test -f "/opt/google/chrome/extensions/${QTIDM_CHROME_EXTENSION_ID}.json"
+            test -f "/opt/google/chrome/extensions/${QTIDM_CHROME_EXTENSION_ID:-$DEV_CHROME_EXTENSION_ID}.json"
           fi
 
       - name: Install linuxdeploy
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-        env:
-          LINUXDEPLOY_SHA256: df908b19f1ed1cdafa79508d415aa12d6c56ce4d56d4149aa8c09286718706e5
-          LINUXDEPLOY_PLUGIN_QT_SHA256: cfc1055b2b9dbc08412b579f20990b7b41a17b61beaa5847dc9477c96c9e9617
         run: |
-          curl -L -o linuxdeploy.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl -L -o linuxdeploy-plugin-qt.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-          printf '%s  %s\n' "$LINUXDEPLOY_SHA256" linuxdeploy.AppImage \
-            "$LINUXDEPLOY_PLUGIN_QT_SHA256" linuxdeploy-plugin-qt.AppImage | sha256sum --check --strict
+          curl -L -o linuxdeploy.AppImage "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${{ matrix.target_arch }}.AppImage"
+          curl -L -o linuxdeploy-plugin-qt.AppImage "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-${{ matrix.target_arch }}.AppImage"
+          printf '%s  %s\n' "${{ matrix.linuxdeploy_sha }}" linuxdeploy.AppImage \
+            "${{ matrix.plugin_sha }}" linuxdeploy-plugin-qt.AppImage | sha256sum --check --strict
           chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
           sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
           sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
 
       - name: Build AppImage
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: |
           chmod +x packaging/build-appimage.sh packaging/appimage/AppRun
-          sh packaging/build-appimage.sh
-          test -f "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage"
+          sh packaging/build-appimage.sh --arch ${{ matrix.arch }}
+          test -n "$(find dist -type f -name "qtIDM-*-${{ matrix.target_arch }}.AppImage" -print -quit)"
 
       - name: Smoke AppImage
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         env:
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: |
-          chmod +x "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage"
-          xvfb-run -a "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage" --version
-          APPIMAGE="$(realpath "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage")"
+          APPIMAGE="$(find dist -type f -name "qtIDM-*-${{ matrix.target_arch }}.AppImage" -print -quit)"
+          chmod +x "$APPIMAGE"
+          QT_QPA_PLATFORM=offscreen "$APPIMAGE" --version
+          APPIMAGE_PATH="$(realpath "$APPIMAGE")"
           # The bundled qtidm-cli is reachable by invoking the AppImage under that
           # name. The link must live outside the checkout: the Flatpak bundle is
           # built from this tree, and a dead link named after a CMake target makes
           # its linker fail with "cannot open output file qtidm-cli".
           SMOKE_DIR="$RUNNER_TEMP/qtidm-cli-smoke"
           mkdir -p "$SMOKE_DIR"
-          ln -sf "$APPIMAGE" "$SMOKE_DIR/qtidm-cli"
+          ln -sf "$APPIMAGE_PATH" "$SMOKE_DIR/qtidm-cli"
           "$SMOKE_DIR/qtidm-cli" --version | grep -q '^qtidm-cli '
           if [ -f browser/packages/qtidm-chrome.crx ]; then
             EXTRACT_DIR="$(mktemp -d)"
-            APPIMAGE="$(realpath "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage")"
             (
               cd "$EXTRACT_DIR"
-              env -u APPIMAGE_EXTRACT_AND_RUN "$APPIMAGE" --appimage-extract usr/share/qtidm/browser/packages >/dev/null
+              env -u APPIMAGE_EXTRACT_AND_RUN "$APPIMAGE_PATH" --appimage-extract usr/share/qtidm/browser/packages >/dev/null
               test -f squashfs-root/usr/share/qtidm/browser/packages/qtidm-chrome.crx
               test -f squashfs-root/usr/share/qtidm/browser/packages/qtidm-firefox.xpi
             )
           fi
 
       - name: Build Flatpak bundle
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: |
           chmod +x packaging/release/build-flatpak-bundle.sh
-          sh packaging/release/build-flatpak-bundle.sh
+          sh packaging/release/build-flatpak-bundle.sh --arch ${{ matrix.arch }}
 
       - name: Smoke Flatpak bundle
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: |
-          test -f "dist/qtIDM-${{ steps.version.outputs.version }}.flatpak"
-          flatpak install --user -y "dist/qtIDM-${{ steps.version.outputs.version }}.flatpak"
-          dbus-run-session -- xvfb-run -a flatpak run io.qtidm.Qtidm --version
+          FLATPAK_FILE="$(find dist -type f -name "qtIDM-*-${{ matrix.target_arch }}.flatpak" -print -quit)"
+          test -n "$FLATPAK_FILE"
+          flatpak install --user -y "$FLATPAK_FILE"
+          dbus-run-session -- QT_QPA_PLATFORM=offscreen flatpak run io.qtidm.Qtidm --version
           flatpak run --command=qtidm-cli io.qtidm.Qtidm --version
           if [ -f browser/packages/qtidm-chrome.crx ]; then
             flatpak run --command=sh io.qtidm.Qtidm -c \
               'test -f /app/share/qtidm/browser/packages/qtidm-chrome.crx && test -f /app/share/qtidm/browser/packages/qtidm-firefox.xpi'
           fi
 
-      - name: Upload workflow artifacts
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+      - name: Upload Debian, AppImage and Flatpak packages
         uses: actions/upload-artifact@v6
         with:
-          name: qtIDM-${{ steps.version.outputs.version }}-linux-packages
-          path: dist/*
+          name: qtidm-packages-ubuntu-${{ matrix.arch }}
+          path: |
+            dist/*.deb
+            dist/*.ddeb
+            dist/*.changes
+            dist/*.buildinfo
+            dist/*-${{ matrix.target_arch }}.AppImage
+            dist/*-${{ matrix.target_arch }}.flatpak
+
+  package-rpm:
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            target_arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            target_arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: fedora:40
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Synchronize version from release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: sh packaging/release/sync-tag-version.sh --apply "$GITHUB_REF_NAME"
+
+      - name: Install Fedora packaging dependencies
+        run: |
+          dnf install -y rpm-build cmake ninja-build gcc-c++ qt6-qtbase-devel libcurl-devel sqlite-devel tar git
+
+      - name: Build RPM package
+        run: |
+          chmod +x packaging/build-rpm.sh
+          sh packaging/build-rpm.sh --arch ${{ matrix.arch }}
+
+      - name: Smoke RPM package
+        run: |
+          RPM_FILE="$(find dist -type f -name "qtidm-*-1.fc40.${{ matrix.target_arch }}.rpm" -print -quit)"
+          test -n "$RPM_FILE"
+          dnf install -y "$RPM_FILE"
+          QT_QPA_PLATFORM=offscreen qtIDM --version
+          test -x /usr/bin/qtIDM-native-host
+          test -x /usr/bin/qtidm-cli
+          qtidm-cli --version
+          test -f /usr/lib/mozilla/native-messaging-hosts/io.qtidm.native.json
+          test -f /etc/opt/chrome/native-messaging-hosts/io.qtidm.native.json
+          test -f /etc/chromium/native-messaging-hosts/io.qtidm.native.json
+
+      - name: Upload RPM package
+        uses: actions/upload-artifact@v6
+        with:
+          name: qtidm-packages-rpm-${{ matrix.arch }}
+          path: dist/*.rpm
+
+  package-arch:
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            target_arch: x86_64
+            runner: ubuntu-24.04
+            image: archlinux:latest
+          - arch: arm64
+            target_arch: aarch64
+            runner: ubuntu-24.04-arm
+            image: ogarcia/archlinux:latest
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Synchronize version from release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: sh packaging/release/sync-tag-version.sh --apply "$GITHUB_REF_NAME"
+
+      - name: Install Arch packaging dependencies
+        run: |
+          pacman -Syu --noconfirm base-devel cmake ninja gcc qt6-base curl sqlite hicolor-icon-theme tar git
+
+      - name: Build Arch package
+        run: |
+          useradd -m builduser
+          chown -R builduser:builduser .
+          chmod +x packaging/build-arch.sh
+          su builduser -c "sh packaging/build-arch.sh --arch ${{ matrix.arch }}"
+
+      - name: Smoke Arch package
+        run: |
+          ARCH_FILE="$(find dist -type f -name "qtidm-*-${{ matrix.target_arch }}.pkg.tar.*" -print -quit)"
+          test -n "$ARCH_FILE"
+          pacman -U --noconfirm "$ARCH_FILE"
+          QT_QPA_PLATFORM=offscreen qtIDM --version
+          test -x /usr/bin/qtIDM-native-host
+          test -x /usr/bin/qtidm-cli
+          qtidm-cli --version
+          test -f /usr/lib/mozilla/native-messaging-hosts/io.qtidm.native.json
+          test -f /etc/opt/chrome/native-messaging-hosts/io.qtidm.native.json
+          test -f /etc/chromium/native-messaging-hosts/io.qtidm.native.json
+
+      - name: Upload Arch package
+        uses: actions/upload-artifact@v6
+        with:
+          name: qtidm-packages-arch-${{ matrix.arch }}
+          path: dist/*.pkg.tar.*
+
+  publish-release:
+    needs: [build-test, package-deb-appimage-flatpak, package-rpm, package-arch]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: downloaded-artifacts
+
+      - name: Consolidate release artifacts
+        run: |
+          mkdir -p dist
+          find downloaded-artifacts -type f -exec cp -f {} dist/ \;
+          rm -rf downloaded-artifacts
+          echo "Release artifacts:"
+          ls -la dist/
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: qtIDM ${{ steps.version.outputs.version }}
-          body_path: dist/CHANGELOG-${{ steps.version.outputs.version }}.md
+          tag_name: ${{ github.ref_name }}
+          name: qtIDM ${{ needs.build-test.outputs.version }}
+          body_path: dist/CHANGELOG-${{ needs.build-test.outputs.version }}.md
           files: dist/*

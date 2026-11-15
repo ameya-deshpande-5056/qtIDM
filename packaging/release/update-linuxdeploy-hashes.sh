@@ -34,11 +34,14 @@ try:
         sums_text = resp.read().decode()
 
     yt_sha = None
+    yt_arm64_sha = None
     for line in sums_text.splitlines():
         parts = line.strip().split()
-        if len(parts) >= 2 and parts[1] == 'yt-dlp_linux':
-            yt_sha = parts[0]
-            break
+        if len(parts) >= 2:
+            if parts[1] == 'yt-dlp_linux':
+                yt_sha = parts[0]
+            elif parts[1] == 'yt-dlp_linux_aarch64':
+                yt_arm64_sha = parts[0]
 
     lic_url = f'https://raw.githubusercontent.com/yt-dlp/yt-dlp/{tag}/LICENSE'
     req_lic = urllib.request.Request(lic_url, headers={'User-Agent': 'qtIDM'})
@@ -48,6 +51,9 @@ try:
     if yt_sha and lic_sha:
         pattern_yt = r'(url:\s*https://github\.com/yt-dlp/yt-dlp/releases/download/)[^/]+(/yt-dlp_linux\s*\n\s*sha256:\s*)[0-9a-f]{64}'
         new_content, n1 = re.subn(pattern_yt, rf'\g<1>{tag}\g<2>{yt_sha}', content)
+        if yt_arm64_sha:
+            pattern_yt_arm = r'(url:\s*https://github\.com/yt-dlp/yt-dlp/releases/download/)[^/]+(/yt-dlp_linux_aarch64\s*\n\s*sha256:\s*)[0-9a-f]{64}'
+            new_content, n_arm = re.subn(pattern_yt_arm, rf'\g<1>{tag}\g<2>{yt_arm64_sha}', new_content)
         pattern_lic = r'(url:\s*https://raw\.githubusercontent\.com/yt-dlp/yt-dlp/)[^/]+(/LICENSE\s*\n\s*sha256:\s*)[0-9a-f]{64}'
         new_content, n2 = re.subn(pattern_lic, rf'\g<1>{tag}\g<2>{lic_sha}', new_content)
         if n1 > 0 or n2 > 0:
@@ -70,8 +76,20 @@ try:
     with urllib.request.urlopen(req_tar, timeout=20) as resp:
         seven_sha = hashlib.sha256(resp.read()).hexdigest()
 
+    seven_arm_sha = None
+    try:
+        tar_arm_url = f'https://github.com/ip7z/7zip/releases/download/{tag}/7z{tag_nodot}-linux-arm64.tar.xz'
+        req_tar_arm = urllib.request.Request(tar_arm_url, headers={'User-Agent': 'qtIDM'})
+        with urllib.request.urlopen(req_tar_arm, timeout=20) as resp:
+            seven_arm_sha = hashlib.sha256(resp.read()).hexdigest()
+    except Exception as e_arm:
+        print(f"Warning: failed to fetch 7zip arm64 tarball: {e_arm}", file=sys.stderr)
+
     pattern_7z = r'(url:\s*https://github\.com/ip7z/7zip/releases/download/)[^/]+(/7z)[0-9]+(-linux-x64\.tar\.xz\s*\n\s*sha256:\s*)[0-9a-f]{64}'
     new_content, n = re.subn(pattern_7z, rf'\g<1>{tag}\g<2>{tag_nodot}\g<3>{seven_sha}', content)
+    if seven_arm_sha:
+        pattern_7z_arm = r'(url:\s*https://github\.com/ip7z/7zip/releases/download/)[^/]+(/7z)[0-9]+(-linux-arm64\.tar\.xz\s*\n\s*sha256:\s*)[0-9a-f]{64}'
+        new_content, n_arm = re.subn(pattern_7z_arm, rf'\g<1>{tag}\g<2>{tag_nodot}\g<3>{seven_arm_sha}', new_content)
     if n > 0 and new_content != content:
         content = new_content
         changed = True
@@ -120,27 +138,40 @@ EOF
   fi
 fi
 
-echo "Fetching continuous linuxdeploy and linuxdeploy-plugin-qt AppImages..."
-curl -sL --retry 3 -o "$TMPDIR/linuxdeploy.AppImage" \
+echo "Fetching continuous linuxdeploy and linuxdeploy-plugin-qt AppImages (x86_64 and aarch64)..."
+curl -sL --retry 3 -o "$TMPDIR/linuxdeploy-x86_64.AppImage" \
   https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-curl -sL --retry 3 -o "$TMPDIR/linuxdeploy-plugin-qt.AppImage" \
+curl -sL --retry 3 -o "$TMPDIR/linuxdeploy-plugin-qt-x86_64.AppImage" \
   https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+curl -sL --retry 3 -o "$TMPDIR/linuxdeploy-aarch64.AppImage" \
+  https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-aarch64.AppImage
+curl -sL --retry 3 -o "$TMPDIR/linuxdeploy-plugin-qt-aarch64.AppImage" \
+  https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-aarch64.AppImage
 
-NEW_LINUXDEPLOY_SHA=$(sha256sum "$TMPDIR/linuxdeploy.AppImage" | awk '{print $1}')
-NEW_PLUGIN_SHA=$(sha256sum "$TMPDIR/linuxdeploy-plugin-qt.AppImage" | awk '{print $1}')
+NEW_LINUXDEPLOY_SHA=$(sha256sum "$TMPDIR/linuxdeploy-x86_64.AppImage" | awk '{print $1}')
+NEW_PLUGIN_SHA=$(sha256sum "$TMPDIR/linuxdeploy-plugin-qt-x86_64.AppImage" | awk '{print $1}')
+NEW_LINUXDEPLOY_ARM64_SHA=$(sha256sum "$TMPDIR/linuxdeploy-aarch64.AppImage" | awk '{print $1}')
+NEW_PLUGIN_ARM64_SHA=$(sha256sum "$TMPDIR/linuxdeploy-plugin-qt-aarch64.AppImage" | awk '{print $1}')
 
 echo "Fetched hashes:"
-echo "  linuxdeploy:           $NEW_LINUXDEPLOY_SHA"
-echo "  linuxdeploy-plugin-qt: $NEW_PLUGIN_SHA"
+echo "  linuxdeploy (x86_64):            $NEW_LINUXDEPLOY_SHA"
+echo "  linuxdeploy-plugin-qt (x86_64):  $NEW_PLUGIN_SHA"
+echo "  linuxdeploy (aarch64):           $NEW_LINUXDEPLOY_ARM64_SHA"
+echo "  linuxdeploy-plugin-qt (aarch64): $NEW_PLUGIN_ARM64_SHA"
 
 OLD_LINUXDEPLOY_SHA=$(grep -oP 'LINUXDEPLOY_SHA256:\s*\K[0-9a-f]{64}' "$WORKFLOW_FILE" | head -n 1 || true)
 OLD_PLUGIN_SHA=$(grep -oP 'LINUXDEPLOY_PLUGIN_QT_SHA256:\s*\K[0-9a-f]{64}' "$WORKFLOW_FILE" | head -n 1 || true)
+OLD_LINUXDEPLOY_ARM64_SHA=$(grep -oP 'LINUXDEPLOY_ARM64_SHA256:\s*\K[0-9a-f]{64}' "$WORKFLOW_FILE" | head -n 1 || true)
+OLD_PLUGIN_ARM64_SHA=$(grep -oP 'LINUXDEPLOY_PLUGIN_QT_ARM64_SHA256:\s*\K[0-9a-f]{64}' "$WORKFLOW_FILE" | head -n 1 || true)
 
 echo "Current workflow hashes:"
-echo "  linuxdeploy:           $OLD_LINUXDEPLOY_SHA"
-echo "  linuxdeploy-plugin-qt: $OLD_PLUGIN_SHA"
+echo "  linuxdeploy (x86_64):            $OLD_LINUXDEPLOY_SHA"
+echo "  linuxdeploy-plugin-qt (x86_64):  $OLD_PLUGIN_SHA"
+echo "  linuxdeploy (aarch64):           $OLD_LINUXDEPLOY_ARM64_SHA"
+echo "  linuxdeploy-plugin-qt (aarch64): $OLD_PLUGIN_ARM64_SHA"
 
-if [ "$NEW_LINUXDEPLOY_SHA" != "$OLD_LINUXDEPLOY_SHA" ] || [ "$NEW_PLUGIN_SHA" != "$OLD_PLUGIN_SHA" ]; then
+if [ "$NEW_LINUXDEPLOY_SHA" != "$OLD_LINUXDEPLOY_SHA" ] || [ "$NEW_PLUGIN_SHA" != "$OLD_PLUGIN_SHA" ] || \
+   [ "$NEW_LINUXDEPLOY_ARM64_SHA" != "$OLD_LINUXDEPLOY_ARM64_SHA" ] || [ "$NEW_PLUGIN_ARM64_SHA" != "$OLD_PLUGIN_ARM64_SHA" ]; then
   CHANGED=true
   echo "Updating $WORKFLOW_FILE..."
   if [ -n "$OLD_LINUXDEPLOY_SHA" ]; then
@@ -148,6 +179,12 @@ if [ "$NEW_LINUXDEPLOY_SHA" != "$OLD_LINUXDEPLOY_SHA" ] || [ "$NEW_PLUGIN_SHA" !
   fi
   if [ -n "$OLD_PLUGIN_SHA" ]; then
     sed -i "s/$OLD_PLUGIN_SHA/$NEW_PLUGIN_SHA/g" "$WORKFLOW_FILE"
+  fi
+  if [ -n "$OLD_LINUXDEPLOY_ARM64_SHA" ]; then
+    sed -i "s/$OLD_LINUXDEPLOY_ARM64_SHA/$NEW_LINUXDEPLOY_ARM64_SHA/g" "$WORKFLOW_FILE"
+  fi
+  if [ -n "$OLD_PLUGIN_ARM64_SHA" ]; then
+    sed -i "s/$OLD_PLUGIN_ARM64_SHA/$NEW_PLUGIN_ARM64_SHA/g" "$WORKFLOW_FILE"
   fi
 
   if [ -f "$README_FILE" ]; then

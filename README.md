@@ -127,9 +127,9 @@ See [Queues and Scheduler](#queues-and-scheduler) below for dialog usage, workfl
 
 ### Distribution
 
-- Debian, AppImage, and Flatpak packaging routes.
+- Debian, RPM (Fedora), Arch, Flatpak, and AppImage packaging routes for amd64 and arm64.
 - Signed browser-extension artifacts bundled into tagged application releases.
-- GitHub Actions build, test, package, smoke-test, artifact, and tagged-release workflow.
+- GitHub Actions build, test, multi-arch package, smoke-test, artifact, and tagged-release workflow.
 
 ## Runtime Integrations
 
@@ -457,7 +457,8 @@ sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev qt6-base-
 Build and test the Debian package:
 
 ```bash
-sh packaging/build-deb.sh
+sh packaging/build-deb.sh                    # the machine's own architecture
+sh packaging/build-deb.sh --arch arm64       # arm64 package
 sudo apt-get install -y ./dist/qtidm_0.3.2-1_amd64.deb
 qtIDM --version
 ```
@@ -479,11 +480,12 @@ printf '%s  %s\n' \
 chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
 sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
 sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
-APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh
+APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh              # machine architecture
+APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh --arch arm64 # arm64 (aarch64)
 APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.3.2-x86_64.AppImage --version
 ```
 
-The script writes exactly one versioned AppImage to `dist/`. The checksums pin
+The script writes versioned and architecture-labelled AppImages (`qtIDM-<version>-x86_64.AppImage` or `qtIDM-<version>-aarch64.AppImage`) to `dist/`. The checksums pin
 the reviewed `continuous` linuxdeploy artifacts; when upstream replaces either
 artifact, review the new binaries and update both this section and the workflow
 checksums together.
@@ -492,15 +494,16 @@ Build and test the Flatpak bundle:
 
 ```bash
 sh packaging/release/version-info.sh
-sh packaging/release/build-flatpak-bundle.sh
-flatpak install --user -y dist/qtIDM-0.3.2.flatpak
+sh packaging/release/build-flatpak-bundle.sh              # machine architecture
+sh packaging/release/build-flatpak-bundle.sh --arch arm64 # arm64 (aarch64)
+flatpak install --user -y dist/qtIDM-0.3.2-x86_64.flatpak
 flatpak run io.qtidm.Qtidm --version
 ```
 
 The Flatpak targets the supported KDE 6.11 runtime, has write access only to the
 user's Downloads directory plus portal-selected files, and bundles FFmpeg
 through the runtime together with `secret-tool`, 7-Zip, and yt-dlp. The bundled
-7-Zip and yt-dlp helpers currently target the x86-64 release architecture.
+7-Zip and yt-dlp helpers support both x86_64 and aarch64 release architectures.
 
 Build and test the RPM (Fedora):
 
@@ -818,7 +821,7 @@ git push origin main
 git push origin "v$VERSION"
 ```
 
-The single workflow `.github/workflows/build-release.yml` builds, tests, packages, smoke-tests, uploads artifacts, and publishes the GitHub Release for version tags.
+The GitHub Actions workflow `.github/workflows/build-release.yml` builds, tests, packages for Debian, RPM, Arch, Flatpak, and AppImage across both `amd64` and `arm64`, smoke-tests each package, uploads artifacts, and publishes the GitHub Release for version tags.
 Treat pushed release tags as immutable. If a published tag points at the wrong
 commit, prefer preparing a new patch release instead of force-moving the tag.
 
