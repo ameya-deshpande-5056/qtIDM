@@ -458,7 +458,7 @@ Build and test the Debian package:
 
 ```bash
 sh packaging/build-deb.sh
-sudo apt-get install -y ./dist/qtidm_0.3.0-1_amd64.deb
+sudo apt-get install -y ./dist/qtidm_0.3.1-1_amd64.deb
 qtIDM --version
 ```
 
@@ -480,7 +480,7 @@ chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
 sudo mv linuxdeploy.AppImage /usr/local/bin/linuxdeploy
 sudo mv linuxdeploy-plugin-qt.AppImage /usr/local/bin/linuxdeploy-plugin-qt
 APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh
-APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.3.0-x86_64.AppImage --version
+APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.3.1-x86_64.AppImage --version
 ```
 
 The script writes exactly one versioned AppImage to `dist/`. The checksums pin
@@ -493,7 +493,7 @@ Build and test the Flatpak bundle:
 ```bash
 sh packaging/release/version-info.sh
 sh packaging/release/build-flatpak-bundle.sh
-flatpak install --user -y dist/qtIDM-0.3.0.flatpak
+flatpak install --user -y dist/qtIDM-0.3.1.flatpak
 flatpak run io.qtidm.Qtidm --version
 ```
 
@@ -507,7 +507,7 @@ Build and test the RPM (Fedora):
 ```bash
 sudo dnf install -y rpm-build cmake ninja-build gcc-c++ qt6-qtbase-devel libcurl-devel sqlite-devel
 sh packaging/build-rpm.sh
-sudo dnf install -y ./dist/qtidm-0.3.0-1.fc40.x86_64.rpm
+sudo dnf install -y ./dist/qtidm-0.3.1-1.fc40.x86_64.rpm
 qtIDM --version
 qtidm-cli --version
 ```
@@ -521,9 +521,9 @@ Build and test the Arch package:
 
 ```bash
 sudo pacman -S --needed base-devel cmake ninja qt6-base curl sqlite
-sh packaging/build-arch.sh                 # dist/qtidm-0.3.0-1-x86_64.pkg.tar.zst
+sh packaging/build-arch.sh                 # dist/qtidm-0.3.1-1-x86_64.pkg.tar.zst
 sh packaging/build-arch.sh --pkg-ext xz    # the same package as .pkg.tar.xz
-sudo pacman -U ./dist/qtidm-0.3.0-1-x86_64.pkg.tar.zst
+sudo pacman -U ./dist/qtidm-0.3.1-1-x86_64.pkg.tar.zst
 qtIDM --version
 qtidm-cli --version
 ```
@@ -580,7 +580,7 @@ The application and browser integrations have independent version tracks:
 
 | Component | Current version | Authoritative files |
 | --- | --- | --- |
-| qtIDM application and release tag | `0.3.0` / `v0.3.0` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
+| qtIDM application and release tag | `0.3.1` / `v0.3.1` | `CMakeLists.txt`, overridden by a higher release tag in CI, with release notes in `CHANGELOG.md` |
 | Chrome and Firefox extensions | `0.4.0` | `browser/chrome/manifest.json` and `browser/firefox/manifest.json` |
 
 The two checked-in browser manifest versions must always match each other, but

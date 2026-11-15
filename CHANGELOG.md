@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
 
 - Added a widgets-free automation surface (`src/integration/AutomationApi.{h,cpp}`) that drives the real engine, scheduler and repository: `listJson()`, `pauseJson()`, `startJson()`, `removeJson()`, `deleteJson()`, `startQueueJson()`, `stopQueueJson()`, and `handleVerb()` dispatch. Every answer is a JSON object with `done` and `skipped` entries carrying a reason (`unknown id`, `not active`, `not resumable`, `already complete`, `already queued`, `media control failed`).
 - Exposed the automation verbs on the existing session D-Bus service as `ListDownloads`, `PauseDownloads`, `StartDownloads`, `RemoveDownloads`, `DeleteDownloads`, `StartQueue`, `StopQueue`, routed through a `SingleInstance::AutomationHandler` so the D-Bus class keeps no engine or storage dependency. `src/app/AutomationNames.h` is now the single source of the service, object, interface and discovery-file names.
