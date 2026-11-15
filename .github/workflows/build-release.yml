@@ -311,7 +311,7 @@ jobs:
           FLATPAK_FILE="$(find dist -type f -name "qtIDM-*-${{ matrix.target_arch }}.flatpak" -print -quit)"
           test -n "$FLATPAK_FILE"
           flatpak install --user -y "$FLATPAK_FILE"
-          dbus-run-session -- QT_QPA_PLATFORM=offscreen flatpak run io.qtidm.Qtidm --version
+          QT_QPA_PLATFORM=offscreen dbus-run-session -- flatpak run --env=QT_QPA_PLATFORM=offscreen io.qtidm.Qtidm --version
           flatpak run --command=qtidm-cli io.qtidm.Qtidm --version
           flatpak run --command=deno io.qtidm.Qtidm --version
           if [ -f browser/packages/qtidm-chrome.crx ]; then
