@@ -106,6 +106,32 @@ private slots:
                  qPrintable(version));
     }
 
+    void distroSourceTarballLayoutMatchesPackageBuildExpectations()
+    {
+        const auto read = [](const QString& path) {
+            QFile file(path);
+            if (!file.open(QIODevice::ReadOnly)) {
+                return QString();
+            }
+            return QString::fromUtf8(file.readAll());
+        };
+        const auto source = QStringLiteral(QTIDM_SOURCE_DIR) + QLatin1Char('/');
+
+        const auto rpmScript = read(source + QStringLiteral("packaging/build-rpm.sh"));
+        QVERIFY(rpmScript.contains(QStringLiteral("STAGE=\"$BUILD_ROOT/qtidm-$VERSION\"")));
+        QVERIFY(rpmScript.contains(QStringLiteral("tar -C \"$BUILD_ROOT\" -czf \"$TOP/SOURCES/qtidm-$VERSION.tar.gz\" \"qtidm-$VERSION\"")));
+
+        const auto archScript = read(source + QStringLiteral("packaging/build-arch.sh"));
+        QVERIFY(archScript.contains(QStringLiteral("STAGE=\"$BUILD_ROOT/qtidm-$VERSION\"")));
+        QVERIFY(archScript.contains(QStringLiteral("tar -C \"$BUILD_ROOT\" -czf \"$WORK/qtidm-$VERSION.tar.gz\" \"qtidm-$VERSION\"")));
+
+        const auto spec = read(source + QStringLiteral("packaging/rpm/qtidm.spec"));
+        QVERIFY(spec.contains(QStringLiteral("%setup -q -n %{name}-%{version}")));
+
+        const auto pkgbuild = read(source + QStringLiteral("packaging/arch/PKGBUILD"));
+        QVERIFY(pkgbuild.contains(QStringLiteral("cmake -S \"$srcdir/$pkgname-$pkgver\"")));
+    }
+
     void distroPackagingSupportsBothArchitectures()
     {
         // Debian, Fedora, Arch, Flatpak and AppImage package amd64 and arm64;
@@ -137,6 +163,8 @@ private slots:
 
         const auto appimageScript = read(source + QStringLiteral("packaging/build-appimage.sh"));
         QVERIFY(appimageScript.contains(QStringLiteral("cp -L \"$DENO\" \"$APPDIR/usr/bin/deno\"")));
+        QVERIFY(appimageScript.contains(QStringLiteral("EXTRA_PLATFORM_PLUGINS")));
+        QVERIFY(appimageScript.contains(QStringLiteral("libqoffscreen.so")));
 
         for (const auto& script : { QStringLiteral("packaging/build-rpm.sh"),
                                     QStringLiteral("packaging/build-arch.sh"),

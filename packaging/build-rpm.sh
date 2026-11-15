@@ -4,11 +4,11 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 . "$ROOT/packaging/common.sh"
+VERSION="$(sh "$ROOT/packaging/release/version-info.sh")"
 BUILD_ROOT="$(packaging_workspace qtidm-rpm)"
 TOP="$BUILD_ROOT/rpmbuild"
-STAGE="$BUILD_ROOT/qtidm"
+STAGE="$BUILD_ROOT/qtidm-$VERSION"
 OUTPUT="${QTIDM_RPM_OUTPUT_DIR:-$ROOT/dist}"
-VERSION="$(sh "$ROOT/packaging/release/version-info.sh")"
 REQUESTED_ARCH=""
 TOOLCHAIN=""
 trap 'rm -rf "$BUILD_ROOT"' EXIT HUP INT TERM
@@ -90,7 +90,7 @@ fi
 mkdir -p "$TOP/SOURCES" "$TOP/SPECS" "$TOP/BUILD" "$TOP/RPMS" "$TOP/SRPMS" "$OUTPUT"
 mkdir -p "$STAGE"
 stage_source_tree "$ROOT" "$STAGE"
-tar -C "$BUILD_ROOT" -czf "$TOP/SOURCES/qtidm-$VERSION.tar.gz" qtidm
+tar -C "$BUILD_ROOT" -czf "$TOP/SOURCES/qtidm-$VERSION.tar.gz" "qtidm-$VERSION"
 
 # The spec's Version is authoritative for rpmbuild, so keep it tied to the
 # project version instead of relying on a manual edit.

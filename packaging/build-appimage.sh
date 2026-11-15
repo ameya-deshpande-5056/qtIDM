@@ -134,6 +134,16 @@ cp "$DESKTOP_FILE" "$APPDIR/io.qtidm.Qtidm.desktop"
 cp "$ICON_FILE" "$APPDIR/io.qtidm.Qtidm.png"
 ln -sf io.qtidm.Qtidm.png "$APPDIR/.DirIcon"
 
+if [ -z "${EXTRA_PLATFORM_PLUGINS:-}" ]; then
+    EXTRA_PLATFORM_PLUGINS="libqoffscreen.so"
+else
+    case ";$EXTRA_PLATFORM_PLUGINS;" in
+        *";libqoffscreen.so;"*) ;;
+        *) EXTRA_PLATFORM_PLUGINS="$EXTRA_PLATFORM_PLUGINS;libqoffscreen.so" ;;
+    esac
+fi
+export EXTRA_PLATFORM_PLUGINS
+
 (
     cd "$GENERATED"
     linuxdeploy --appdir "$APPDIR" \

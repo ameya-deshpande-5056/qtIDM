@@ -4,11 +4,11 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 . "$ROOT/packaging/common.sh"
+VERSION="$(sh "$ROOT/packaging/release/version-info.sh")"
 BUILD_ROOT="$(packaging_workspace qtidm-arch)"
 WORK="$BUILD_ROOT/pkg"
-STAGE="$BUILD_ROOT/qtidm"
+STAGE="$BUILD_ROOT/qtidm-$VERSION"
 OUTPUT="${QTIDM_ARCH_OUTPUT_DIR:-$ROOT/dist}"
-VERSION="$(sh "$ROOT/packaging/release/version-info.sh")"
 PKG_TAR_EXT="zst"
 REQUESTED_ARCH=""
 TOOLCHAIN=""
@@ -112,7 +112,7 @@ fi
 mkdir -p "$WORK" "$OUTPUT"
 mkdir -p "$STAGE"
 stage_source_tree "$ROOT" "$STAGE"
-tar -C "$BUILD_ROOT" -czf "$WORK/qtidm-$VERSION.tar.gz" qtidm
+tar -C "$BUILD_ROOT" -czf "$WORK/qtidm-$VERSION.tar.gz" "qtidm-$VERSION"
 
 # makepkg takes pkgver from the PKGBUILD and expects a matching source tarball,
 # so tie both to the version CMakeLists.txt declares.
