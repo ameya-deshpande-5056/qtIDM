@@ -61,7 +61,7 @@ fi
 assert_not_home_workspace "$BUILD_ROOT"
 
 MANIFEST="$BUILD_ROOT/io.qtidm.Qtidm.yml"
-cp "$ROOT/packaging/flatpak/io.qtidm.Qtidm.yml" "$MANIFEST"
+sed "s|path: \.\./\.\.*|path: $ROOT|" "$ROOT/packaging/flatpak/io.qtidm.Qtidm.yml" > "$MANIFEST"
 
 if command -v curl >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
     DENO_TAG="$(curl -sI "https://github.com/denoland/deno/releases/latest/download/deno-$TARGET_ARCH-unknown-linux-gnu.zip" | grep -i '^location:' | sed -E 's|.*/download/([^/]+)/.*|\1|' | tr -d '\r\n')"

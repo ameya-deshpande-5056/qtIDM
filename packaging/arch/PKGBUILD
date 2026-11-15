@@ -17,6 +17,7 @@ optdepends=(
   'deno: JavaScript challenge solver for YouTube downloads'
   'chromium: JavaScript-rendered site grabbing'
 )
+options=('!debug')
 backup=(
   'etc/opt/chrome/native-messaging-hosts/io.qtidm.native.json'
   'etc/chromium/native-messaging-hosts/io.qtidm.native.json'

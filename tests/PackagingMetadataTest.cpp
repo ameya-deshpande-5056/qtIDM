@@ -151,6 +151,7 @@ private slots:
 
         const auto pkgbuild = read(source + QStringLiteral("packaging/arch/PKGBUILD"));
         QVERIFY(pkgbuild.contains(QStringLiteral("arch=('x86_64' 'aarch64')")));
+        QVERIFY(pkgbuild.contains(QStringLiteral("options=('!debug')")));
         QVERIFY(pkgbuild.contains(QStringLiteral("QTIDM_CMAKE_TOOLCHAIN_FILE")));
 
         const auto debianControl = read(source + QStringLiteral("packaging/debian/control"));
@@ -182,6 +183,9 @@ private slots:
             QVERIFY2(data.contains(QStringLiteral("--arch")), qPrintable(script));
             QVERIFY2(data.contains(QStringLiteral("packaging_normalize_arch")), qPrintable(script));
         }
+
+        const auto bundleScript = read(source + QStringLiteral("packaging/release/build-flatpak-bundle.sh"));
+        QVERIFY(bundleScript.contains(QStringLiteral("path: $ROOT")));
     }
 
     void rpmPackagingShipsEveryBinary()
@@ -312,6 +316,8 @@ private slots:
         QVERIFY(workflow.contains(QStringLiteral("package-deb-appimage-flatpak")));
         QVERIFY(workflow.contains(QStringLiteral("package-rpm")));
         QVERIFY(workflow.contains(QStringLiteral("package-arch")));
+        QVERIFY(workflow.contains(QStringLiteral("LocalFileSigLevel")));
+        QVERIFY(workflow.contains(QStringLiteral("! -name \"*-debug-*\"")));
         QVERIFY(workflow.contains(QStringLiteral("publish-release")));
     }
 };

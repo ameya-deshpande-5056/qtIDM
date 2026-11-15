@@ -407,6 +407,8 @@ jobs:
 
       - name: Install Arch packaging dependencies
         run: |
+          sed -i 's/^[#[:space:]]*LocalFileSigLevel.*/LocalFileSigLevel = Optional/' /etc/pacman.conf
+          grep -q '^LocalFileSigLevel' /etc/pacman.conf || sed -i '/^\[options\]/a LocalFileSigLevel = Optional' /etc/pacman.conf
           pacman -Syu --noconfirm base-devel cmake ninja gcc qt6-base curl sqlite hicolor-icon-theme tar git
 
       - name: Build Arch package
@@ -418,7 +420,9 @@ jobs:
 
       - name: Smoke Arch package
         run: |
-          ARCH_FILE="$(find dist -type f -name "qtidm-*-${{ matrix.target_arch }}.pkg.tar.*" -print -quit)"
+          sed -i 's/^[#[:space:]]*LocalFileSigLevel.*/LocalFileSigLevel = Optional/' /etc/pacman.conf
+          grep -q '^LocalFileSigLevel' /etc/pacman.conf || sed -i '/^\[options\]/a LocalFileSigLevel = Optional' /etc/pacman.conf
+          ARCH_FILE="$(find dist -type f -name "qtidm-*-${{ matrix.target_arch }}.pkg.tar.*" ! -name "*-debug-*" -print -quit)"
           test -n "$ARCH_FILE"
           pacman -U --noconfirm "$ARCH_FILE"
           QT_QPA_PLATFORM=offscreen qtIDM --version
