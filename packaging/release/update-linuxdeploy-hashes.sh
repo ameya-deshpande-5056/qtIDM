@@ -166,29 +166,7 @@ EOF
     CHANGED=true
     rm -f "$FLATPAK_FILE.changed"
   fi
-  if [ -f "$FLATPAK_FILE.deno" ]; then
-    NEW_DENO_TAG=$(sed -n '1p' "$FLATPAK_FILE.deno")
-    NEW_DENO_SHA=$(sed -n '2p' "$FLATPAK_FILE.deno")
-    NEW_DENO_ARM64_SHA=$(sed -n '3p' "$FLATPAK_FILE.deno")
-    rm -f "$FLATPAK_FILE.deno"
-
-    OLD_DENO_TAG=$(grep -oP 'DENO_VERSION:\s*\K[^\s]+' "$WORKFLOW_FILE" | head -n 1 || true)
-    OLD_DENO_SHA=$(grep -oP 'DENO_SHA256:\s*\K[0-9a-f]{64}' "$WORKFLOW_FILE" | head -n 1 || true)
-    OLD_DENO_ARM64_SHA=$(grep -oP 'DENO_ARM64_SHA256:\s*\K[0-9a-f]{64}' "$WORKFLOW_FILE" | head -n 1 || true)
-
-    if [ -n "$OLD_DENO_TAG" ] && [ "$NEW_DENO_TAG" != "$OLD_DENO_TAG" ]; then
-      sed -i "s/$OLD_DENO_TAG/$NEW_DENO_TAG/g" "$WORKFLOW_FILE"
-      CHANGED=true
-    fi
-    if [ -n "$OLD_DENO_SHA" ] && [ "$NEW_DENO_SHA" != "$OLD_DENO_SHA" ]; then
-      sed -i "s/$OLD_DENO_SHA/$NEW_DENO_SHA/g" "$WORKFLOW_FILE"
-      CHANGED=true
-    fi
-    if [ -n "$OLD_DENO_ARM64_SHA" ] && [ "$NEW_DENO_ARM64_SHA" != "$OLD_DENO_ARM64_SHA" ]; then
-      sed -i "s/$OLD_DENO_ARM64_SHA/$NEW_DENO_ARM64_SHA/g" "$WORKFLOW_FILE"
-      CHANGED=true
-    fi
-  fi
+  rm -f "$FLATPAK_FILE.deno"
 fi
 
 echo "Fetching continuous linuxdeploy and linuxdeploy-plugin-qt AppImages (x86_64 and aarch64)..."

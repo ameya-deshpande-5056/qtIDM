@@ -60,13 +60,37 @@ fi
 
 assert_not_home_workspace "$BUILD_ROOT"
 
+MANIFEST="$BUILD_ROOT/io.qtidm.Qtidm.yml"
+cp "$ROOT/packaging/flatpak/io.qtidm.Qtidm.yml" "$MANIFEST"
+
+if command -v curl >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    DENO_TAG="$(curl -sI "https://github.com/denoland/deno/releases/latest/download/deno-$TARGET_ARCH-unknown-linux-gnu.zip" | grep -i '^location:' | sed -E 's|.*/download/([^/]+)/.*|\1|' | tr -d '\r\n')"
+    if [ -n "$DENO_TAG" ]; then
+        LATEST_ZIP="$BUILD_ROOT/deno-latest-$TARGET_ARCH.zip"
+        if curl -fsSL -o "$LATEST_ZIP" "https://github.com/denoland/deno/releases/latest/download/deno-$TARGET_ARCH-unknown-linux-gnu.zip"; then
+            LATEST_SHA="$(sha256sum "$LATEST_ZIP" | awk '{print $1}')"
+            python3 -c "
+import re, sys
+manifest_path, arch, tag, sha = sys.argv[1:5]
+with open(manifest_path, 'r', encoding='utf-8') as f:
+    content = f.read()
+pattern = rf'(url:\s*https://github\.com/denoland/deno/releases/download/)[^/]+(/deno-{arch}-unknown-linux-gnu\.zip\s*\n\s*sha256:\s*)[0-9a-f]{{64}}'
+updated = re.sub(pattern, rf'\g<1>{tag}\g<2>{sha}', content)
+with open(manifest_path, 'w', encoding='utf-8') as f:
+    f.write(updated)
+" "$MANIFEST" "$TARGET_ARCH" "$DENO_TAG" "$LATEST_SHA"
+            rm -f "$LATEST_ZIP"
+        fi
+    fi
+fi
+
 flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
 flatpak-builder --user --install-deps-from=flathub --force-clean \
     --arch="$TARGET_ARCH" \
     --state-dir="$BUILD_ROOT/state" \
     --repo="$REPO_DIR" \
     "$BUILD_DIR" \
-    "$ROOT/packaging/flatpak/io.qtidm.Qtidm.yml"
+    "$MANIFEST"
 mkdir -p "$OUTPUT"
 ARTIFACT="$OUTPUT/qtIDM-$VERSION-$TARGET_ARCH.flatpak"
 flatpak build-bundle --arch="$TARGET_ARCH" "$REPO_DIR" "$ARTIFACT" io.qtidm.Qtidm
