@@ -203,6 +203,21 @@ private slots:
             QVERIFY(!css.contains(QStringLiteral("#087f5b")));
         }
     }
+    void releaseSmokeLinksStayOutOfTheSourceTree()
+    {
+        QFile file(QStringLiteral(QTIDM_SOURCE_DIR)
+                   + QStringLiteral("/.github/workflows/build-release.yml"));
+        QVERIFY(file.exists());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto workflow = QString::fromUtf8(file.readAll());
+        // The Flatpak bundle is built from the checkout, so a smoke link left
+        // there becomes a dead source-tree entry named after a CMake target and
+        // makes the bundle's linker fail with "cannot open output file".
+        QVERIFY2(!workflow.contains(QStringLiteral("ln -sf \"$APPIMAGE\" qtidm-cli")),
+                 "the AppImage smoke link must not be created inside the checkout");
+        QVERIFY(workflow.contains(QStringLiteral("SMOKE_DIR=\"$RUNNER_TEMP")));
+        QVERIFY(workflow.contains(QStringLiteral("\"$SMOKE_DIR/qtidm-cli\" --version")));
+    }
 };
 
 QTEST_MAIN(PackagingMetadataTest)

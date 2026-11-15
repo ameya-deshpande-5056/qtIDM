@@ -208,9 +208,14 @@ jobs:
           chmod +x "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage"
           xvfb-run -a "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage" --version
           APPIMAGE="$(realpath "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage")"
-          # The bundled qtidm-cli is reachable by invoking the AppImage under that name.
-          ln -sf "$APPIMAGE" qtidm-cli
-          ./qtidm-cli --version | grep -q '^qtidm-cli '
+          # The bundled qtidm-cli is reachable by invoking the AppImage under that
+          # name. The link must live outside the checkout: the Flatpak bundle is
+          # built from this tree, and a dead link named after a CMake target makes
+          # its linker fail with "cannot open output file qtidm-cli".
+          SMOKE_DIR="$RUNNER_TEMP/qtidm-cli-smoke"
+          mkdir -p "$SMOKE_DIR"
+          ln -sf "$APPIMAGE" "$SMOKE_DIR/qtidm-cli"
+          "$SMOKE_DIR/qtidm-cli" --version | grep -q '^qtidm-cli '
           if [ -f browser/packages/qtidm-chrome.crx ]; then
             EXTRACT_DIR="$(mktemp -d)"
             APPIMAGE="$(realpath "dist/qtIDM-${{ steps.version.outputs.version }}-x86_64.AppImage")"
