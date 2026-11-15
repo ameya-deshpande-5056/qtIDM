@@ -26,6 +26,7 @@ Requires:       sqlite-libs
 Recommends:     ffmpeg-free
 Recommends:     p7zip
 Recommends:     libsecret
+Suggests:       nodejs
 
 %description
 qtIDM is a Linux-native download manager built with Qt 6 and libcurl. It

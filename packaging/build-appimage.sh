@@ -109,6 +109,16 @@ if [ -n "$SECRET_TOOL" ]; then
     cp -L "$SECRET_TOOL" "$APPDIR/usr/bin/secret-tool"
 fi
 
+YTDLP="$(command -v yt-dlp || true)"
+if [ -n "$YTDLP" ]; then
+    cp -L "$YTDLP" "$APPDIR/usr/bin/yt-dlp"
+fi
+
+DENO="$(command -v deno || true)"
+if [ -n "$DENO" ]; then
+    cp -L "$DENO" "$APPDIR/usr/bin/deno"
+fi
+
 if ! command -v linuxdeploy >/dev/null 2>&1; then
     echo "linuxdeploy is required to build the AppImage." >&2
     exit 1

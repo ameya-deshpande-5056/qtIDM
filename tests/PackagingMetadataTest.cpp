@@ -132,6 +132,10 @@ private slots:
         const auto flatpak = read(source + QStringLiteral("packaging/flatpak/io.qtidm.Qtidm.yml"));
         QVERIFY(flatpak.contains(QStringLiteral("x86_64")));
         QVERIFY(flatpak.contains(QStringLiteral("aarch64")));
+        QVERIFY(flatpak.contains(QStringLiteral("name: deno")));
+
+        const auto appimageScript = read(source + QStringLiteral("packaging/build-appimage.sh"));
+        QVERIFY(appimageScript.contains(QStringLiteral("cp -L \"$DENO\" \"$APPDIR/usr/bin/deno\"")));
 
         for (const auto& script : { QStringLiteral("packaging/build-rpm.sh"),
                                     QStringLiteral("packaging/build-arch.sh"),

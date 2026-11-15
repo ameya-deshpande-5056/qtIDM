@@ -197,6 +197,9 @@ jobs:
       LINUXDEPLOY_PLUGIN_QT_SHA256: cfc1055b2b9dbc08412b579f20990b7b41a17b61beaa5847dc9477c96c9e9617
       LINUXDEPLOY_ARM64_SHA256: f38e4d7cebf20d8073ec4e00e0a167ac146cd8585fe2f8fe82df27d74f2bd8e1
       LINUXDEPLOY_PLUGIN_QT_ARM64_SHA256: d5b5a9020065cefda8c7af7c9500f686b23640eac50c88201a81752c6ee2e49c
+      DENO_VERSION: v2.9.8
+      DENO_SHA256: e890975bc2549807bbcc0b584ffafda72cc7c93349dd99c80483dd784f6c4609
+      DENO_ARM64_SHA256: d49596c20b9788cf8f5d8ddf644103d4bde56ed239753f0bdb92ba9361d51905
       DEV_CHROME_EXTENSION_ID: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       QTIDM_CHROME_EXTENSION_ID: ${{ vars.QTIDM_CHROME_EXTENSION_ID }}
     steps:
@@ -216,7 +219,19 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper devscripts appstream desktop-file-utils flatpak flatpak-builder libfuse2 ffmpeg 7zip libsecret-tools xvfb dbus-x11
+          sudo apt-get install -y build-essential cmake ninja-build python3 python3-pip pipx qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper devscripts appstream desktop-file-utils flatpak flatpak-builder libfuse2 ffmpeg 7zip libsecret-tools xvfb dbus-x11
+          python3 -m pip install --upgrade --break-system-packages yt-dlp || pipx install yt-dlp
+
+      - name: Install Deno
+        run: |
+          DENO_ARCH="${{ matrix.target_arch }}-unknown-linux-gnu"
+          DENO_EXPECTED_SHA="${{ matrix.arch == 'amd64' && env.DENO_SHA256 || env.DENO_ARM64_SHA256 }}"
+          curl -fsSL -o "$RUNNER_TEMP/deno.zip" "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-${DENO_ARCH}.zip"
+          printf '%s  %s\n' "$DENO_EXPECTED_SHA" "$RUNNER_TEMP/deno.zip" | sha256sum --check --strict
+          unzip -q -o "$RUNNER_TEMP/deno.zip" -d "$RUNNER_TEMP/deno-bin"
+          sudo mv "$RUNNER_TEMP/deno-bin/deno" /usr/local/bin/deno
+          sudo chmod +x /usr/local/bin/deno
+          deno --version
 
       - name: Build Debian package
         run: |
@@ -274,6 +289,12 @@ jobs:
           mkdir -p "$SMOKE_DIR"
           ln -sf "$APPIMAGE_PATH" "$SMOKE_DIR/qtidm-cli"
           "$SMOKE_DIR/qtidm-cli" --version | grep -q '^qtidm-cli '
+          EXTRACT_DIR="$(mktemp -d)"
+          (
+            cd "$EXTRACT_DIR"
+            env -u APPIMAGE_EXTRACT_AND_RUN "$APPIMAGE_PATH" --appimage-extract usr/bin/deno >/dev/null
+            test -x squashfs-root/usr/bin/deno
+          )
           if [ -f browser/packages/qtidm-chrome.crx ]; then
             EXTRACT_DIR="$(mktemp -d)"
             (
@@ -296,6 +317,7 @@ jobs:
           flatpak install --user -y "$FLATPAK_FILE"
           dbus-run-session -- QT_QPA_PLATFORM=offscreen flatpak run io.qtidm.Qtidm --version
           flatpak run --command=qtidm-cli io.qtidm.Qtidm --version
+          flatpak run --command=deno io.qtidm.Qtidm --version
           if [ -f browser/packages/qtidm-chrome.crx ]; then
             flatpak run --command=sh io.qtidm.Qtidm -c \
               'test -f /app/share/qtidm/browser/packages/qtidm-chrome.crx && test -f /app/share/qtidm/browser/packages/qtidm-firefox.xpi'

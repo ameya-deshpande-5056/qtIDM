@@ -14,6 +14,7 @@ optdepends=(
   '7zip: automatic archive extraction'
   'libsecret: Secret Service credential storage'
   'yt-dlp: social media downloads'
+  'deno: JavaScript challenge solver for YouTube downloads'
   'chromium: JavaScript-rendered site grabbing'
 )
 backup=(

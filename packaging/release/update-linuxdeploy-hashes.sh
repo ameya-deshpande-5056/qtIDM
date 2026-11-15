@@ -126,6 +126,36 @@ try:
 except Exception as e:
     print(f"Warning: failed to check libsecret update: {e}", file=sys.stderr)
 
+# 4. Update Deno
+try:
+    req = urllib.request.Request('https://api.github.com/repos/denoland/deno/releases/latest', headers={'User-Agent': 'qtIDM'})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        tag = json.loads(resp.read().decode())['tag_name']
+
+    x64_url = f'https://github.com/denoland/deno/releases/download/{tag}/deno-x86_64-unknown-linux-gnu.zip'
+    req_x64 = urllib.request.Request(x64_url, headers={'User-Agent': 'qtIDM'})
+    with urllib.request.urlopen(req_x64, timeout=30) as resp:
+        deno_x64_sha = hashlib.sha256(resp.read()).hexdigest()
+
+    arm64_url = f'https://github.com/denoland/deno/releases/download/{tag}/deno-aarch64-unknown-linux-gnu.zip'
+    req_arm64 = urllib.request.Request(arm64_url, headers={'User-Agent': 'qtIDM'})
+    with urllib.request.urlopen(req_arm64, timeout=30) as resp:
+        deno_arm64_sha = hashlib.sha256(resp.read()).hexdigest()
+
+    pattern_deno_x64 = r'(url:\s*https://github\.com/denoland/deno/releases/download/)[^/]+(/deno-x86_64-unknown-linux-gnu\.zip\s*\n\s*sha256:\s*)[0-9a-f]{64}'
+    new_content, n_x64 = re.subn(pattern_deno_x64, rf'\g<1>{tag}\g<2>{deno_x64_sha}', content)
+    pattern_deno_arm = r'(url:\s*https://github\.com/denoland/deno/releases/download/)[^/]+(/deno-aarch64-unknown-linux-gnu\.zip\s*\n\s*sha256:\s*)[0-9a-f]{64}'
+    new_content, n_arm = re.subn(pattern_deno_arm, rf'\g<1>{tag}\g<2>{deno_arm64_sha}', new_content)
+    if (n_x64 > 0 or n_arm > 0) and new_content != content:
+        content = new_content
+        changed = True
+        print(f"Updated Flatpak Deno to {tag}")
+
+    with open(sys.argv[1] + '.deno', 'w') as f_deno:
+        f_deno.write(f"{tag}\n{deno_x64_sha}\n{deno_arm64_sha}\n")
+except Exception as e:
+    print(f"Warning: failed to check Deno update: {e}", file=sys.stderr)
+
 if changed:
     with open(flatpak_file, 'w', encoding='utf-8') as f:
         f.write(content)
@@ -135,6 +165,29 @@ EOF
   if [ -f "$FLATPAK_FILE.changed" ]; then
     CHANGED=true
     rm -f "$FLATPAK_FILE.changed"
+  fi
+  if [ -f "$FLATPAK_FILE.deno" ]; then
+    NEW_DENO_TAG=$(sed -n '1p' "$FLATPAK_FILE.deno")
+    NEW_DENO_SHA=$(sed -n '2p' "$FLATPAK_FILE.deno")
+    NEW_DENO_ARM64_SHA=$(sed -n '3p' "$FLATPAK_FILE.deno")
+    rm -f "$FLATPAK_FILE.deno"
+
+    OLD_DENO_TAG=$(grep -oP 'DENO_VERSION:\s*\K[^\s]+' "$WORKFLOW_FILE" | head -n 1 || true)
+    OLD_DENO_SHA=$(grep -oP 'DENO_SHA256:\s*\K[0-9a-f]{64}' "$WORKFLOW_FILE" | head -n 1 || true)
+    OLD_DENO_ARM64_SHA=$(grep -oP 'DENO_ARM64_SHA256:\s*\K[0-9a-f]{64}' "$WORKFLOW_FILE" | head -n 1 || true)
+
+    if [ -n "$OLD_DENO_TAG" ] && [ "$NEW_DENO_TAG" != "$OLD_DENO_TAG" ]; then
+      sed -i "s/$OLD_DENO_TAG/$NEW_DENO_TAG/g" "$WORKFLOW_FILE"
+      CHANGED=true
+    fi
+    if [ -n "$OLD_DENO_SHA" ] && [ "$NEW_DENO_SHA" != "$OLD_DENO_SHA" ]; then
+      sed -i "s/$OLD_DENO_SHA/$NEW_DENO_SHA/g" "$WORKFLOW_FILE"
+      CHANGED=true
+    fi
+    if [ -n "$OLD_DENO_ARM64_SHA" ] && [ "$NEW_DENO_ARM64_SHA" != "$OLD_DENO_ARM64_SHA" ]; then
+      sed -i "s/$OLD_DENO_ARM64_SHA/$NEW_DENO_ARM64_SHA/g" "$WORKFLOW_FILE"
+      CHANGED=true
+    fi
   fi
 fi
 

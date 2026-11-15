@@ -85,6 +85,25 @@ modules:
         sha256: 7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c
         dest-filename: LICENSE
 
+  - name: deno
+    buildsystem: simple
+    only-arches:
+      - x86_64
+      - aarch64
+    build-commands:
+      - install -Dm755 deno /app/bin/deno
+    sources:
+      - type: archive
+        only-arches:
+          - x86_64
+        url: https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-unknown-linux-gnu.zip
+        sha256: e890975bc2549807bbcc0b584ffafda72cc7c93349dd99c80483dd784f6c4609
+      - type: archive
+        only-arches:
+          - aarch64
+        url: https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-unknown-linux-gnu.zip
+        sha256: d49596c20b9788cf8f5d8ddf644103d4bde56ed239753f0bdb92ba9361d51905
+
   - name: qtIDM
     buildsystem: cmake-ninja
     config-opts:

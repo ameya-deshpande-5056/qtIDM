@@ -485,7 +485,7 @@ APPIMAGE_EXTRACT_AND_RUN=1 sh packaging/build-appimage.sh --arch arm64 # arm64 (
 APPIMAGE_EXTRACT_AND_RUN=1 ./dist/qtIDM-0.3.2-x86_64.AppImage --version
 ```
 
-The script writes versioned and architecture-labelled AppImages (`qtIDM-<version>-x86_64.AppImage` or `qtIDM-<version>-aarch64.AppImage`) to `dist/`. The checksums pin
+The script writes versioned and architecture-labelled AppImages (`qtIDM-<version>-x86_64.AppImage` or `qtIDM-<version>-aarch64.AppImage`) bundling FFmpeg, 7-Zip, `secret-tool`, `yt-dlp`, and Deno to `dist/`. The checksums pin
 the reviewed `continuous` linuxdeploy artifacts; when upstream replaces either
 artifact, review the new binaries and update both this section and the workflow
 checksums together.
@@ -502,8 +502,9 @@ flatpak run io.qtidm.Qtidm --version
 
 The Flatpak targets the supported KDE 6.11 runtime, has write access only to the
 user's Downloads directory plus portal-selected files, and bundles FFmpeg
-through the runtime together with `secret-tool`, 7-Zip, and yt-dlp. The bundled
-7-Zip and yt-dlp helpers support both x86_64 and aarch64 release architectures.
+through the runtime together with `secret-tool`, 7-Zip, yt-dlp, and Deno (for
+YouTube challenge execution). The bundled 7-Zip, yt-dlp, and Deno helpers
+support both x86_64 and aarch64 release architectures.
 
 Build and test the RPM (Fedora):
 
