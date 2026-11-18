@@ -322,6 +322,7 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
     const qint64 alternateLimit = static_cast<qint64>(
         qMax(1, settings.value(QStringLiteral("downloads/alternateSpeedLimitKib"), 1024).toInt())) * 1024;
     downloader_.setAlternateSpeedLimit(alternateLimitEnabled ? alternateLimit : 0);
+    downloader_.setDefaultDohUrl(settings.value(QStringLiteral("network/dohUrl")).toString().trimmed());
     scheduler_.setCredentialVault(&credentialVault_);
     scheduler_.setMeteredNetworkPolicy(static_cast<MeteredNetworkPolicy>(
         qBound(0, settings.value(QStringLiteral("downloads/meteredPolicy"), 0).toInt(), 2)));
@@ -342,10 +343,40 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
     downloader_.setPersistenceHandler([this](const QString& id, const QVector<SegmentInfo>& segments) {
         return repository_.checkpoint(id, segments);
     });
+    scheduler_.setDomainRules(repository_.listDomainRules());
 
     connect(&downloader_, &CurlEpollDownloader::downloadAdded, this, &MainWindow::onDownloadAdded);
     connect(&downloader_, &CurlEpollDownloader::progressChanged, this, &MainWindow::onProgressChanged);
     connect(&downloader_, &CurlEpollDownloader::segmentsChanged, this, &MainWindow::onSegmentsChanged);
+    connect(&downloader_, &CurlEpollDownloader::targetPathChanged, this,
+        [this](const QString& id, const QString& newTargetPath) {
+            const auto records = repository_.listDownloads();
+            const auto it = std::find_if(records.cbegin(), records.cend(), [&id](const DownloadRecord& record) {
+                return record.id == id;
+            });
+            const QUrl recordUrl = it != records.cend() ? it->url : QUrl {};
+            if (it != records.cend()) {
+                auto updated = *it;
+                updated.targetPath = newTargetPath;
+                updated.request.targetPath = newTargetPath;
+                updated.updatedAt = QDateTime::currentDateTimeUtc();
+                repository_.upsertDownload(updated);
+            }
+            const int row = rowForId(id);
+            if (row >= 0) {
+                const bool sortingEnabled = downloads_->isSortingEnabled();
+                downloads_->setSortingEnabled(false);
+                if (auto* fileItem = downloads_->item(row, FileNameColumn)) {
+                    fileItem->setText(displayFileName(newTargetPath, recordUrl));
+                    fileItem->setIcon(fileIconForPath(newTargetPath));
+                }
+                if (auto* saveItem = downloads_->item(row, SaveToColumn)) {
+                    saveItem->setText(newTargetPath);
+                }
+                downloads_->setSortingEnabled(sortingEnabled);
+                refreshDownloadDetailsFor(id);
+            }
+        });
     connect(&downloader_, &CurlEpollDownloader::metadataChanged, this,
         [this](const QString& id, qint64 total, const QString& entityTag, const QString& lastModified) {
             const auto records = repository_.listDownloads();
@@ -369,6 +400,7 @@ MainWindow::MainWindow(CurlEpollDownloader& downloader, DownloadScheduler& sched
     connect(&mediaDownloader_, &MediaDownloader::downloadAdded, this, &MainWindow::onDownloadAdded);
     connect(&mediaDownloader_, &MediaDownloader::progressChanged, this, &MainWindow::onProgressChanged);
     connect(&mediaDownloader_, &MediaDownloader::statusChanged, this, &MainWindow::onStatusChanged);
+    connect(&mediaDownloader_, &MediaDownloader::segmentsChanged, this, &MainWindow::onSegmentsChanged);
     connect(&themeManager_, &ThemeManager::themeChanged, this, &MainWindow::applyTheme);
     connect(&scheduler_, &DownloadScheduler::completionFileMoved, this,
             [this](const QString& id, const QString& targetPath) {
@@ -465,6 +497,8 @@ bool MainWindow::addUrl(QString url, QVariantMap headers)
 
     const auto mediaTypeHint = takeHeader(&headers, u"_qtidmMediaType").trimmed().toUpper();
     const auto mimeTypeHint = takeHeader(&headers, u"_qtidmMimeType").trimmed().toLower();
+    const auto pageTitleHint = takeHeader(&headers, u"_qtidmPageTitle").trimmed();
+    const auto refreshTargetHint = takeHeader(&headers, u"_qtidmRefreshTarget").trimmed();
     const auto suggestedFilename = safeSuggestedFilename(takeHeader(&headers, u"_qtidmSuggestedFilename"));
     const auto httpMethod = takeHeader(&headers, u"_qtidmHttpMethod").trimmed().toUpper();
     const auto requestBody = QByteArray::fromBase64(takeHeader(&headers, u"_qtidmRequestBody").toLatin1());
@@ -503,6 +537,8 @@ bool MainWindow::addUrl(QString url, QVariantMap headers)
     speedLimit->setSuffix(QStringLiteral(" KB/s"));
     speedLimit->setValue(settings.value(QStringLiteral("downloads/defaultSpeedLimitKib"), 0).toInt());
     auto* proxyEdit = new QLineEdit(settings.value(QStringLiteral("downloads/defaultProxy")).toString());
+    auto* dohEdit = new QLineEdit(settings.value(QStringLiteral("network/dohUrl")).toString());
+    dohEdit->setPlaceholderText(QStringLiteral("Default: system / preset (e.g. cloudflare) / URL"));
     auto* priority = new QSpinBox;
     priority->setRange(-100, 100);
     priority->setValue(0);
@@ -615,6 +651,7 @@ bool MainWindow::addUrl(QString url, QVariantMap headers)
     form->addRow(QStringLiteral("Per-host connection limit:"), hostConnections);
     form->addRow(QStringLiteral("Speed limit:"), speedLimit);
     form->addRow(QStringLiteral("Proxy:"), proxyEdit);
+    form->addRow(QStringLiteral("DNS-over-HTTPS:"), dohEdit);
     form->addRow(QStringLiteral("Checksum:"), checksumRow);
     form->addRow(QStringLiteral("HTTP headers:"), headerEdit);
     form->addRow(QStringLiteral("After completion:"), completionCommand);
@@ -672,12 +709,16 @@ bool MainWindow::addUrl(QString url, QVariantMap headers)
         return false;
     }
     if (adaptiveMedia) {
-        mediaDownloader_.enqueue(parsed, targetEdit->text(), editedHeaders);
+        mediaDownloader_.enqueue(parsed, targetEdit->text(), editedHeaders, {}, {}, {}, dohEdit->text().trimmed());
         return true;
     }
 
     DownloadRequest request;
     request.url = parsed;
+    request.pageTitle = pageTitleHint;
+    if (!refreshTargetHint.isEmpty()) {
+        request.refreshTarget = QUrl(refreshTargetHint);
+    }
     request.targetPath = targetEdit->text();
     request.category = categoryEdit->text();
     request.queueName = queueEdit->text().trimmed();
@@ -690,6 +731,7 @@ bool MainWindow::addUrl(QString url, QVariantMap headers)
     request.dynamicSegmentation = dynamicSegments->isChecked();
     request.perHostConnectionLimit = hostConnections->value();
     request.proxyUrl = proxyEdit->text();
+    request.dohUrl = dohEdit->text().trimmed();
     request.checksumAlgorithm = checksumType->currentText().toLower().remove(QLatin1Char('-'));
     request.expectedChecksum = checksumEdit->text().simplified().remove(QLatin1Char(' ')).toLower();
     request.completionCommand = completionCommand->text().trimmed();
@@ -944,9 +986,15 @@ bool MainWindow::addUrls(QStringList urls, QVariantMap headers)
             }
             const auto suggested = safeSuggestedFilename(browserDownload.value(QStringLiteral("suggestedFilename")).toString());
             if (!suggested.isEmpty()) requestHeaders.insert(QStringLiteral("_qtidmSuggestedFilename"), suggested);
+            const auto pageTitle = browserDownload.value(QStringLiteral("pageTitle")).toString().trimmed();
+            if (!pageTitle.isEmpty()) requestHeaders.insert(QStringLiteral("_qtidmPageTitle"), pageTitle);
+            const auto refreshTarget = browserDownload.value(QStringLiteral("refreshTarget")).toString().trimmed();
+            if (!refreshTarget.isEmpty()) requestHeaders.insert(QStringLiteral("_qtidmRefreshTarget"), refreshTarget);
         }
         const auto mediaTypeHint = takeHeader(&requestHeaders, u"_qtidmMediaType").trimmed().toUpper();
         const auto mimeTypeHint = takeHeader(&requestHeaders, u"_qtidmMimeType").trimmed().toLower();
+        const auto pageTitleHint = takeHeader(&requestHeaders, u"_qtidmPageTitle").trimmed();
+        const auto refreshTargetHint = takeHeader(&requestHeaders, u"_qtidmRefreshTarget").trimmed();
         const bool adaptiveMedia = MediaDownloader::supports(url, mediaTypeHint);
         auto suggested = safeSuggestedFilename(takeHeader(&requestHeaders, u"_qtidmSuggestedFilename"));
         if (suggested.isEmpty() && url.fileName().isEmpty()) {
@@ -970,6 +1018,10 @@ bool MainWindow::addUrls(QStringList urls, QVariantMap headers)
         }
         DownloadRequest request;
         request.url = url;
+        request.pageTitle = pageTitleHint;
+        if (!refreshTargetHint.isEmpty()) {
+            request.refreshTarget = QUrl(refreshTargetHint);
+        }
         request.targetPath = targetPath;
         request.category = categoryEdit->text().trimmed().compare(QStringLiteral("Auto"), Qt::CaseInsensitive) == 0
             ? categoryForName(name)
@@ -2015,6 +2067,43 @@ void MainWindow::showOptions()
     userAgent->setPlaceholderText(QStringLiteral("Use libcurl default"));
     auto* defaultProxy = new QLineEdit(settings.value(QStringLiteral("downloads/defaultProxy")).toString());
     defaultProxy->setPlaceholderText(QStringLiteral("http://user:pass@host:port or socks5://host:port"));
+    auto* dohProvider = new QComboBox;
+    auto* dohCustomUrl = new QLineEdit;
+    dohCustomUrl->setPlaceholderText(QStringLiteral("https://example.com/dns-query"));
+    const auto dohPresets = defaultDohPresets();
+    const QString currentDoh = settings.value(QStringLiteral("network/dohUrl")).toString().trimmed();
+    int selectedDohIndex = 0;
+    for (int i = 0; i < dohPresets.size(); ++i) {
+        dohProvider->addItem(dohPresets[i].name, dohPresets[i].id);
+        if (!dohPresets[i].id.isEmpty() && dohPresets[i].id.compare(currentDoh, Qt::CaseInsensitive) == 0) {
+            selectedDohIndex = i;
+        } else if (!dohPresets[i].url.isEmpty() && dohPresets[i].url.compare(currentDoh, Qt::CaseInsensitive) == 0) {
+            selectedDohIndex = i;
+        }
+    }
+    if (selectedDohIndex == 0 && !currentDoh.isEmpty() && currentDoh.compare(QStringLiteral("system"), Qt::CaseInsensitive) != 0) {
+        for (int i = 0; i < dohPresets.size(); ++i) {
+            if (dohPresets[i].id == QStringLiteral("custom")) {
+                selectedDohIndex = i;
+                break;
+            }
+        }
+        dohCustomUrl->setText(currentDoh);
+    }
+    dohProvider->setCurrentIndex(selectedDohIndex);
+    const bool isCustomInitially = dohProvider->currentData().toString() == QStringLiteral("custom");
+    dohCustomUrl->setEnabled(isCustomInitially);
+    dohCustomUrl->setVisible(isCustomInitially);
+    connect(dohProvider, QOverload<int>::of(&QComboBox::currentIndexChanged), [dohProvider, dohCustomUrl]() {
+        const bool isCustom = dohProvider->currentData().toString() == QStringLiteral("custom");
+        dohCustomUrl->setEnabled(isCustom);
+        dohCustomUrl->setVisible(isCustom);
+    });
+    auto* dohContainer = new QWidget;
+    auto* dohLayout = new QVBoxLayout(dohContainer);
+    dohLayout->setContentsMargins(0, 0, 0, 0);
+    dohLayout->addWidget(dohProvider);
+    dohLayout->addWidget(dohCustomUrl);
     auto* sessionDataLimit = new QSpinBox;
     sessionDataLimit->setRange(0, 2 * 1024 * 1024);
     sessionDataLimit->setSuffix(QStringLiteral(" MiB"));
@@ -2068,6 +2157,7 @@ void MainWindow::showOptions()
     form->addRow(QStringLiteral("Maximum redirects:"), maximumRedirects);
     form->addRow(QStringLiteral("Default User-Agent:"), userAgent);
     form->addRow(QStringLiteral("Default proxy:"), defaultProxy);
+    form->addRow(QStringLiteral("DNS-over-HTTPS (DoH):"), dohContainer);
     form->addRow(QStringLiteral("HTTP/FTP session data limit:"), sessionDataLimit);
     form->addRow(QStringLiteral("HTTP/FTP session data used:"), sessionUsageRow);
     form->addRow(QStringLiteral("Metered networks:"), meteredPolicy);
@@ -2108,6 +2198,14 @@ void MainWindow::showOptions()
     settings.setValue(QStringLiteral("downloads/maximumRedirects"), maximumRedirects->value());
     settings.setValue(QStringLiteral("downloads/defaultUserAgent"), userAgent->text().trimmed());
     settings.setValue(QStringLiteral("downloads/defaultProxy"), defaultProxy->text().trimmed());
+    QString chosenDoh;
+    if (dohProvider->currentData().toString() == QStringLiteral("custom")) {
+        chosenDoh = dohCustomUrl->text().trimmed();
+    } else {
+        chosenDoh = dohProvider->currentData().toString();
+    }
+    settings.setValue(QStringLiteral("network/dohUrl"), chosenDoh);
+    downloader_.setDefaultDohUrl(chosenDoh);
     settings.setValue(QStringLiteral("downloads/sessionDataLimitMiB"), sessionDataLimit->value());
     settings.setValue(QStringLiteral("downloads/meteredPolicy"), meteredPolicy->currentIndex());
     settings.setValue(QStringLiteral("downloads/defaultExtractArchives"), defaultExtractArchives->isChecked());
@@ -2544,6 +2642,8 @@ void MainWindow::propertiesSelected()
     auto* destination = new QLineEdit(it->targetPath);
     destination->setReadOnly(true);
     auto* proxyEdit = new QLineEdit(it->request.proxyUrl);
+    auto* dohEdit = new QLineEdit(it->request.dohUrl);
+    dohEdit->setPlaceholderText(QStringLiteral("Inherit options / preset (e.g. cloudflare) / URL"));
     auto* userEdit = new QLineEdit(it->request.username);
     auto* passwordEdit = new QLineEdit(it->request.password);
     passwordEdit->setEchoMode(QLineEdit::Password);
@@ -2602,6 +2702,7 @@ void MainWindow::propertiesSelected()
     form->addRow(QStringLiteral("Destination:"), destination);
     form->addRow(QStringLiteral("Category:"), categoryEdit);
     form->addRow(QStringLiteral("Proxy:"), proxyEdit);
+    form->addRow(QStringLiteral("DNS-over-HTTPS:"), dohEdit);
     form->addRow(QStringLiteral("User:"), userEdit);
     form->addRow(QStringLiteral("Password:"), passwordEdit);
     form->addRow(QStringLiteral("Credential storage:"), storeCredential);
@@ -2641,6 +2742,7 @@ void MainWindow::propertiesSelected()
     updated.request.category = updated.category;
     updated.request.targetPath = updated.targetPath;
     updated.request.proxyUrl = proxyEdit->text().trimmed();
+    updated.request.dohUrl = dohEdit->text().trimmed();
     updated.request.username = userEdit->text();
     updated.request.password = passwordEdit->text();
     updated.request.credentialVaultKey = storeCredential->isChecked()
@@ -3200,6 +3302,9 @@ void MainWindow::applyRequestDefaults(DownloadRequest& request) const
     request.maximumRedirects = qBound(0, settings.value(QStringLiteral("downloads/maximumRedirects"), 20).toInt(), 100);
     if (request.proxyUrl.trimmed().isEmpty()) {
         request.proxyUrl = settings.value(QStringLiteral("downloads/defaultProxy")).toString().trimmed();
+    }
+    if (request.dohUrl.trimmed().isEmpty()) {
+        request.dohUrl = settings.value(QStringLiteral("network/dohUrl")).toString().trimmed();
     }
     if (request.speedLimitBytesPerSecond == 0) {
         request.speedLimitBytesPerSecond =

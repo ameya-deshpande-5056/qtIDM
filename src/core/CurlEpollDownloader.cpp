@@ -1,4 +1,8 @@
 #include "core/CurlEpollDownloader.h"
+#include "core/BrowserCamouflage.h"
+#include "core/FileNaming.h"
+#include "core/SegmentPlanner.h"
+#include "integration/sites/SiteAdapterRegistry.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -6,6 +10,7 @@
 #include <QFileInfo>
 #include <QFile>
 #include <QMutexLocker>
+#include <QRegularExpression>
 #include <QStorageInfo>
 #include <QUrl>
 #include <curl/curl.h>
@@ -17,6 +22,7 @@
 #include <unistd.h>
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <utility>
@@ -40,6 +46,14 @@ struct CurlEpollDownloader::DownloadBatch {
     bool quotaExceeded = false;
     bool failureReported = false;
     bool rangeFallbackAttempted = false;
+    double ewmaTtfbMs = 0.0;
+    bool hasTtfbSample = false;
+    qint64 lastFinishedSegmentEnd = -1;
+    QHash<int, int> segmentPreemptCounts;
+    QByteArray magicHeader;
+    QString responseContentType;
+    QString contentDispositionFilename;
+    int siteRecoveryAttempts = 0;
     DownloadStatus reportedStatus = DownloadStatus::Downloading;
 };
 
@@ -49,6 +63,7 @@ struct CurlEpollDownloader::SegmentTransfer {
     qint64 start = 0;
     qint64 end = 0;
     qint64 written = 0;
+    qint64 reservedWritten = 0;
     qint64 initialWritten = 0;
     qint64 requestedRangeStart = -1;
     qint64 requestedRangeEnd = -1;
@@ -63,6 +78,7 @@ struct CurlEpollDownloader::SegmentTransfer {
     QByteArray proxyBytes;
     QByteArray requestBody;
     QByteArray caCertBytes;
+    QByteArray dohUrlBytes;
     curl_slist* headers = nullptr;
     curl_slist* resolveList = nullptr;
     bool requiresHttpPartialResponse = false;
@@ -73,9 +89,14 @@ struct CurlEpollDownloader::SegmentTransfer {
     QString responseEntityTag;
     QString responseLastModified;
     QString responseLocation;
+    QString responseContentType;
+    QString responseContentDisposition;
+    QByteArray errorBodyPreview;
     QString validationError;
     qint64 startTimeMs = 0;
+    qint64 firstByteTimeMs = 0;
     qint64 lastProgressTimeMs = 0;
+    bool receiving = false;
 
     ~SegmentTransfer()
     {
@@ -172,6 +193,9 @@ void resetResponseMetadata(CurlEpollDownloader::SegmentTransfer* transfer)
     transfer->responseEntityTag.clear();
     transfer->responseLastModified.clear();
     transfer->responseLocation.clear();
+    transfer->responseContentType.clear();
+    transfer->responseContentDisposition.clear();
+    transfer->errorBodyPreview.clear();
 }
 
 void parseContentRange(const QByteArray& rawValue, CurlEpollDownloader::SegmentTransfer* transfer)
@@ -237,6 +261,28 @@ size_t headerCallback(char* ptr, size_t size, size_t nmemb, void* userdata)
         transfer->responseLastModified = QString::fromLatin1(line.mid(14).trimmed());
     } else if (line.left(9).compare("Location:", Qt::CaseInsensitive) == 0) {
         transfer->responseLocation = QString::fromUtf8(line.mid(9).trimmed());
+    } else if (line.left(13).compare("Content-Type:", Qt::CaseInsensitive) == 0) {
+        transfer->responseContentType = QString::fromLatin1(line.mid(13).trimmed());
+    } else if (line.left(20).compare("Content-Disposition:", Qt::CaseInsensitive) == 0) {
+        const auto disp = QString::fromUtf8(line.mid(20).trimmed());
+        static const QRegularExpression extRe(QStringLiteral(R"re(filename\*\s*=\s*(?:"([^"]+)"|([^;]+)))re"),
+            QRegularExpression::CaseInsensitiveOption);
+        const auto em = extRe.match(disp);
+        if (em.hasMatch()) {
+            const auto raw = (em.captured(1).isEmpty() ? em.captured(2) : em.captured(1)).trimmed();
+            const int tick2 = raw.indexOf(QStringLiteral("''"));
+            const auto encoded = tick2 >= 0 ? raw.mid(tick2 + 2) : raw;
+            transfer->responseContentDisposition = QUrl::fromPercentEncoding(encoded.toUtf8());
+        } else {
+            static const QRegularExpression regRe(QStringLiteral(R"re(filename\s*=\s*(?:"((?:\\.|[^"])*)"|([^;]+)))re"),
+                QRegularExpression::CaseInsensitiveOption);
+            const auto rm = regRe.match(disp);
+            if (rm.hasMatch()) {
+                auto raw = (rm.captured(1).isEmpty() ? rm.captured(2) : rm.captured(1)).trimmed();
+                raw.replace(QStringLiteral("\\\""), QStringLiteral("\""));
+                transfer->responseContentDisposition = raw;
+            }
+        }
     } else if (line.left(12).compare("Retry-After:", Qt::CaseInsensitive) == 0) {
         bool ok = false;
         const auto seconds = line.mid(12).trimmed().toLongLong(&ok);
@@ -285,7 +331,7 @@ void extractCookies(CURL* easy, QStringList* serverCookies)
     }
 }
 
-void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDownloader::SegmentTransfer* transfer)
+void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDownloader::SegmentTransfer* transfer, const QString& defaultDohUrl = QString())
 {
     transfer->urlBytes = request.url.toString(QUrl::FullyEncoded).toUtf8();
     curl_easy_setopt(easy, CURLOPT_URL, transfer->urlBytes.constData());
@@ -360,6 +406,18 @@ void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDo
         curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 0L);
     }
 
+    // D4: Browser-like TLS cipher suite & curve camouflage
+    QString requestUserAgent;
+    for (auto it = request.headers.cbegin(); it != request.headers.cend(); ++it) {
+        if (it.key().compare(QStringLiteral("User-Agent"), Qt::CaseInsensitive) == 0) {
+            requestUserAgent = it.value().toString();
+            break;
+        }
+    }
+    const auto tlsProfile = BrowserCamouflage::resolveProfile(
+        BrowserCamouflage::parseProfile(request.browserTlsProfile), requestUserAgent);
+    BrowserCamouflage::applyTlsProfile(easy, tlsProfile);
+
     if (!request.username.isEmpty() || !request.password.isEmpty()) {
         transfer->userPwdBytes = (request.username + QLatin1Char(':') + request.password).toUtf8();
         curl_easy_setopt(easy, CURLOPT_USERPWD, transfer->userPwdBytes.constData());
@@ -369,6 +427,19 @@ void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDo
         transfer->proxyBytes = request.proxyUrl.toUtf8();
         curl_easy_setopt(easy, CURLOPT_PROXY, transfer->proxyBytes.constData());
     }
+    QString effectiveDohUrl = request.dohUrl.trimmed();
+    if (effectiveDohUrl.isEmpty()) {
+        effectiveDohUrl = defaultDohUrl.trimmed();
+    }
+    effectiveDohUrl = resolveDohUrl(effectiveDohUrl);
+    if (!effectiveDohUrl.isEmpty() && transfer) {
+        transfer->dohUrlBytes = effectiveDohUrl.toUtf8();
+        curl_easy_setopt(easy, CURLOPT_DOH_URL, transfer->dohUrlBytes.constData());
+        if (request.insecureSkipSslVerification) {
+            curl_easy_setopt(easy, CURLOPT_DOH_SSL_VERIFYPEER, 0L);
+            curl_easy_setopt(easy, CURLOPT_DOH_SSL_VERIFYHOST, 0L);
+        }
+    }
     if (request.httpMethod == QStringLiteral("POST")) {
         transfer->requestBody = request.requestBody;
         curl_easy_setopt(easy, CURLOPT_POST, 1L);
@@ -376,11 +447,7 @@ void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDo
         curl_easy_setopt(easy, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(transfer->requestBody.size()));
     }
     for (auto it = request.headers.cbegin(); it != request.headers.cend(); ++it) {
-        const auto key = it.key();
-        if (key.startsWith(QLatin1Char('_'))) {
-            continue;
-        }
-        if (key.compare(QStringLiteral("Cookie"), Qt::CaseInsensitive) == 0) {
+        if (it.key().compare(QStringLiteral("Cookie"), Qt::CaseInsensitive) == 0) {
             // If request.cookies is empty, parse fallback raw cookies as host-only records
             if (request.cookies.isEmpty()) {
                 const auto cookieHeader = it.value().toString();
@@ -405,9 +472,13 @@ void applyRequestOptions(CURL* easy, const DownloadRequest& request, CurlEpollDo
                     }
                 }
             }
-            continue;
         }
-        const auto line = key.toUtf8() + ": " + it.value().toString().toUtf8();
+    }
+    // D4: Apply strict browser-like HTTP header ordering
+    const auto orderedHeaders = BrowserCamouflage::buildOrderedHeaders(
+        request.headers, tlsProfile, request.url, tlsProfile != BrowserTlsProfile::None);
+    for (const auto& [hdrKey, hdrVal] : orderedHeaders) {
+        const auto line = hdrKey.toUtf8() + ": " + hdrVal.toUtf8();
         transfer->headers = curl_slist_append(transfer->headers, line.constData());
     }
     if (transfer->headers) {
@@ -948,6 +1019,30 @@ void CurlEpollDownloader::resetSessionBytesReceived()
     sessionBytesReceived_.store(0);
 }
 
+QString CurlEpollDownloader::defaultDohUrl() const
+{
+    QMutexLocker lock(&dohMutex_);
+    return defaultDohUrl_;
+}
+
+void CurlEpollDownloader::setDefaultDohUrl(const QString& url)
+{
+    QMutexLocker lock(&dohMutex_);
+    defaultDohUrl_ = url.trimmed();
+}
+
+void CurlEpollDownloader::setDomainRules(const QVector<DomainRule>& rules)
+{
+    QMutexLocker lock(&domainRulesMutex_);
+    domainRules_ = rules;
+}
+
+QVector<DomainRule> CurlEpollDownloader::domainRules() const
+{
+    QMutexLocker lock(&domainRulesMutex_);
+    return domainRules_;
+}
+
 void CurlEpollDownloader::acknowledgeCheckpoint(const QString& id, const QVector<SegmentInfo>& confirmedSegments)
 {
     {
@@ -1019,6 +1114,22 @@ size_t CurlEpollDownloader::writeCallback(char* ptr, size_t size, size_t nmemb, 
     auto& batch = *transfer->batch;
     auto& segment = batch.segments[transfer->segmentIndex];
 
+    // D1: Guard against site adapters returning an HTML virus-scan/repair page instead of the file
+    // Check BEFORE adopting Content-Length / ETag metadata from the HTML error/interstitial page.
+    if (transfer->written == transfer->initialWritten && batch.siteRecoveryAttempts < 2
+        && transfer->responseContentType.contains(QStringLiteral("text/html"), Qt::CaseInsensitive)) {
+        const auto* adapter = SiteAdapterRegistry::defaultRegistry().findAdapterFor(
+            batch.request.url, batch.request.refreshTarget, batch.request.siteAdapterHint);
+        if (adapter && adapter->indicatesExpired(batch.request.url, transfer->responseCode,
+                transfer->responseContentType, {}, QByteArray(ptr, static_cast<qsizetype>(qMin<qint64>(bytes, 2048))))) {
+            if (transfer->errorBodyPreview.size() < 4096) {
+                transfer->errorBodyPreview.append(ptr, static_cast<qsizetype>(qMin<qint64>(bytes, 4096 - transfer->errorBodyPreview.size())));
+            }
+            transfer->validationError = QStringLiteral("site returned HTML page instead of file");
+            return 0;
+        }
+    }
+
     if (transfer->requiresHttpPartialResponse) {
         if (transfer->responseCode != 206) {
             transfer->validationError = QStringLiteral("server did not honor requested byte range");
@@ -1080,7 +1191,7 @@ size_t CurlEpollDownloader::writeCallback(char* ptr, size_t size, size_t nmemb, 
 
     if (segment.end >= segment.start) {
         const auto expectedLength = segment.end - segment.start + 1;
-        if (transfer->written > expectedLength || bytes > expectedLength - transfer->written) {
+        if (transfer->reservedWritten > expectedLength || bytes > expectedLength - transfer->reservedWritten) {
             transfer->validationError = QStringLiteral("response exceeds expected segment size");
             return 0;
         }
@@ -1093,14 +1204,46 @@ size_t CurlEpollDownloader::writeCallback(char* ptr, size_t size, size_t nmemb, 
         batch.quotaExceeded = true;
         return 0;
     }
-    const auto offset = transfer->start + transfer->written;
+
+    if (batch.responseContentType.isEmpty() && !transfer->responseContentType.isEmpty()) {
+        batch.responseContentType = transfer->responseContentType;
+    }
+    if (batch.contentDispositionFilename.isEmpty() && !transfer->responseContentDisposition.isEmpty()) {
+        batch.contentDispositionFilename = transfer->responseContentDisposition;
+    }
+
+    // Two-phase range lock: claim [offset, offset + bytes) before disk write,
+    // then commit only after SparseFileWriter::writeAt succeeds.
+    const auto offset = transfer->start + transfer->reservedWritten;
+    transfer->reservedWritten += bytes;
     if (!batch.writer->writeAt(offset, ptr, bytes)) {
+        transfer->reservedWritten = transfer->written;
         transfer->validationError = batch.writer->lastError();
         return 0;
     }
+    // D3: Capture leading magic bytes from file offset 0 for format sniffing
+    if (offset < FileNaming::kMagicHeaderSize && bytes > 0) {
+        const qint64 copyEnd = qMin<qint64>(FileNaming::kMagicHeaderSize, offset + bytes);
+        if (batch.magicHeader.size() < copyEnd) {
+            batch.magicHeader.resize(static_cast<qsizetype>(copyEnd));
+        }
+        std::memcpy(batch.magicHeader.data() + offset, ptr, static_cast<size_t>(copyEnd - offset));
+    }
+    const auto nowMs = QDateTime::currentMSecsSinceEpoch();
+    if (bytes > 0 && !transfer->receiving) {
+        transfer->receiving = true;
+        transfer->firstByteTimeMs = nowMs;
+        const double ttfbSample = static_cast<double>(qMax<qint64>(1, nowMs - transfer->startTimeMs));
+        if (!batch.hasTtfbSample) {
+            batch.ewmaTtfbMs = ttfbSample;
+            batch.hasTtfbSample = true;
+        } else {
+            batch.ewmaTtfbMs = 0.7 * batch.ewmaTtfbMs + 0.3 * ttfbSample;
+        }
+    }
     batch.owner->sessionBytesReceived_.fetch_add(bytes);
-    transfer->written += bytes;
-    transfer->lastProgressTimeMs = QDateTime::currentMSecsSinceEpoch();
+    transfer->written = transfer->reservedWritten;
+    transfer->lastProgressTimeMs = nowMs;
     segment.written = transfer->written;
     segment.status = DownloadStatus::Downloading;
     if (bytes > 0 && !batch.failed && batch.reportedStatus != DownloadStatus::Downloading) {
@@ -1352,12 +1495,41 @@ void CurlEpollDownloader::runProbeWorker()
                 struct in6_addr in6;
                 const bool isIpLiteral = (::inet_aton(hostBytes.constData(), &in4) == 1)
                                       || (::inet_pton(AF_INET6, hostBytes.constData(), &in6) == 1);
+
+                QString effectiveDoh = probed.queued.request.dohUrl.trimmed();
+                if (effectiveDoh.compare(QStringLiteral("system"), Qt::CaseInsensitive) == 0) {
+                    effectiveDoh.clear();
+                } else if (effectiveDoh.isEmpty()) {
+                    QMutexLocker lock(&dohMutex_);
+                    effectiveDoh = defaultDohUrl_;
+                }
+
                 if (isIpLiteral) {
                     probed.queued.request.pinnedIp.clear();
                     if (!probed.queued.request.allowPrivateNetworkRedirects) {
                         if (host == QStringLiteral("169.254.169.254") || host == QStringLiteral("100.100.100.200")
                             || host == QStringLiteral("[fd00:ec2::254]") || host == QStringLiteral("fd00:ec2::254")) {
                             probed.error = QStringLiteral("destination resolves to a blocked cloud metadata address");
+                        }
+                    }
+                } else if (!effectiveDoh.isEmpty()) {
+                    QString cleanHost = host.toLower();
+                    if (cleanHost.startsWith(QLatin1Char('[')) && cleanHost.endsWith(QLatin1Char(']'))) {
+                        cleanHost = cleanHost.mid(1, cleanHost.length() - 2);
+                    }
+                    if (cleanHost == QStringLiteral("localhost")
+                        || cleanHost.endsWith(QStringLiteral(".localhost"))
+                        || cleanHost.endsWith(QStringLiteral(".local"))
+                        || cleanHost.endsWith(QStringLiteral(".internal"))
+                        || cleanHost.endsWith(QStringLiteral(".lan"))
+                        || cleanHost.endsWith(QStringLiteral(".home"))
+                        || cleanHost.endsWith(QStringLiteral(".corp"))
+                        || cleanHost == QStringLiteral("metadata.google.internal")
+                        || cleanHost == QStringLiteral("metadata")
+                        || cleanHost == QStringLiteral("instance-data")
+                        || (!cleanHost.contains(QLatin1Char('.')) && !cleanHost.contains(QLatin1Char(':')))) {
+                        if (!probed.queued.request.allowPrivateNetworkRedirects) {
+                            probed.error = QStringLiteral("destination resolves to a private or loopback address");
                         }
                     }
                 } else {
@@ -1493,6 +1665,39 @@ void CurlEpollDownloader::addProbedTransfer(ProbedRequest probed)
         emit statusChanged(queued.id, DownloadStatus::Failed, resumeError);
         return;
     }
+    // D1: Infer refreshTarget for known file-hosting sites if not explicitly set
+    if (!queued.request.refreshTarget.isValid() || queued.request.refreshTarget.isEmpty()) {
+        const QUrl inferred = SiteAdapterRegistry::defaultRegistry().inferRefreshTarget(
+            queued.request.url, queued.request.siteAdapterHint);
+        if (inferred.isValid()) {
+            queued.request.refreshTarget = inferred;
+        }
+    }
+
+    // D2: Apply matching per-domain connection, segment, speed, and header rules
+    {
+        const auto rules = domainRules();
+        if (const auto* rule = DomainRule::findBestMatch(rules, queued.request.url.host())) {
+            if (rule->maxSegments > 0) {
+                queued.request.segments = qMin(queued.request.segments, rule->maxSegments);
+                queued.request.perHostConnectionLimit = qMin(queued.request.perHostConnectionLimit, rule->maxSegments);
+            }
+            if (rule->speedLimitBytesPerSecond > 0) {
+                queued.request.speedLimitBytesPerSecond = queued.request.speedLimitBytesPerSecond > 0
+                    ? qMin(queued.request.speedLimitBytesPerSecond, rule->speedLimitBytesPerSecond)
+                    : rule->speedLimitBytesPerSecond;
+            }
+            if (!rule->customUserAgent.isEmpty() && !queued.request.headers.contains(QStringLiteral("User-Agent"))) {
+                queued.request.headers.insert(QStringLiteral("User-Agent"), rule->customUserAgent);
+            }
+            for (auto hIt = rule->customHeaders.cbegin(); hIt != rule->customHeaders.cend(); ++hIt) {
+                if (!queued.request.headers.contains(hIt.key())) {
+                    queued.request.headers.insert(hIt.key(), hIt.value());
+                }
+            }
+        }
+    }
+
     const int requestedSegments = queued.request.httpMethod == QStringLiteral("POST")
         ? 1 : std::clamp(queued.request.segments, 1, 32);
     const bool canResumeSegments = rangeSupported && !queued.request.resumeSegments.isEmpty();
@@ -1602,19 +1807,18 @@ void CurlEpollDownloader::addProbedTransfer(ProbedRequest probed)
     record.updatedAt = record.createdAt;
     record.request = queued.request;
 
-    const qint64 segmentSize = total > 0 ? ((total + segmentCount - 1) / segmentCount) : -1;
-    for (int index = 0; index < segmentCount; ++index) {
-        SegmentInfo segment;
-        if (canResumeSegments) {
-            segment = queued.request.resumeSegments[index];
-        } else {
-            segment.index = index;
-            segment.start = total > 0 ? index * segmentSize : 0;
-            segment.end = total > 0 ? qMin(total - 1, segment.start + segmentSize - 1) : -1;
-            segment.status = DownloadStatus::Queued;
+    if (canResumeSegments) {
+        for (int index = 0; index < segmentCount; ++index) {
+            const SegmentInfo& segment = queued.request.resumeSegments[index];
+            batch->segments.append(segment);
+            record.segments.append(segment);
         }
-        batch->segments.append(segment);
-        record.segments.append(segment);
+    } else {
+        const auto planned = SegmentPlanner::planInitialSegments(total, segmentCount, SegmentPlanner::kPageAlign);
+        for (const auto& segment : planned) {
+            batch->segments.append(segment);
+            record.segments.append(segment);
+        }
     }
 
     record.completedBytes = batchReceived(*batch);
@@ -1646,6 +1850,216 @@ void CurlEpollDownloader::addProbedTransfer(ProbedRequest probed)
     }
 }
 
+bool CurlEpollDownloader::preemptStalledSegment(const std::shared_ptr<DownloadBatch>& batch)
+{
+    if (!batch || batch->failed || batch->total <= 0 || !batch->request.dynamicSegmentation) {
+        return false;
+    }
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    const qint64 preemptAfterMs = batch->hasTtfbSample
+        ? std::clamp<qint64>(static_cast<qint64>(std::llround(batch->ewmaTtfbMs * 2.0)), 1500, 10000)
+        : 2500;
+    const qint64 preferredStart = batch->lastFinishedSegmentEnd >= 0 ? (batch->lastFinishedSegmentEnd + 1) : -1;
+
+    CURL* victimEasy = nullptr;
+    int victimIndex = -1;
+    qint64 longestWaitMs = -1;
+    bool victimIsPreferred = false;
+
+    for (const auto& [easy, transfer] : transfers_) {
+        if (transfer->batch != batch || transfer->receiving) {
+            continue;
+        }
+        const int idx = transfer->segmentIndex;
+        if (idx < 0 || idx >= batch->segments.size()) {
+            continue;
+        }
+        if (batch->segmentPreemptCounts.value(idx, 0) >= 2) {
+            continue;
+        }
+        const qint64 waitMs = nowMs - transfer->startTimeMs;
+        if (waitMs < preemptAfterMs) {
+            continue;
+        }
+        const auto& seg = batch->segments[idx];
+        const qint64 nextOffset = seg.start + qMax(seg.written, transfer->reservedWritten);
+        if (seg.end < nextOffset) {
+            continue;
+        }
+        const bool isPreferred = (preferredStart >= 0 && seg.start == preferredStart);
+        if (isPreferred && !victimIsPreferred) {
+            victimEasy = easy;
+            victimIndex = idx;
+            longestWaitMs = waitMs;
+            victimIsPreferred = true;
+        } else if (isPreferred == victimIsPreferred && waitMs > longestWaitMs) {
+            victimEasy = easy;
+            victimIndex = idx;
+            longestWaitMs = waitMs;
+        }
+    }
+
+    if (!victimEasy || victimIndex < 0) {
+        return false;
+    }
+
+    const int attempt = transfers_[victimEasy]->attempt;
+    const auto batchHost = hostKey(batch->request.url);
+    curl_multi_remove_handle(multi_, victimEasy);
+    curl_easy_cleanup(victimEasy);
+    transfers_.erase(victimEasy);
+    emit hostConnectionCountChanged(batchHost, activeConnectionsForHost(batchHost));
+
+    batch->segmentPreemptCounts[victimIndex] = batch->segmentPreemptCounts.value(victimIndex, 0) + 1;
+    // Force HTTP/1.1 on the preempting replacement connection to escape hung H2 streams
+    addSegmentTransfer(batch, victimIndex, attempt, true);
+    emit segmentsChanged(batch->id, batch->segments);
+    return true;
+}
+
+bool CurlEpollDownloader::tryRecoverExpiredUrl(const std::shared_ptr<DownloadBatch>& batch,
+                                               int segmentIndex,
+                                               long responseCode,
+                                               const QString& contentType,
+                                               const QUrl& redirectLocation,
+                                               const QByteArray& bodyPreview)
+{
+    if (!batch || batch->failed || batch->siteRecoveryAttempts >= 2) {
+        return false;
+    }
+    const auto* adapter = SiteAdapterRegistry::defaultRegistry().findAdapterFor(
+        batch->request.url, batch->request.refreshTarget, batch->request.siteAdapterHint);
+    if (!adapter || !adapter->indicatesExpired(batch->request.url, responseCode, contentType, redirectLocation, bodyPreview)) {
+        return false;
+    }
+
+    batch->siteRecoveryAttempts++;
+    const auto doh = defaultDohUrl();
+    const auto baseRequest = batch->request;
+
+    SiteHttpFetcher fetcher = [doh, baseRequest](const QUrl& url, const QVariantMap& headers,
+                                                 const QString& method, const QByteArray& body) -> SiteHttpResponse {
+        SiteHttpResponse out;
+        auto* easy = curl_easy_init();
+        if (!easy) {
+            return out;
+        }
+        auto tempTransfer = std::make_unique<SegmentTransfer>();
+        DownloadRequest fetchReq = baseRequest;
+        fetchReq.url = url;
+        fetchReq.httpMethod = method.toUpper() == QStringLiteral("POST") ? QStringLiteral("POST") : QString {};
+        fetchReq.requestBody = body;
+        fetchReq.headers = headers;
+        fetchReq.pinnedIp.clear();
+        applyRequestOptions(easy, fetchReq, tempTransfer.get(), doh);
+        curl_easy_setopt(easy, CURLOPT_FAILONERROR, 0L);
+        curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 5L);
+        curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION,
+            +[](char* p, size_t s, size_t n, void* u) -> size_t {
+                auto* buf = static_cast<QByteArray*>(u);
+                const auto len = static_cast<qsizetype>(s * n);
+                if (buf->size() + len > 2 * 1024 * 1024) {
+                    return 0;
+                }
+                buf->append(p, len);
+                return s * n;
+            });
+        curl_easy_setopt(easy, CURLOPT_WRITEDATA, &out.body);
+        const auto rc = curl_easy_perform(easy);
+        if (rc == CURLE_OK) {
+            curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &out.statusCode);
+            char* effUrl = nullptr;
+            if (curl_easy_getinfo(easy, CURLINFO_EFFECTIVE_URL, &effUrl) == CURLE_OK && effUrl) {
+                out.finalUrl = QUrl(QString::fromUtf8(effUrl));
+            }
+            out.contentType = tempTransfer->responseContentType;
+            out.locationHeader = tempTransfer->responseLocation;
+        }
+        curl_easy_cleanup(easy);
+        return out;
+    };
+
+    const QUrl effectiveRefresh = batch->request.refreshTarget.isValid()
+        ? batch->request.refreshTarget
+        : (redirectLocation.isValid() ? redirectLocation : adapter->inferRefreshTarget(batch->request.url));
+
+    const auto recovered = adapter->recover(batch->request.url, effectiveRefresh,
+        batch->request.siteAdapterToken, batch->request.headers, fetcher);
+    if (!recovered.recovered || !recovered.refreshedUrl.isValid()) {
+        return false;
+    }
+
+    QString redirectError;
+    QString newPinnedIp;
+    if (!validateRedirectUrl(batch->request.url, recovered.refreshedUrl,
+            batch->request.allowPrivateNetworkRedirects, &redirectError, &newPinnedIp)) {
+        return false;
+    }
+
+    batch->request.url = recovered.refreshedUrl;
+    batch->request.pinnedIp = newPinnedIp;
+    if (recovered.updatedRefreshTarget.isValid()) {
+        batch->request.refreshTarget = recovered.updatedRefreshTarget;
+    }
+    if (!recovered.updatedToken.isEmpty()) {
+        batch->request.siteAdapterToken = recovered.updatedToken;
+    }
+    for (auto it = recovered.extraHeaders.cbegin(); it != recovered.extraHeaders.cend(); ++it) {
+        batch->request.headers.insert(it.key(), it.value());
+    }
+    if (!recovered.suggestedFilename.isEmpty() && batch->contentDispositionFilename.isEmpty()) {
+        batch->contentDispositionFilename = recovered.suggestedFilename;
+    }
+
+    // If no real file bytes have been written yet (e.g., initial probe hit an HTML virus-scan
+    // or repair page whose Content-Length belonged to the HTML interstitial), reset metadata and
+    // start fresh against the recovered direct URL.
+    int restartSegmentIndex = segmentIndex;
+    if (batchReceived(*batch) == 0 && batch->request.resumeSegments.isEmpty()) {
+        for (auto it = transfers_.begin(); it != transfers_.end();) {
+            if (it->second->batch == batch) {
+                auto* otherEasy = it->first;
+                curl_multi_remove_handle(multi_, otherEasy);
+                curl_easy_cleanup(otherEasy);
+                it = transfers_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        for (int i = retries_.size() - 1; i >= 0; --i) {
+            if (retries_[i].batch == batch) {
+                retries_.removeAt(i);
+            }
+        }
+        batch->writer->close();
+        batch->writer->open(batch->stagingPath, -1, false);
+        batch->total = -1;
+        batch->request.entityTag.clear();
+        batch->request.lastModified.clear();
+        batch->responseContentType.clear();
+        batch->magicHeader.clear();
+        batch->segments.clear();
+        SegmentInfo freshSeg;
+        freshSeg.index = 0;
+        freshSeg.start = 0;
+        freshSeg.end = -1;
+        freshSeg.written = 0;
+        freshSeg.durableWritten = 0;
+        freshSeg.status = DownloadStatus::Downloading;
+        batch->segments.append(freshSeg);
+        batch->activeSegments = 1;
+        restartSegmentIndex = 0;
+        emit segmentsChanged(batch->id, batch->segments);
+    } else {
+        batch->activeSegments++;
+    }
+    emit statusChanged(batch->id, DownloadStatus::Connecting,
+        QStringLiteral("Recovered expired link via %1 adapter").arg(adapter->name()));
+    addSegmentTransfer(batch, restartSegmentIndex, 0, false);
+    return true;
+}
+
 bool CurlEpollDownloader::splitActiveSegment(const std::shared_ptr<DownloadBatch>& batch)
 {
     if (!batch || batch->failed || batch->total <= 0 || !batch->request.dynamicSegmentation) {
@@ -1658,6 +2072,7 @@ bool CurlEpollDownloader::splitActiveSegment(const std::shared_ptr<DownloadBatch
     }
 
     constexpr qint64 splitThresholdBytes = 64 * 1024;
+    constexpr qint64 minHalfBytes = splitThresholdBytes / 2;
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
 
     CURL* candidateEasy = nullptr;
@@ -1674,11 +2089,11 @@ bool CurlEpollDownloader::splitActiveSegment(const std::shared_ptr<DownloadBatch
             continue;
         }
         const auto& seg = batch->segments[idx];
-        const qint64 nextOffset = seg.start + seg.written;
-        if (seg.end < nextOffset) {
+        const qint64 reservedOffset = seg.start + qMax(seg.written, transfer->reservedWritten);
+        if (seg.end < reservedOffset) {
             continue;
         }
-        const qint64 unread = seg.end - nextOffset + 1;
+        const qint64 unread = seg.end - reservedOffset + 1;
         if (unread < splitThresholdBytes) {
             continue;
         }
@@ -1704,14 +2119,19 @@ bool CurlEpollDownloader::splitActiveSegment(const std::shared_ptr<DownloadBatch
     }
 
     auto& origSeg = batch->segments[candidateIndex];
-    const qint64 nextOffset = origSeg.start + origSeg.written;
-    const qint64 unread = origSeg.end - nextOffset + 1;
+    const qint64 reservedOffset = origSeg.start + qMax(origSeg.written, transfers_[candidateEasy]->reservedWritten);
+    const qint64 unread = origSeg.end - reservedOffset + 1;
     if (unread < splitThresholdBytes) {
         return false;
     }
     const qint64 originalEnd = origSeg.end;
-    const qint64 mid = nextOffset + (unread / 2) - 1;
-    if (mid < nextOffset || mid >= originalEnd) {
+    const auto alignedSplit = SegmentPlanner::computeAlignedSplitPoint(
+        reservedOffset, originalEnd + 1, minHalfBytes, SegmentPlanner::kPageAlign);
+    if (!alignedSplit.has_value()) {
+        return false;
+    }
+    const qint64 mid = *alignedSplit - 1;
+    if (mid < reservedOffset || mid >= originalEnd) {
         return false;
     }
 
@@ -1766,6 +2186,14 @@ bool CurlEpollDownloader::splitActiveSegment(const std::shared_ptr<DownloadBatch
         if (retry.batch == batch && retry.segmentIndex > candidateIndex) {
             retry.segmentIndex++;
         }
+    }
+    if (!batch->segmentPreemptCounts.isEmpty()) {
+        QHash<int, int> shifted;
+        for (auto it = batch->segmentPreemptCounts.cbegin(); it != batch->segmentPreemptCounts.cend(); ++it) {
+            const int newIdx = it.key() > candidateIndex ? it.key() + 1 : it.key();
+            shifted.insert(newIdx, it.value());
+        }
+        batch->segmentPreemptCounts = std::move(shifted);
     }
 
     // 4. Persist split layout to database BEFORE replacement transfers start writing!
@@ -1885,6 +2313,13 @@ void CurlEpollDownloader::refillQueuedSegments()
     for (const auto& id : changedBatches) {
         if (const auto batch = batches_.value(id)) {
             emit segmentsChanged(batch->id, batch->segments);
+        }
+    }
+
+    // Preempt any stalled pending (non-receiving) connections before splitting active fast segments
+    for (const auto& id : std::as_const(batchOrder_)) {
+        if (const auto batch = batches_.value(id)) {
+            preemptStalledSegment(batch);
         }
     }
 
@@ -2016,7 +2451,55 @@ bool CurlEpollDownloader::verifyCompletedDownload(const std::shared_ptr<Download
 
 bool CurlEpollDownloader::publishCompletedDownload(const std::shared_ptr<DownloadBatch>& batch, QString* error) const
 {
-    const auto targetPath = batch->request.targetPath;
+    QString targetPath = batch->request.targetPath;
+
+    // D3: Magic-Byte Sniffing & Semantic File Naming for meaningless/script filenames
+    if (batch->request.enableSemanticNaming) {
+        QByteArray header = batch->magicHeader;
+        if (header.size() < FileNaming::kMagicHeaderSize) {
+            QFile probe(batch->stagingPath);
+            if (probe.open(QIODevice::ReadOnly)) {
+                header = probe.read(FileNaming::kMagicHeaderSize);
+            }
+        }
+        const QFileInfo info(targetPath);
+        const QString currentName = info.fileName();
+        const QString sniffedExt = FileNaming::sniffExtensionFromMagicBytes(header);
+        const bool shouldApplySemanticName = FileNaming::isMeaninglessFilename(currentName)
+            || (FileNaming::hasGenericOrMissingExtension(currentName)
+                && !sniffedExt.isEmpty() && sniffedExt != QStringLiteral("html"));
+        if (shouldApplySemanticName) {
+            const QString semanticName = FileNaming::resolveSemanticFilename(
+                currentName,
+                batch->request.pageTitle,
+                header,
+                batch->contentDispositionFilename,
+                batch->responseContentType);
+            if (!semanticName.isEmpty() && semanticName != currentName) {
+                QString candidate = info.dir().filePath(semanticName);
+                if (batch->request.fileConflictPolicy == FileConflictPolicy::AutoRename && QFileInfo::exists(candidate)) {
+                    const QFileInfo candInfo(candidate);
+                    const QString base = candInfo.completeBaseName();
+                    const QString ext = candInfo.suffix();
+                    for (int n = 1; n < 10000; ++n) {
+                        const QString alt = ext.isEmpty()
+                            ? QStringLiteral("%1 (%2)").arg(base).arg(n)
+                            : QStringLiteral("%1 (%2).%3").arg(base).arg(n).arg(ext);
+                        candidate = info.dir().filePath(alt);
+                        if (!QFileInfo::exists(candidate)) {
+                            break;
+                        }
+                    }
+                }
+                targetPath = candidate;
+                batch->request.targetPath = targetPath;
+                if (batch->owner) {
+                    emit batch->owner->targetPathChanged(batch->id, targetPath);
+                }
+            }
+        }
+    }
+
     if (QFileInfo::exists(targetPath) && !QFile::remove(targetPath)) {
         *error = QStringLiteral("could not replace existing destination file %1").arg(targetPath);
         return false;
@@ -2038,11 +2521,14 @@ void CurlEpollDownloader::addSegmentTransfer(const std::shared_ptr<DownloadBatch
     transfer->start = segment.start;
     transfer->end = segment.end;
     transfer->written = segment.written;
+    transfer->reservedWritten = segment.written;
     transfer->initialWritten = segment.written;
     transfer->attempt = attempt;
     transfer->forceHttp1 = forceHttp1;
     transfer->startTimeMs = QDateTime::currentMSecsSinceEpoch();
+    transfer->firstByteTimeMs = 0;
     transfer->lastProgressTimeMs = transfer->startTimeMs;
+    transfer->receiving = false;
 
     auto* easy = curl_easy_init();
     const auto rangeStart = segment.start + segment.written;
@@ -2064,7 +2550,7 @@ void CurlEpollDownloader::addSegmentTransfer(const std::shared_ptr<DownloadBatch
             transferRequest.headers.insert(QStringLiteral("If-Range"), validator);
         }
     }
-    applyRequestOptions(easy, transferRequest, transfer.get());
+    applyRequestOptions(easy, transferRequest, transfer.get(), defaultDohUrl());
     if (!transfer->rangeBytes.isEmpty()) {
         curl_easy_setopt(easy, CURLOPT_RANGE, transfer->rangeBytes.constData());
     }
@@ -2211,7 +2697,7 @@ qint64 CurlEpollDownloader::probeSize(DownloadRequest& request, bool* rangeSuppo
     while (redirectsFollowed <= maxRedirects) {
         auto transfer = std::make_unique<SegmentTransfer>();
         auto* easy = curl_easy_init();
-        applyRequestOptions(easy, request, transfer.get());
+        applyRequestOptions(easy, request, transfer.get(), defaultDohUrl());
         curl_easy_setopt(easy, CURLOPT_NOBODY, 1L);
         curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 0L);
         curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, discardCallback);
@@ -2225,6 +2711,41 @@ qint64 CurlEpollDownloader::probeSize(DownloadRequest& request, bool* rangeSuppo
         if (rc == CURLE_ABORTED_BY_CALLBACK || !running_.load()) {
             curl_easy_cleanup(easy);
             return -1;
+        }
+        char* primaryIpStr = nullptr;
+        const QString hostStr = request.url.host().trimmed();
+        struct in_addr hostIn4;
+        struct in6_addr hostIn6;
+        const auto hostBytes = hostStr.toUtf8();
+        const bool hostIsIp = (::inet_aton(hostBytes.constData(), &hostIn4) == 1)
+                           || (::inet_pton(AF_INET6, hostBytes.constData(), &hostIn6) == 1);
+        QString effectiveDohProbe = request.dohUrl.trimmed();
+        if (effectiveDohProbe.isEmpty()) {
+            effectiveDohProbe = defaultDohUrl().trimmed();
+        }
+        const bool isDohActive = !resolveDohUrl(effectiveDohProbe).isEmpty();
+        if (isDohActive && !hostIsIp) {
+            if (curl_easy_getinfo(easy, CURLINFO_PRIMARY_IP, &primaryIpStr) == CURLE_OK && primaryIpStr && primaryIpStr[0] != '\0') {
+                const QString resolvedIp = QString::fromLatin1(primaryIpStr);
+                if (!request.allowPrivateNetworkRedirects) {
+                    bool isPrivate = false;
+                    struct in_addr in4;
+                    struct in6_addr in6;
+                    if (::inet_aton(primaryIpStr, &in4) == 1) {
+                        isPrivate = isPrivateIpv4(ntohl(in4.s_addr));
+                    } else if (::inet_pton(AF_INET6, primaryIpStr, &in6) == 1) {
+                        isPrivate = isPrivateIpv6(in6);
+                    }
+                    if (isPrivate) {
+                        if (error) *error = QStringLiteral("destination resolves to a private or loopback address (%1)").arg(resolvedIp);
+                        curl_easy_cleanup(easy);
+                        return -1;
+                    }
+                }
+                if (request.pinnedIp.isEmpty()) {
+                    request.pinnedIp = resolvedIp;
+                }
+            }
         }
         char* redirectUrlStr = nullptr;
         if (response == 301 || response == 302 || response == 303 || response == 307 || response == 308) {
@@ -2270,7 +2791,7 @@ qint64 CurlEpollDownloader::probeSize(DownloadRequest& request, bool* rangeSuppo
     while (redirectsFollowed <= maxRedirects) {
         auto rangeProbe = std::make_unique<SegmentTransfer>();
         auto* easy = curl_easy_init();
-        applyRequestOptions(easy, request, rangeProbe.get());
+        applyRequestOptions(easy, request, rangeProbe.get(), defaultDohUrl());
         rangeProbe->rangeBytes = "0-0";
         curl_easy_setopt(easy, CURLOPT_RANGE, rangeProbe->rangeBytes.constData());
         curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 0L);
@@ -2286,6 +2807,41 @@ qint64 CurlEpollDownloader::probeSize(DownloadRequest& request, bool* rangeSuppo
         if (rc == CURLE_ABORTED_BY_CALLBACK || !running_.load()) {
             curl_easy_cleanup(easy);
             return -1;
+        }
+        char* primaryIpStr = nullptr;
+        const QString hostStr = request.url.host().trimmed();
+        struct in_addr hostIn4;
+        struct in6_addr hostIn6;
+        const auto hostBytes = hostStr.toUtf8();
+        const bool hostIsIp = (::inet_aton(hostBytes.constData(), &hostIn4) == 1)
+                           || (::inet_pton(AF_INET6, hostBytes.constData(), &hostIn6) == 1);
+        QString effectiveDohProbe = request.dohUrl.trimmed();
+        if (effectiveDohProbe.isEmpty()) {
+            effectiveDohProbe = defaultDohUrl().trimmed();
+        }
+        const bool isDohActive = !resolveDohUrl(effectiveDohProbe).isEmpty();
+        if (isDohActive && !hostIsIp) {
+            if (curl_easy_getinfo(easy, CURLINFO_PRIMARY_IP, &primaryIpStr) == CURLE_OK && primaryIpStr && primaryIpStr[0] != '\0') {
+                const QString resolvedIp = QString::fromLatin1(primaryIpStr);
+                if (!request.allowPrivateNetworkRedirects) {
+                    bool isPrivate = false;
+                    struct in_addr in4;
+                    struct in6_addr in6;
+                    if (::inet_aton(primaryIpStr, &in4) == 1) {
+                        isPrivate = isPrivateIpv4(ntohl(in4.s_addr));
+                    } else if (::inet_pton(AF_INET6, primaryIpStr, &in6) == 1) {
+                        isPrivate = isPrivateIpv6(in6);
+                    }
+                    if (isPrivate) {
+                        if (error) *error = QStringLiteral("destination resolves to a private or loopback address (%1)").arg(resolvedIp);
+                        curl_easy_cleanup(easy);
+                        return -1;
+                    }
+                }
+                if (request.pinnedIp.isEmpty()) {
+                    request.pinnedIp = resolvedIp;
+                }
+            }
         }
         char* redirectUrlStr = nullptr;
         if (response == 301 || response == 302 || response == 303 || response == 307 || response == 308) {
@@ -2500,6 +3056,10 @@ void CurlEpollDownloader::checkCompleted()
             if (!location.isEmpty() && transfer->attempt < qMax(0, batch->request.maximumRedirects)) {
                 const QUrl oldUrl = batch->request.url;
                 const QUrl newUrl = oldUrl.resolved(QUrl(location));
+                if (tryRecoverExpiredUrl(batch, transfer->segmentIndex, response,
+                        transfer->responseContentType, newUrl, {})) {
+                    continue;
+                }
                 QString redirectError;
                 QString newPinnedIp;
                 if (!validateRedirectUrl(oldUrl, newUrl, batch->request.allowPrivateNetworkRedirects, &redirectError, &newPinnedIp)) {
@@ -2563,6 +3123,7 @@ void CurlEpollDownloader::checkCompleted()
                 : transfer->written == segment.end - segment.start + 1;
             if (transfer->validationError.isEmpty() && exactSegmentLength) {
                 segment.status = DownloadStatus::Completed;
+                batch->lastFinishedSegmentEnd = segment.end;
             } else {
                 segment.status = DownloadStatus::Failed;
                 if (transfer->validationError.isEmpty()) {
@@ -2573,6 +3134,10 @@ void CurlEpollDownloader::checkCompleted()
                 continue;
             }
         } else {
+            if (!batch->failed && tryRecoverExpiredUrl(batch, transfer->segmentIndex, response,
+                    transfer->responseContentType, {}, transfer->errorBodyPreview)) {
+                continue;
+            }
             const bool isRangeCorruption = (transfer->validationError == QStringLiteral("response exceeds its declared Content-Range")
                 || (transfer->validationError == QStringLiteral("server returned an invalid Content-Range")
                     && transfer->initialWritten == 0));

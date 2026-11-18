@@ -1,4 +1,5 @@
 #include "core/MediaStreamProxy.h"
+#include "core/DownloadTypes.h"
 
 #include <arpa/inet.h>
 #include <curl/curl.h>
@@ -40,11 +41,12 @@ QUrl MediaStreamProxy::proxyUrl() const
     return QUrl(QStringLiteral("http://127.0.0.1:%1%2").arg(port_).arg(ext));
 }
 
-bool MediaStreamProxy::start(const QUrl& rootUrl, const QVariantMap& headers)
+bool MediaStreamProxy::start(const QUrl& rootUrl, const QVariantMap& headers, const QString& dohUrl)
 {
     stop();
     rootUrl_ = rootUrl;
     headers_ = headers;
+    dohUrl_ = dohUrl;
 
     listenFd_ = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (listenFd_ < 0) {
@@ -215,6 +217,13 @@ void MediaStreamProxy::handleClient(int clientFd)
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 20L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1024L);
+
+    const QString resolvedDoh = resolveDohUrl(dohUrl_.trimmed());
+    QByteArray dohBytes;
+    if (!resolvedDoh.isEmpty()) {
+        dohBytes = resolvedDoh.toUtf8();
+        curl_easy_setopt(curl, CURLOPT_DOH_URL, dohBytes.constData());
+    }
 
     struct curl_slist* reqHeaders = nullptr;
     for (auto it = headers_.cbegin(); it != headers_.cend(); ++it) {

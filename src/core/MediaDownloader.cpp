@@ -1,5 +1,6 @@
 #include "core/MediaDownloader.h"
 #include "core/MediaStreamProxy.h"
+#include "core/HlsDownloader.h"
 
 #include "app/Logger.h"
 
@@ -116,14 +117,22 @@ MediaDownloader::~MediaDownloader()
     const auto jobs = jobs_;
     jobs_.clear();
     for (const auto& job : jobs) {
-        job.process->disconnect(this);
-        job.process->terminate();
-        if (!job.process->waitForFinished(2000)) {
-            job.process->kill();
-            job.process->waitForFinished(1000);
+        if (job.hls) {
+            job.hls->cancel();
+        }
+        if (job.process) {
+            job.process->disconnect(this);
+            job.process->terminate();
+            if (!job.process->waitForFinished(2000)) {
+                job.process->kill();
+                job.process->waitForFinished(1000);
+            }
         }
         if (job.proxy) {
             job.proxy->stop();
+        }
+        if (job.audioProxy) {
+            job.audioProxy->stop();
         }
     }
 }
@@ -209,7 +218,7 @@ QStringList MediaDownloader::httpInputArguments(const QVariantMap& headers)
 }
 
 QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId,
-    const QUrl& audioUrl, const QVariantMap& audioHeaders)
+    const QUrl& audioUrl, const QVariantMap& audioHeaders, const QString& dohUrl)
 {
     const auto id = existingId.isEmpty() ? makeId(url, targetPath) : existingId;
     DownloadRecord record;
@@ -224,6 +233,7 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
     record.request.targetPath = targetPath;
     record.request.category = record.category;
     record.request.headers = headers;
+    record.request.dohUrl = dohUrl;
     emit downloadAdded(record);
 
     const auto hint = headers.value(QStringLiteral("_qtidmMediaType")).toString();
@@ -254,6 +264,32 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
         }
     }
 
+    const bool isHls = (url.scheme() == QStringLiteral("http") || url.scheme() == QStringLiteral("https"))
+        && !isCombined
+        && (url.path(QUrl::FullyDecoded).contains(QStringLiteral(".m3u8"), Qt::CaseInsensitive)
+            || hint.toUpper() == QStringLiteral("HLS"));
+
+    if (isHls) {
+        auto hlsDownloader = std::make_shared<HlsDownloader>();
+        connect(hlsDownloader.get(), &HlsDownloader::progressChanged, this, &MediaDownloader::progressChanged);
+        connect(hlsDownloader.get(), &HlsDownloader::segmentsChanged, this, &MediaDownloader::segmentsChanged);
+        connect(hlsDownloader.get(), &HlsDownloader::statusChanged, this, [this](const QString& jobId, DownloadStatus status, const QString& message) {
+            emit statusChanged(jobId, status, message);
+            if (status == DownloadStatus::Completed || status == DownloadStatus::Failed || status == DownloadStatus::Canceled) {
+                jobs_.remove(jobId);
+            }
+        });
+
+        Job job;
+        job.hls = hlsDownloader;
+        job.targetPath = targetPath;
+        job.stagingPath = mediaStagingPath(targetPath);
+        jobs_.insert(id, job);
+
+        hlsDownloader->start(id, url, targetPath, headers, dohUrl, 6);
+        return id;
+    }
+
     const auto ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
     if (ffmpeg.isEmpty()) {
         const auto message = QStringLiteral("FFmpeg is required for HLS/DASH media downloads. Install the ffmpeg package.");
@@ -269,7 +305,7 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
     QUrl inputUrl = url;
     if ((url.scheme() == QStringLiteral("http") || url.scheme() == QStringLiteral("https")) && isAdaptiveUrl) {
         proxy = std::make_shared<MediaStreamProxy>();
-        if (!proxy->start(url, headers)) {
+        if (!proxy->start(url, headers, dohUrl)) {
             const auto message = QStringLiteral("Could not initialize local HTTP/2 stream proxy.");
             emit statusChanged(id, DownloadStatus::Failed, message);
             Logger::error(QStringLiteral("Media download %1").arg(id), message);
@@ -287,7 +323,7 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
             || audioHint.toUpper() == QStringLiteral("HLS") || audioHint.toUpper() == QStringLiteral("DASH");
         if ((audioUrl.scheme() == QStringLiteral("http") || audioUrl.scheme() == QStringLiteral("https")) && isAdaptiveAudio) {
             audioProxy = std::make_shared<MediaStreamProxy>();
-            if (!audioProxy->start(audioUrl, audioHeaders)) {
+            if (!audioProxy->start(audioUrl, audioHeaders, dohUrl)) {
                 const auto message = QStringLiteral("Could not initialize local HTTP/2 stream proxy for audio.");
                 emit statusChanged(id, DownloadStatus::Failed, message);
                 Logger::error(QStringLiteral("Media download %1").arg(id), message);
@@ -382,7 +418,17 @@ QString MediaDownloader::enqueue(const QUrl& url, const QString& targetPath, con
     arguments << stagingPath;
     process->setArguments(arguments);
 
-    jobs_.insert(id, Job { process, proxy, audioProxy, targetPath, stagingPath, {}, 0, QDateTime::currentMSecsSinceEpoch(), false, false });
+    Job job;
+    job.process = process;
+    job.proxy = proxy;
+    job.audioProxy = audioProxy;
+    job.targetPath = targetPath;
+    job.stagingPath = stagingPath;
+    job.lastBytes = 0;
+    job.lastTick = QDateTime::currentMSecsSinceEpoch();
+    job.canceled = false;
+    job.paused = false;
+    jobs_.insert(id, job);
 
     connect(process, &QProcess::started, this, [this, id, isCombined = audioUrl.isValid()] {
         emit statusChanged(id, DownloadStatus::Downloading,
@@ -412,7 +458,15 @@ bool MediaDownloader::contains(const QString& id) const
 void MediaDownloader::pause(const QString& id)
 {
     auto it = jobs_.find(id);
-    if (it == jobs_.end() || it->process->state() == QProcess::NotRunning || it->paused) {
+    if (it == jobs_.end()) {
+        return;
+    }
+    if (it->hls) {
+        it->hls->pause();
+        it->paused = true;
+        return;
+    }
+    if (!it->process || it->process->state() == QProcess::NotRunning || it->paused) {
         return;
     }
     if (::kill(static_cast<pid_t>(it->process->processId()), SIGSTOP) == 0) {
@@ -424,7 +478,15 @@ void MediaDownloader::pause(const QString& id)
 void MediaDownloader::resume(const QString& id)
 {
     auto it = jobs_.find(id);
-    if (it == jobs_.end() || it->process->state() == QProcess::NotRunning || !it->paused) {
+    if (it == jobs_.end()) {
+        return;
+    }
+    if (it->hls) {
+        it->hls->resume();
+        it->paused = false;
+        return;
+    }
+    if (!it->process || it->process->state() == QProcess::NotRunning || !it->paused) {
         return;
     }
     if (::kill(static_cast<pid_t>(it->process->processId()), SIGCONT) == 0) {
@@ -440,18 +502,26 @@ void MediaDownloader::cancel(const QString& id)
     if (it == jobs_.end()) {
         return;
     }
+    if (it->hls) {
+        it->hls->cancel();
+        jobs_.erase(it);
+        emit statusChanged(id, DownloadStatus::Canceled, QStringLiteral("Adaptive media download canceled"));
+        return;
+    }
     it->canceled = true;
     if (it->paused) {
         ::kill(static_cast<pid_t>(it->process->processId()), SIGCONT);
         it->paused = false;
     }
     auto* process = it->process;
-    process->terminate();
-    QTimer::singleShot(3000, process, [process] {
-        if (process->state() != QProcess::NotRunning) {
-            process->kill();
-        }
-    });
+    if (process) {
+        process->terminate();
+        QTimer::singleShot(3000, process, [process] {
+            if (process->state() != QProcess::NotRunning) {
+                process->kill();
+            }
+        });
+    }
 }
 
 void MediaDownloader::collectOutput(const QString& id)

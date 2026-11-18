@@ -117,6 +117,13 @@ DownloadScheduler::DownloadScheduler(CurlEpollDownloader& downloader, QObject* p
                 it->lastModified = lastModified;
             }
         });
+    connect(&downloader_, &CurlEpollDownloader::targetPathChanged, this,
+        [this](const QString& id, const QString& newTargetPath) {
+            auto it = activeRequests_.find(id);
+            if (it != activeRequests_.end() && !newTargetPath.isEmpty()) {
+                it->targetPath = newTargetPath;
+            }
+        });
     connect(&archiveExtractor_, &ArchiveExtractor::extractionFailed,
         this, &DownloadScheduler::completionAutomationFailed);
     connect(&archiveExtractor_, &ArchiveExtractor::extractionFinished,
@@ -411,6 +418,18 @@ bool DownloadScheduler::isNetworkMetered() const
     return networkMetered_;
 }
 
+void DownloadScheduler::setDomainRules(const QVector<DomainRule>& rules)
+{
+    domainRules_ = rules;
+    downloader_.setDomainRules(rules);
+    dispatchDue();
+}
+
+QVector<DomainRule> DownloadScheduler::domainRules() const
+{
+    return domainRules_;
+}
+
 bool DownloadScheduler::isAllowedAt(const DownloadRequest& request, const QDateTime& dateTime)
 {
     const int weekdayBit = 1 << (dateTime.date().dayOfWeek() - 1);
@@ -467,6 +486,31 @@ void DownloadScheduler::dispatchDue()
             continue;
         }
         auto request = queue_[index];
+        const auto* domainRule = DomainRule::findBestMatch(domainRules_, request.url.host());
+        QString matchedRuleDomain;
+        if (domainRule) {
+            matchedRuleDomain = DomainRule::normalizeDomain(domainRule->domain);
+            if (domainRule->maxConcurrentDownloads > 0
+                && activeByDomain_.value(matchedRuleDomain, 0) >= domainRule->maxConcurrentDownloads) {
+                continue;
+            }
+            if (domainRule->maxSegments > 0) {
+                request.segments = qMin(request.segments, domainRule->maxSegments);
+            }
+            if (domainRule->speedLimitBytesPerSecond > 0) {
+                request.speedLimitBytesPerSecond = request.speedLimitBytesPerSecond > 0
+                    ? qMin(request.speedLimitBytesPerSecond, domainRule->speedLimitBytesPerSecond)
+                    : domainRule->speedLimitBytesPerSecond;
+            }
+            if (!domainRule->customUserAgent.isEmpty()) {
+                request.headers.insert(QStringLiteral("User-Agent"), domainRule->customUserAgent);
+            }
+            for (auto hIt = domainRule->customHeaders.cbegin(); hIt != domainRule->customHeaders.cend(); ++hIt) {
+                if (!request.headers.contains(hIt.key())) {
+                    request.headers.insert(hIt.key(), hIt.value());
+                }
+            }
+        }
         if (!request.credentialVaultKey.isEmpty() && request.password.isEmpty()) {
             QString credentialError;
             const auto password = credentialVault_
@@ -489,6 +533,10 @@ void DownloadScheduler::dispatchDue()
         downloadQueues_.insert(id, queueKey);
         activeRequests_.insert(id, request);
         activeByQueue_[queueKey] = activeByQueue_.value(queueKey, 0) + 1;
+        if (!matchedRuleDomain.isEmpty()) {
+            downloadRuleDomains_.insert(id, matchedRuleDomain);
+            activeByDomain_[matchedRuleDomain] = activeByDomain_.value(matchedRuleDomain, 0) + 1;
+        }
         emit downloadDispatched(id, request);
         if (request.repeatIntervalSeconds > 0) {
             do {
@@ -526,6 +574,12 @@ void DownloadScheduler::downloadStatusChanged(const QString& id, DownloadStatus 
     downloadQueues_.erase(it);
     meteredPausedIds_.remove(id);
     activeByQueue_[queueKey] = qMax(0, activeByQueue_.value(queueKey) - 1);
+    const auto domainIt = downloadRuleDomains_.find(id);
+    if (domainIt != downloadRuleDomains_.end()) {
+        const auto ruleDomain = domainIt.value();
+        downloadRuleDomains_.erase(domainIt);
+        activeByDomain_[ruleDomain] = qMax(0, activeByDomain_.value(ruleDomain) - 1);
+    }
     const auto request = activeRequests_.take(id);
     QString completedPath = request.targetPath;
     if (status == DownloadStatus::Completed && !request.completionMoveDirectory.isEmpty()) {

@@ -10,6 +10,7 @@ const modifierByTab = new Map();
 const restoredDownloads = new Map();
 let nativePort = null;
 let nativeSequence = 0;
+let swStreamSequence = 0;
 const nativePending = new Map();
 const defaultSettings = {
   interceptDownloads: true,
@@ -63,14 +64,22 @@ function splitRules(value) {
 function isExcluded(url, value) {
   try {
     const parsed = new URL(url);
-    const host = parsed.hostname.toLowerCase();
+    let host = parsed.hostname.toLowerCase();
+    let pathnameForExt = parsed.pathname;
+    if (parsed.protocol === "blob:") {
+      try {
+        const inner = new URL(parsed.pathname);
+        host = inner.hostname.toLowerCase();
+        pathnameForExt = inner.pathname;
+      } catch (_) {}
+    }
     const hostMatch = splitRules(value.excludedHosts).some((rule) => {
       const suffix = rule.startsWith("*.") ? rule.slice(2) : rule;
       return host === suffix || (rule.startsWith("*.") && host.endsWith(`.${suffix}`));
     });
-    const extension = parsed.pathname.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] || "";
-    return hostMatch || (extension && splitRules(value.excludedExtensions)
-      .map((item) => item.replace(/^\./, "")).includes(extension));
+    const extension = pathnameForExt.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] || "";
+    return Boolean(hostMatch || (extension && splitRules(value.excludedExtensions)
+      .map((item) => item.replace(/^\./, "")).includes(extension)));
   } catch (_) {
     return false;
   }
@@ -240,6 +249,19 @@ function httpOrigin(value) {
   }
 }
 
+function firstHttpUrl(...candidates) {
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string" || !candidate) continue;
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        return parsed.href;
+      }
+    } catch (_) {}
+  }
+  return "";
+}
+
 function leafFilename(value) {
   const normalized = String(value || "").replace(/\0/g, "").trim();
   if (!normalized) return "";
@@ -320,6 +342,7 @@ function extensionFromMime(mime) {
     case "application/pdf":
       return "pdf";
     case "application/zip":
+    case "application/x-zip-compressed":
       return "zip";
     case "application/x-tar":
       return "tar";
@@ -328,6 +351,27 @@ function extensionFromMime(mime) {
       return "gz";
     case "application/x-7z-compressed":
       return "7z";
+    case "application/vnd.rar":
+    case "application/x-rar-compressed":
+      return "rar";
+    case "application/epub+zip":
+      return "epub";
+    case "text/csv":
+      return "csv";
+    case "text/plain":
+      return "txt";
+    case "application/json":
+      return "json";
+
+    // Images
+    case "image/png":
+      return "png";
+    case "image/jpeg":
+      return "jpg";
+    case "image/webp":
+      return "webp";
+    case "image/gif":
+      return "gif";
 
     default:
       if (cleaned.startsWith("audio/")) return "mp3";
@@ -430,6 +474,9 @@ function mediaExtension(item) {
   if (type === "VIDEO") return "mp4";
   if (type === "AUDIO") return "mp3";
   if (type === "SUBTITLE") return "vtt";
+  if (type === "DOCUMENT") return "pdf";
+  if (type === "ARCHIVE") return "zip";
+  if (type === "IMAGE") return "png";
   return "";
 }
 
@@ -564,14 +611,15 @@ async function resolveTabId(details) {
 
 async function storeMedia(details, value) {
   const tabId = await resolveTabId(details);
-  if (tabId < 0 || !details.url || !/^https?:\/\//i.test(details.url) || isExcluded(details.url, value)) {
+  const isBlob = typeof details.url === "string" && details.url.startsWith("blob:");
+  if (tabId < 0 || !details.url || (!/^https?:\/\//i.test(details.url) && !isBlob) || isExcluded(details.url, value)) {
     return;
   }
   const key = mediaKey(tabId);
   const stored = (await captureStorage.get(key))[key];
   const items = Array.isArray(stored) ? stored : (stored && stored.url ? [stored] : []);
   const contentType = (details.responseHeaders || [])
-    .find((header) => header.name.toLowerCase() === "content-type")?.value?.toLowerCase() || "";
+    .find((header) => header.name.toLowerCase() === "content-type")?.value?.toLowerCase() || details.mimeType || "";
   const duplicate = items.findIndex((entry) => entry.url === details.url);
   const previous = duplicate >= 0 ? items[duplicate] : null;
   const observedHeaders = details.requestHeaders
@@ -580,15 +628,27 @@ async function storeMedia(details, value) {
       || recentRequestHeaders(details.url)
       || {};
   const observedReferer = Object.entries(observedHeaders).find(([name]) => name.toLowerCase() === "referer")?.[1];
+  const frameId = typeof details.frameId === "number" && details.frameId >= 0
+    ? details.frameId
+    : (typeof previous?.frameId === "number" ? previous.frameId : 0);
+  const isSubframe = Boolean(details.isSubframe || frameId > 0 || previous?.isSubframe);
+  const frameUrl = firstHttpUrl(details.frameUrl, isSubframe ? details.documentUrl : "", previous?.frameUrl);
   const item = {
     url: details.url,
-    referrer: observedReferer || details.initiator || details.documentUrl
-      || previous?.referrer || "",
+    isBlob: isBlob || !!details.isBlob,
+    size: typeof details.size === "number" ? details.size : (previous?.size || 0),
+    referrer: firstHttpUrl(observedReferer, details.documentUrl, details.initiator, frameUrl, previous?.referrer)
+      || observedReferer || details.initiator || details.documentUrl || previous?.referrer || "",
+    frameId,
+    frameUrl,
+    frameToken: details.frameToken || previous?.frameToken || "",
+    frameTitle: details.frameTitle || previous?.frameTitle || "",
+    isSubframe,
     detectedAt: Date.now(),
-    type: mediaType(details.url, contentType),
+    type: details.mediaType || mediaType(details.url, contentType),
     contentType: contentType || previous?.contentType || "",
     headers: Object.keys(observedHeaders).length ? observedHeaders : previous?.headers || {},
-    suggestedFilename: responseFilename(details) || previous?.suggestedFilename || ""
+    suggestedFilename: details.filename || responseFilename(details) || previous?.suggestedFilename || ""
   };
   if (duplicate >= 0) items.splice(duplicate, 1);
   items.unshift(item);
@@ -599,13 +659,43 @@ async function storeMedia(details, value) {
     tabId,
     title: "Open captured downloads in qtIDM"
   });
-  chrome.runtime.sendMessage({ type: "mediaCaptured", tabId }).catch(() => {});
+  chrome.runtime.sendMessage?.({ type: "mediaCaptured", tabId })?.catch?.(() => {});
+}
+
+async function pruneUnloadedFrameBlobs(tabId, frameToken = "", frameId = -1) {
+  if (typeof tabId !== "number" || tabId < 0) return;
+  if (!frameToken && !(typeof frameId === "number" && frameId > 0)) return;
+  const key = mediaKey(tabId);
+  const stored = (await captureStorage.get(key))[key];
+  const items = Array.isArray(stored) ? stored : (stored && stored.url ? [stored] : []);
+  if (!items.length) return;
+  const kept = items.filter((entry) => {
+    const isBlobEntry = Boolean(entry?.isBlob || (typeof entry?.url === "string" && entry.url.startsWith("blob:")));
+    if (!isBlobEntry) return true;
+    if (frameToken && entry.frameToken === frameToken) return false;
+    if (frameId > 0 && entry.frameId === frameId) return false;
+    return true;
+  });
+  if (kept.length === items.length) return;
+  await captureStorage.set({ [key]: kept });
+  await chrome.action.setBadgeText({ tabId, text: kept.length ? String(kept.length) : "" });
+  chrome.runtime.sendMessage?.({ type: "mediaCaptured", tabId })?.catch?.(() => {});
 }
 
 function rememberMedia(details, value) {
   const tabKey = (typeof details?.tabId === "number" && details.tabId >= 0) ? details.tabId : "global";
   const previous = mediaWriteQueues.get(tabKey) || Promise.resolve();
   const operation = previous.catch(() => {}).then(() => storeMedia(details, value));
+  mediaWriteQueues.set(tabKey, operation);
+  return operation.finally(() => {
+    if (mediaWriteQueues.get(tabKey) === operation) mediaWriteQueues.delete(tabKey);
+  });
+}
+
+function queueFrameUnload(tabId, frameToken, frameId) {
+  const tabKey = (typeof tabId === "number" && tabId >= 0) ? tabId : "global";
+  const previous = mediaWriteQueues.get(tabKey) || Promise.resolve();
+  const operation = previous.catch(() => {}).then(() => pruneUnloadedFrameBlobs(tabId, frameToken, frameId));
   mediaWriteQueues.set(tabKey, operation);
   return operation.finally(() => {
     if (mediaWriteQueues.get(tabKey) === operation) mediaWriteQueues.delete(tabKey);
@@ -721,13 +811,17 @@ async function makeDownloadEntry(url, tab, referrer = "", capturedHeaders = {}, 
   setHeaderDefault(headers, "User-Agent", navigator.userAgent);
   if (mediaTypeHint) headers._qtidmMediaType = mediaTypeHint;
   if (mimeType) headers._qtidmMimeType = mimeType;
+  if (tab?.title) headers._qtidmPageTitle = String(tab.title).trim();
+  if (pageReferrer && /^https?:\/\//i.test(pageReferrer)) headers._qtidmRefreshTarget = pageReferrer;
   return {
     url,
     headers,
     cookies: structuredCookies,
     method: method === "POST" || request.method === "POST" ? "POST" : "",
     body: body ? textToBase64(body) : (request.bodyBase64 || textToBase64(request.body)),
-    suggestedFilename: suggestedFilename ? sanitizeMediaTitle(suggestedFilename) : ""
+    suggestedFilename: suggestedFilename ? sanitizeMediaTitle(suggestedFilename) : "",
+    pageTitle: tab?.title ? String(tab.title).trim() : "",
+    refreshTarget: pageReferrer && /^https?:\/\//i.test(pageReferrer) ? pageReferrer : ""
   };
 }
 
@@ -746,6 +840,96 @@ async function prepareBrowserDownload(url) {
     throw new Error(response?.message || "The qtIDM native host is not ready to receive the download.");
   }
   return response.prepared === true;
+}
+
+async function pullServiceWorkerStream(tabId, url, suggestedFilename = "", frameId = 0, targetFrameToken = "") {
+  if (typeof tabId !== "number" || tabId < 0 || !/^https?:\/\//i.test(url || "")
+      || typeof chrome.tabs?.sendMessage !== "function") {
+    return { ok: false, handled: false, fallback: true };
+  }
+  const frameOpts = (typeof frameId === "number" && frameId >= 0) ? { frameId } : undefined;
+  const sendToFrame = (payload) => (frameOpts
+    ? chrome.tabs.sendMessage(tabId, payload, frameOpts)
+    : chrome.tabs.sendMessage(tabId, payload)).catch(() => null);
+
+  const scope = await sendToFrame({ type: "swCheckScope", url, targetFrameToken });
+  if (!scope || !scope.controlled) {
+    return { ok: false, handled: false, fallback: true };
+  }
+
+  const streamId = `sw-${Date.now().toString(36)}-${++swStreamSequence}`;
+  const prep = await sendToFrame({ type: "swPrepare", streamId, url, targetFrameToken });
+  if (!prep || !prep.ok) {
+    return { ok: false, handled: false, fallback: true };
+  }
+
+  const dispositionName = prep.disposition
+    ? responseFilename({ responseHeaders: [{ name: "Content-Disposition", value: prep.disposition }] })
+    : "";
+  const filename = sanitizeMediaTitle(suggestedFilename || dispositionName
+    || browserSuggestedFilename("", prep.url || url, prep.mime || "")) || "sw_download.bin";
+
+  let beginRes;
+  try {
+    beginRes = await nativeRequest({
+      type: "swStreamBegin",
+      streamId,
+      url: prep.url || url,
+      filename,
+      expectedSize: typeof prep.length === "number" ? prep.length : -1,
+      mimeType: prep.mime || ""
+    });
+    if (!beginRes || !beginRes.ok) {
+      throw new Error(beginRes?.message || "qtIDM native host rejected ServiceWorker stream.");
+    }
+  } catch (error) {
+    await sendToFrame({ type: "swRelease", streamId, targetFrameToken });
+    throw error;
+  }
+
+  let sequence = 0;
+  let offset = 0;
+  try {
+    while (true) {
+      const chunk = await sendToFrame({ type: "swPull", streamId, sequence, targetFrameToken });
+      if (!chunk || !chunk.ok) {
+        throw new Error(chunk?.error || "ServiceWorker ReadableStream read failed.");
+      }
+      if (chunk.end) {
+        const finishRes = await nativeRequest({
+          type: "swStreamFinish",
+          streamId,
+          totalBytes: offset
+        });
+        if (!finishRes || !finishRes.ok) {
+          throw new Error(finishRes?.message || "qtIDM failed finalizing ServiceWorker stream.");
+        }
+        return {
+          ok: true,
+          handled: true,
+          streamId,
+          path: finishRes.path || beginRes.path || "",
+          bytesWritten: offset
+        };
+      }
+      const chunkRes = await nativeRequest({
+        type: "swStreamChunk",
+        streamId,
+        sequence,
+        offset,
+        data: chunk.data || ""
+      });
+      if (!chunkRes || !chunkRes.ok) {
+        throw new Error(chunkRes?.message || "qtIDM rejected ServiceWorker stream chunk.");
+      }
+      offset += typeof chunk.bytes === "number" ? chunk.bytes : 0;
+      sequence += 1;
+    }
+  } catch (error) {
+    await sendToFrame({ type: "swRelease", streamId, targetFrameToken });
+    await nativeRequest({ type: "swStreamAbort", streamId }).catch(() => {});
+    throw error;
+  }
 }
 
 async function sendBatchToHost(urls, tab, referrer = "") {
@@ -820,6 +1004,20 @@ async function redirectBrowserDownload(item, url) {
   }
 
   try {
+    if (typeof item.tabId === "number" && item.tabId >= 0 && typeof chrome.tabs?.sendMessage === "function") {
+      const swResult = await pullServiceWorkerStream(
+        item.tabId,
+        url,
+        browserSuggestedFilename(item.filename, url, item.mime || ""),
+        typeof item.frameId === "number" ? item.frameId : 0
+      );
+      if (swResult.handled) {
+        await chrome.downloads.cancel(item.id).catch(() => {});
+        await chrome.downloads.removeFile(item.id).catch(() => {});
+        await chrome.downloads.erase({ id: item.id }).catch(() => {});
+        return;
+      }
+    }
     const prepared = await prepareBrowserDownload(url);
     if (prepared) {
       await chrome.downloads.cancel(item.id);
@@ -921,20 +1119,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (tab?.id >= 0 && typeof message.url === "string") {
         try {
           const parsed = new URL(message.url);
-          if ((parsed.protocol === "http:" || parsed.protocol === "https:")
-              && !parsed.username && !parsed.password && parsed.hostname !== "169.254.169.254") {
+          const isBlob = parsed.protocol === "blob:";
+          let validOrigin = false;
+          if (isBlob) {
+            try {
+              const inner = new URL(parsed.pathname);
+              validOrigin = (inner.protocol === "http:" || inner.protocol === "https:")
+                && !inner.username && !inner.password && inner.hostname !== "169.254.169.254";
+            } catch (_) {}
+          } else {
+            validOrigin = (parsed.protocol === "http:" || parsed.protocol === "https:")
+              && !parsed.username && !parsed.password && parsed.hostname !== "169.254.169.254";
+          }
+          if (validOrigin) {
             const value = await settings();
             if (value.captureMedia) {
-              const ref = message.referrer || sender.url || tab?.url || "";
+              const senderFrameId = typeof sender.frameId === "number" && sender.frameId >= 0
+                ? sender.frameId
+                : (typeof message.frameId === "number" && message.frameId >= 0 ? message.frameId : 0);
+              const isSubframe = Boolean(message.isSubframe || senderFrameId > 0);
+              const frameUrl = firstHttpUrl(message.frameUrl, isSubframe ? sender.url : "");
+              const ref = firstHttpUrl(message.referrer, frameUrl, sender.url, tab?.url);
               await rememberMedia({
                 tabId: tab.id,
+                frameId: senderFrameId,
+                frameUrl,
+                frameToken: typeof message.frameToken === "string" ? message.frameToken : "",
+                frameTitle: typeof message.frameTitle === "string" ? message.frameTitle : "",
+                isSubframe,
                 url: parsed.href,
+                isBlob,
+                size: typeof message.size === "number" ? message.size : 0,
+                mimeType: message.mimeType || "",
+                filename: message.filename || "",
+                mediaType: message.mediaType || "",
                 documentUrl: ref,
-                initiator: httpOrigin(ref),
+                initiator: isBlob ? (ref ? httpOrigin(ref) : "") : httpOrigin(ref),
                 type: "media",
                 method: "GET",
                 responseHeaders: [
-                  { name: "Content-Type", value: message.mediaType === "DASH" ? "application/dash+xml" : message.mediaType === "HLS" ? "application/vnd.apple.mpegurl" : "video/mp4" }
+                  { name: "Content-Type", value: message.mimeType || (message.mediaType === "DASH" ? "application/dash+xml" : message.mediaType === "HLS" ? "application/vnd.apple.mpegurl" : "video/mp4") }
                 ]
               }, value);
             }
@@ -944,9 +1168,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: true });
       return;
     }
+    if (message.type === "frameUnloaded") {
+      const tabId = sender.tab?.id;
+      if (typeof tabId === "number" && tabId >= 0) {
+        const senderFrameId = typeof sender.frameId === "number" ? sender.frameId : -1;
+        await queueFrameUnload(tabId, typeof message.frameToken === "string" ? message.frameToken : "", senderFrameId);
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+    if (message.type === "pullServiceWorkerStream") {
+      try {
+        const targetTabId = typeof message.tabId === "number" && message.tabId >= 0
+          ? message.tabId
+          : (sender.tab?.id ?? -1);
+        const result = await pullServiceWorkerStream(
+          targetTabId,
+          message.url || "",
+          message.filename || "",
+          typeof message.frameId === "number" ? message.frameId : (sender.frameId ?? 0),
+          typeof message.targetFrameToken === "string" ? message.targetFrameToken : ""
+        );
+        sendResponse(result);
+      } catch (error) {
+        showError(error.message);
+        sendResponse({ ok: false, handled: false, message: error.message });
+      }
+      return;
+    }
     if (message.type === "qtidmScheme") {
       const tab = sender.tab || await chrome.tabs.get(message.tabId);
-      await sendToHost(message.url, tab, tab?.url || "");
+      await sendToHost(message.url, tab, firstHttpUrl(sender.url, tab?.url));
       sendResponse({ ok: true });
       return;
     }
@@ -1020,7 +1272,60 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       try {
         const tab = await chrome.tabs.get(message.tabId);
-        await sendToHost(item.url, tab, item.referrer, item.headers, item.type, mediaSuggestedFilename(item, tab), "", "", "", item.contentType || "");
+        if (typeof item.url === "string" && item.url.startsWith("blob:")) {
+          const downloadFilename = mediaSuggestedFilename(item, tab) || item.suggestedFilename || "blob_download";
+          let downloaded = false;
+          try {
+            await chrome.downloads.download({
+              url: item.url,
+              filename: downloadFilename,
+              saveAs: false
+            });
+            downloaded = true;
+          } catch (err) {
+            let candidateUrl = item.url;
+            if (tab?.id >= 0 && typeof chrome.tabs?.sendMessage === "function") {
+              const frameOpts = (typeof item.frameId === "number" && item.frameId >= 0)
+                ? { frameId: item.frameId }
+                : undefined;
+              const sendToFrame = (payload) => (frameOpts
+                ? chrome.tabs.sendMessage(tab.id, payload, frameOpts)
+                : chrome.tabs.sendMessage(tab.id, payload)).catch(() => null);
+              const refreshRes = await sendToFrame({
+                type: "refreshBlobUrl",
+                url: item.url,
+                targetFrameToken: item.frameToken || ""
+              });
+              if (refreshRes && refreshRes.url) {
+                candidateUrl = refreshRes.url;
+                try {
+                  await chrome.downloads.download({
+                    url: candidateUrl,
+                    filename: downloadFilename,
+                    saveAs: false
+                  });
+                  downloaded = true;
+                } catch (_) {}
+              }
+              if (!downloaded) {
+                const pageRes = await sendToFrame({
+                  type: "downloadBlobInPage",
+                  url: candidateUrl,
+                  filename: downloadFilename,
+                  targetFrameToken: item.frameToken || ""
+                });
+                if (pageRes && pageRes.ok) {
+                  downloaded = true;
+                }
+              }
+            }
+            if (!downloaded) throw err;
+          }
+          sendResponse({ ok: true, message: "Blob download saved to Downloads." });
+          return;
+        }
+        const effectiveReferrer = firstHttpUrl(item.referrer, item.frameUrl, tab?.url) || item.referrer || "";
+        await sendToHost(item.url, tab, effectiveReferrer, item.headers, item.type, mediaSuggestedFilename(item, tab), "", "", "", item.contentType || "");
         sendResponse({ ok: true });
       } catch (error) {
         showError(error.message);

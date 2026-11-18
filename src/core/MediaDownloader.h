@@ -14,6 +14,7 @@ class QUrl;
 namespace qtidm {
 
 class MediaStreamProxy;
+class HlsDownloader;
 
 class MediaDownloader final : public QObject {
     Q_OBJECT
@@ -28,7 +29,7 @@ public:
     static QString suggestedFilename(const QString& name);
     static QString mediaStagingPath(const QString& targetPath);
     QString enqueue(const QUrl& url, const QString& targetPath, const QVariantMap& headers, const QString& existingId = {},
-        const QUrl& audioUrl = {}, const QVariantMap& audioHeaders = {});
+        const QUrl& audioUrl = {}, const QVariantMap& audioHeaders = {}, const QString& dohUrl = {});
     bool contains(const QString& id) const;
     void pause(const QString& id);
     void resume(const QString& id);
@@ -38,10 +39,12 @@ signals:
     void downloadAdded(qtidm::DownloadRecord record);
     void progressChanged(QString id, qint64 received, qint64 total, double bytesPerSecond);
     void statusChanged(QString id, qtidm::DownloadStatus status, QString message);
+    void segmentsChanged(QString id, QVector<qtidm::SegmentInfo> segments);
 
 private:
     struct Job {
         QProcess* process = nullptr;
+        std::shared_ptr<HlsDownloader> hls;
         std::shared_ptr<MediaStreamProxy> proxy;
         std::shared_ptr<MediaStreamProxy> audioProxy;
         QString targetPath;

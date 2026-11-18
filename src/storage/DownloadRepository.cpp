@@ -95,6 +95,17 @@ bool DownloadRepository::migrate()
             "PRIMARY KEY(download_id, segment_index),"
             "FOREIGN KEY(download_id) REFERENCES downloads(id) ON DELETE CASCADE"
             ");",
+            &lastError_)
+        && execSql(db_,
+            "CREATE TABLE IF NOT EXISTS domain_rules ("
+            "domain TEXT PRIMARY KEY,"
+            "include_subdomains INTEGER NOT NULL DEFAULT 1,"
+            "max_segments INTEGER NOT NULL DEFAULT 0,"
+            "max_concurrent_downloads INTEGER NOT NULL DEFAULT 0,"
+            "speed_limit_bps INTEGER NOT NULL DEFAULT 0,"
+            "custom_user_agent TEXT NOT NULL DEFAULT '',"
+            "custom_headers_json TEXT NOT NULL DEFAULT '{}'"
+            ");",
             &lastError_);
     if (!created) {
         return false;
@@ -390,6 +401,114 @@ QList<DownloadRecord> DownloadRepository::listDownloads() const
         sqlite3_finalize(segmentStmt);
     }
     return records;
+}
+
+bool DownloadRepository::upsertDomainRule(const DomainRule& rule)
+{
+    QMutexLocker lock(&dbMutex_);
+    const QString normDomain = DomainRule::normalizeDomain(rule.domain);
+    if (normDomain.isEmpty()) {
+        lastError_ = QStringLiteral("domain rule requires a non-empty domain");
+        return false;
+    }
+    constexpr auto sql =
+        "INSERT INTO domain_rules(domain,include_subdomains,max_segments,max_concurrent_downloads,speed_limit_bps,custom_user_agent,custom_headers_json) "
+        "VALUES(?,?,?,?,?,?,?) "
+        "ON CONFLICT(domain) DO UPDATE SET "
+        "include_subdomains=excluded.include_subdomains,"
+        "max_segments=excluded.max_segments,"
+        "max_concurrent_downloads=excluded.max_concurrent_downloads,"
+        "speed_limit_bps=excluded.speed_limit_bps,"
+        "custom_user_agent=excluded.custom_user_agent,"
+        "custom_headers_json=excluded.custom_headers_json;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        return false;
+    }
+    QJsonObject headersObj;
+    for (auto it = rule.customHeaders.cbegin(); it != rule.customHeaders.cend(); ++it) {
+        headersObj.insert(it.key(), QJsonValue::fromVariant(it.value()));
+    }
+    const QByteArray domainUtf8 = normDomain.toUtf8();
+    const QByteArray uaUtf8 = rule.customUserAgent.trimmed().toUtf8();
+    const QByteArray headersJson = QJsonDocument(headersObj).toJson(QJsonDocument::Compact);
+
+    sqlite3_bind_text(stmt, 1, domainUtf8.constData(), domainUtf8.size(), SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, rule.includeSubdomains ? 1 : 0);
+    sqlite3_bind_int(stmt, 3, qBound(0, rule.maxSegments, 32));
+    sqlite3_bind_int(stmt, 4, qMax(0, rule.maxConcurrentDownloads));
+    sqlite3_bind_int64(stmt, 5, qMax<qint64>(0, rule.speedLimitBytesPerSecond));
+    sqlite3_bind_text(stmt, 6, uaUtf8.constData(), uaUtf8.size(), SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 7, headersJson.constData(), headersJson.size(), SQLITE_TRANSIENT);
+    const auto rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        return false;
+    }
+    return true;
+}
+
+bool DownloadRepository::removeDomainRule(const QString& domain)
+{
+    QMutexLocker lock(&dbMutex_);
+    const QString normDomain = DomainRule::normalizeDomain(domain);
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, "DELETE FROM domain_rules WHERE domain=?;", -1, &stmt, nullptr) != SQLITE_OK) {
+        lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        return false;
+    }
+    const QByteArray domainUtf8 = normDomain.toUtf8();
+    sqlite3_bind_text(stmt, 1, domainUtf8.constData(), domainUtf8.size(), SQLITE_TRANSIENT);
+    const auto rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        return false;
+    }
+    return true;
+}
+
+QVector<DomainRule> DownloadRepository::listDomainRules() const
+{
+    QMutexLocker lock(&dbMutex_);
+    QVector<DomainRule> rules;
+    constexpr auto sql =
+        "SELECT domain,include_subdomains,max_segments,max_concurrent_downloads,speed_limit_bps,custom_user_agent,custom_headers_json "
+        "FROM domain_rules ORDER BY domain ASC;";
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        lastError_ = QString::fromUtf8(sqlite3_errmsg(db_));
+        return rules;
+    }
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        DomainRule rule;
+        rule.domain = QString::fromUtf8(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+        rule.includeSubdomains = sqlite3_column_int(stmt, 1) != 0;
+        rule.maxSegments = qBound(0, sqlite3_column_int(stmt, 2), 32);
+        rule.maxConcurrentDownloads = qMax(0, sqlite3_column_int(stmt, 3));
+        rule.speedLimitBytesPerSecond = qMax<qint64>(0, sqlite3_column_int64(stmt, 4));
+        const auto* rawUa = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5));
+        rule.customUserAgent = rawUa ? QString::fromUtf8(rawUa) : QString {};
+        const auto* rawHeaders = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6));
+        if (rawHeaders) {
+            const auto headersObj = QJsonDocument::fromJson(QByteArray(rawHeaders)).object();
+            for (auto it = headersObj.begin(); it != headersObj.end(); ++it) {
+                rule.customHeaders.insert(it.key(), it.value().toVariant());
+            }
+        }
+        rules.append(std::move(rule));
+    }
+    sqlite3_finalize(stmt);
+    return rules;
+}
+
+std::optional<DomainRule> DownloadRepository::matchDomainRule(const QString& host) const
+{
+    const auto rules = listDomainRules();
+    const auto* best = DomainRule::findBestMatch(rules, host);
+    return best ? std::optional<DomainRule>(*best) : std::nullopt;
 }
 
 QString DownloadRepository::lastError() const

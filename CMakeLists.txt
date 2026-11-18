@@ -17,10 +17,11 @@ if(NOT UNIX OR APPLE)
     message(FATAL_ERROR "qtIDM is Linux-only.")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets DBus Test Network)
 find_package(CURL REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
+find_package(OpenSSL REQUIRED)
 include(GNUInstallDirs)
 
 set(QTIDM_CHROME_EXTENSION_ID "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" CACHE STRING "Chrome extension ID allowed to use native messaging")
@@ -90,12 +91,21 @@ set(QTIDM_AUTOMATION_SOURCES
     src/app/Logger.cpp
     src/app/Paths.cpp
     src/core/ArchiveExtractor.cpp
+    src/core/BrowserCamouflage.cpp
     src/core/CurlEpollDownloader.cpp
     src/core/DownloadScheduler.cpp
     src/core/DownloadTypes.cpp
+    src/core/FileNaming.cpp
+    src/core/HlsDownloader.cpp
+    src/core/HlsPlaylistParser.cpp
+    src/core/SegmentPlanner.cpp
     src/core/SparseFileWriter.cpp
     src/integration/AutomationApi.cpp
     src/integration/CredentialVault.cpp
+    src/integration/sites/GoFileAdapter.cpp
+    src/integration/sites/GoogleDriveAdapter.cpp
+    src/integration/sites/MediaFireAdapter.cpp
+    src/integration/sites/SiteAdapterRegistry.cpp
     src/storage/DownloadRepository.cpp
 )
 
@@ -108,6 +118,7 @@ target_link_libraries(qtidm_automation PUBLIC
     CURL::libcurl
     SQLite::SQLite3
     Threads::Threads
+    OpenSSL::Crypto
 )
 
 set(QTIDM_UI_SOURCES
@@ -159,6 +170,8 @@ target_link_libraries(qtidm-cli PRIVATE qtidm_automation)
 
 add_executable(qtIDM-native-host
     src/integration/NativeMessagingHost.cpp
+    src/integration/SwStreamSessionManager.cpp
+    src/core/SparseFileWriter.cpp
     src/app/Logger.cpp
     src/app/Paths.cpp
 )
@@ -273,16 +286,25 @@ endif()
 add_executable(qtIDM_scheduler_tests
     tests/DownloadSchedulerTest.cpp
     src/app/Paths.cpp
+    src/core/BrowserCamouflage.cpp
     src/core/CurlEpollDownloader.cpp
     src/core/DownloadScheduler.cpp
     src/core/ArchiveExtractor.cpp
     src/core/DownloadTypes.cpp
+    src/core/FileNaming.cpp
+    src/core/HlsDownloader.cpp
+    src/core/HlsPlaylistParser.cpp
+    src/core/SegmentPlanner.cpp
     src/core/SparseFileWriter.cpp
     src/integration/CredentialVault.cpp
+    src/integration/sites/GoFileAdapter.cpp
+    src/integration/sites/GoogleDriveAdapter.cpp
+    src/integration/sites/MediaFireAdapter.cpp
+    src/integration/sites/SiteAdapterRegistry.cpp
 )
 
 target_include_directories(qtIDM_scheduler_tests PRIVATE src)
-target_link_libraries(qtIDM_scheduler_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl Threads::Threads)
+target_link_libraries(qtIDM_scheduler_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl Threads::Threads OpenSSL::Crypto)
 add_test(NAME qtIDM_scheduler_tests COMMAND qtIDM_scheduler_tests)
 
 add_executable(qtIDM_archive_extractor_tests
@@ -331,15 +353,24 @@ add_test(NAME qtIDM_update_checker_tests COMMAND qtIDM_update_checker_tests)
 
 add_executable(qtIDM_downloader_integration_tests
     tests/DownloaderIntegrationTest.cpp
+    src/core/BrowserCamouflage.cpp
     src/core/CurlEpollDownloader.cpp
     src/core/DownloadTypes.cpp
+    src/core/FileNaming.cpp
+    src/core/HlsDownloader.cpp
+    src/core/HlsPlaylistParser.cpp
+    src/core/SegmentPlanner.cpp
     src/core/SparseFileWriter.cpp
+    src/integration/sites/GoFileAdapter.cpp
+    src/integration/sites/GoogleDriveAdapter.cpp
+    src/integration/sites/MediaFireAdapter.cpp
+    src/integration/sites/SiteAdapterRegistry.cpp
     src/storage/DownloadRepository.cpp
 )
 
 target_include_directories(qtIDM_downloader_integration_tests PRIVATE src)
 target_compile_definitions(qtIDM_downloader_integration_tests PRIVATE QTIDM_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-target_link_libraries(qtIDM_downloader_integration_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl Threads::Threads SQLite::SQLite3)
+target_link_libraries(qtIDM_downloader_integration_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl Threads::Threads SQLite::SQLite3 OpenSSL::Crypto)
 add_test(NAME qtIDM_downloader_integration_tests COMMAND qtIDM_downloader_integration_tests)
 
 add_executable(qtIDM_media_downloader_tests
@@ -347,12 +378,14 @@ add_executable(qtIDM_media_downloader_tests
     src/app/Logger.cpp
     src/app/Paths.cpp
     src/core/DownloadTypes.cpp
+    src/core/HlsDownloader.cpp
+    src/core/HlsPlaylistParser.cpp
     src/core/MediaDownloader.cpp
     src/core/MediaStreamProxy.cpp
 )
 
 target_include_directories(qtIDM_media_downloader_tests PRIVATE src)
-target_link_libraries(qtIDM_media_downloader_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl)
+target_link_libraries(qtIDM_media_downloader_tests PRIVATE Qt6::Core Qt6::Test CURL::libcurl OpenSSL::Crypto)
 add_test(NAME qtIDM_media_downloader_tests COMMAND qtIDM_media_downloader_tests)
 
 add_executable(qtIDM_performance_smoke_tests
@@ -385,13 +418,41 @@ add_test(NAME qtIDM_zip_preview_tests COMMAND qtIDM_zip_preview_tests)
 
 add_executable(qtIDM_crash_worker
     tests/crash_worker.cpp
+    src/core/BrowserCamouflage.cpp
     src/core/CurlEpollDownloader.cpp
     src/core/DownloadTypes.cpp
+    src/core/FileNaming.cpp
+    src/core/HlsDownloader.cpp
+    src/core/HlsPlaylistParser.cpp
+    src/core/SegmentPlanner.cpp
     src/core/SparseFileWriter.cpp
+    src/integration/sites/GoFileAdapter.cpp
+    src/integration/sites/GoogleDriveAdapter.cpp
+    src/integration/sites/MediaFireAdapter.cpp
+    src/integration/sites/SiteAdapterRegistry.cpp
     src/storage/DownloadRepository.cpp
 )
 target_include_directories(qtIDM_crash_worker PRIVATE src)
-target_link_libraries(qtIDM_crash_worker PRIVATE Qt6::Core CURL::libcurl SQLite::SQLite3 Threads::Threads)
+target_link_libraries(qtIDM_crash_worker PRIVATE Qt6::Core CURL::libcurl SQLite::SQLite3 Threads::Threads OpenSSL::Crypto)
+
+add_executable(qtIDM_hls_parser_tests
+    tests/HlsPlaylistParserTest.cpp
+    src/core/HlsPlaylistParser.cpp
+)
+target_include_directories(qtIDM_hls_parser_tests PRIVATE src)
+target_link_libraries(qtIDM_hls_parser_tests PRIVATE Qt6::Core Qt6::Test OpenSSL::Crypto)
+add_test(NAME qtIDM_hls_parser_tests COMMAND qtIDM_hls_parser_tests)
+
+add_executable(qtIDM_hls_downloader_tests
+    tests/HlsDownloaderTest.cpp
+    src/app/Logger.cpp
+    src/core/DownloadTypes.cpp
+    src/core/HlsDownloader.cpp
+    src/core/HlsPlaylistParser.cpp
+)
+target_include_directories(qtIDM_hls_downloader_tests PRIVATE src)
+target_link_libraries(qtIDM_hls_downloader_tests PRIVATE Qt6::Core Qt6::Network Qt6::Test CURL::libcurl OpenSSL::Crypto Threads::Threads)
+add_test(NAME qtIDM_hls_downloader_tests COMMAND qtIDM_hls_downloader_tests)
 
 add_test(NAME qtIDM_crash_injection_tests
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/crash_injection_test.py
@@ -419,6 +480,32 @@ add_test(NAME qtIDM_main_window_tests COMMAND qtIDM_main_window_tests)
 set_tests_properties(qtIDM_main_window_tests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
+
+add_executable(qtIDM_sw_stream_tests
+    tests/SwStreamSessionManagerTest.cpp
+    src/integration/SwStreamSessionManager.cpp
+    src/core/SparseFileWriter.cpp
+    src/app/Logger.cpp
+    src/app/Paths.cpp
+)
+target_include_directories(qtIDM_sw_stream_tests PRIVATE src)
+target_link_libraries(qtIDM_sw_stream_tests PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME qtIDM_sw_stream_tests COMMAND qtIDM_sw_stream_tests)
+
+add_executable(qtIDM_segment_planner_tests
+    tests/SegmentPlannerTest.cpp
+    src/core/SegmentPlanner.cpp
+    src/core/DownloadTypes.cpp
+)
+target_include_directories(qtIDM_segment_planner_tests PRIVATE src)
+target_link_libraries(qtIDM_segment_planner_tests PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME qtIDM_segment_planner_tests COMMAND qtIDM_segment_planner_tests)
+
+add_executable(qtIDM_network_resilience_tests
+    tests/NetworkResilienceTest.cpp
+)
+target_link_libraries(qtIDM_network_resilience_tests PRIVATE qtidm_automation Qt6::Test)
+add_test(NAME qtIDM_network_resilience_tests COMMAND qtIDM_network_resilience_tests)
 endif()
 
 install(TARGETS qtIDM qtIDM-native-host qtidm-cli RUNTIME DESTINATION bin)

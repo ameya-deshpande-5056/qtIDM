@@ -74,12 +74,19 @@ QJsonObject requestToJson(const DownloadRequest& request)
         { QStringLiteral("url"), request.url.toString(QUrl::FullyEncoded) },
         { QStringLiteral("scheduleId"), request.scheduleId },
         { QStringLiteral("existingId"), request.existingId },
+        { QStringLiteral("refreshTarget"), request.refreshTarget.toString(QUrl::FullyEncoded) },
+        { QStringLiteral("siteAdapterToken"), request.siteAdapterToken },
+        { QStringLiteral("siteAdapterHint"), request.siteAdapterHint },
+        { QStringLiteral("pageTitle"), request.pageTitle },
+        { QStringLiteral("browserTlsProfile"), request.browserTlsProfile },
+        { QStringLiteral("enableSemanticNaming"), request.enableSemanticNaming },
         { QStringLiteral("targetPath"), request.targetPath },
         { QStringLiteral("category"), request.category },
         { QStringLiteral("queueName"), request.queueName },
         { QStringLiteral("username"), request.username },
         { QStringLiteral("password"), request.credentialVaultKey.isEmpty() ? request.password : QString {} },
         { QStringLiteral("proxyUrl"), request.proxyUrl },
+        { QStringLiteral("dohUrl"), request.dohUrl },
         { QStringLiteral("checksumAlgorithm"), request.checksumAlgorithm },
         { QStringLiteral("expectedChecksum"), request.expectedChecksum },
         { QStringLiteral("expectedSha256"), request.expectedSha256 },
@@ -127,6 +134,15 @@ DownloadRequest requestFromJson(const QJsonObject& object)
     request.url = QUrl(object.value(QStringLiteral("url")).toString());
     request.scheduleId = object.value(QStringLiteral("scheduleId")).toString();
     request.existingId = object.value(QStringLiteral("existingId")).toString();
+    request.refreshTarget = QUrl(object.value(QStringLiteral("refreshTarget")).toString());
+    request.siteAdapterToken = object.value(QStringLiteral("siteAdapterToken")).toString();
+    request.siteAdapterHint = object.value(QStringLiteral("siteAdapterHint")).toString().trimmed();
+    request.pageTitle = object.value(QStringLiteral("pageTitle")).toString();
+    request.browserTlsProfile = object.value(QStringLiteral("browserTlsProfile")).toString(QStringLiteral("auto")).trimmed().toLower();
+    if (request.browserTlsProfile.isEmpty()) {
+        request.browserTlsProfile = QStringLiteral("auto");
+    }
+    request.enableSemanticNaming = object.value(QStringLiteral("enableSemanticNaming")).toBool(true);
     request.targetPath = object.value(QStringLiteral("targetPath")).toString();
     request.category = object.value(QStringLiteral("category")).toString();
     request.queueName = object.value(QStringLiteral("queueName")).toString(QStringLiteral("Main")).trimmed();
@@ -136,6 +152,7 @@ DownloadRequest requestFromJson(const QJsonObject& object)
     request.username = object.value(QStringLiteral("username")).toString();
     request.password = object.value(QStringLiteral("password")).toString();
     request.proxyUrl = object.value(QStringLiteral("proxyUrl")).toString();
+    request.dohUrl = object.value(QStringLiteral("dohUrl")).toString().trimmed();
     request.checksumAlgorithm = object.value(QStringLiteral("checksumAlgorithm"))
                                     .toString(QStringLiteral("sha256")).trimmed().toLower();
     request.expectedChecksum = object.value(QStringLiteral("expectedChecksum")).toString().trimmed().toLower();
@@ -273,6 +290,90 @@ DownloadRecord recordFromJson(const QJsonObject& object)
         record.segments.append(segment);
     }
     return record;
+}
+
+QString DomainRule::normalizeDomain(const QString& raw)
+{
+    QString clean = raw.trimmed().toLower();
+    if (clean.startsWith(QStringLiteral("*."))) {
+        clean = clean.mid(2);
+    }
+    while (clean.startsWith(QLatin1Char('.'))) {
+        clean.remove(0, 1);
+    }
+    while (clean.endsWith(QLatin1Char('.'))) {
+        clean.chop(1);
+    }
+    return clean;
+}
+
+bool DomainRule::matchesHost(const QString& host) const
+{
+    const QString normRule = normalizeDomain(domain);
+    const QString normHost = normalizeDomain(host);
+    if (normRule.isEmpty() || normHost.isEmpty()) {
+        return false;
+    }
+    if (normHost == normRule) {
+        return true;
+    }
+    return includeSubdomains && normHost.endsWith(QLatin1Char('.') + normRule);
+}
+
+const DomainRule* DomainRule::findBestMatch(const QVector<DomainRule>& rules, const QString& host)
+{
+    const QString normHost = normalizeDomain(host);
+    if (normHost.isEmpty()) {
+        return nullptr;
+    }
+    const DomainRule* best = nullptr;
+    int bestScore = -1;
+    for (const auto& rule : rules) {
+        if (!rule.matchesHost(normHost)) {
+            continue;
+        }
+        const QString normRule = normalizeDomain(rule.domain);
+        // Exact match always beats subdomain match; otherwise longer domain suffix wins
+        const int score = (normRule == normHost ? 10000 : 0) + normRule.size();
+        if (score > bestScore) {
+            bestScore = score;
+            best = &rule;
+        }
+    }
+    return best;
+}
+
+QJsonObject domainRuleToJson(const DomainRule& rule)
+{
+    QJsonObject headers;
+    for (auto it = rule.customHeaders.cbegin(); it != rule.customHeaders.cend(); ++it) {
+        headers.insert(it.key(), QJsonValue::fromVariant(it.value()));
+    }
+    return {
+        { QStringLiteral("domain"), DomainRule::normalizeDomain(rule.domain) },
+        { QStringLiteral("includeSubdomains"), rule.includeSubdomains },
+        { QStringLiteral("maxSegments"), qBound(0, rule.maxSegments, 32) },
+        { QStringLiteral("maxConcurrentDownloads"), qMax(0, rule.maxConcurrentDownloads) },
+        { QStringLiteral("speedLimitBytesPerSecond"), QString::number(qMax<qint64>(0, rule.speedLimitBytesPerSecond)) },
+        { QStringLiteral("customUserAgent"), rule.customUserAgent },
+        { QStringLiteral("customHeaders"), headers }
+    };
+}
+
+DomainRule domainRuleFromJson(const QJsonObject& object)
+{
+    DomainRule rule;
+    rule.domain = DomainRule::normalizeDomain(object.value(QStringLiteral("domain")).toString());
+    rule.includeSubdomains = object.value(QStringLiteral("includeSubdomains")).toBool(true);
+    rule.maxSegments = qBound(0, object.value(QStringLiteral("maxSegments")).toInt(0), 32);
+    rule.maxConcurrentDownloads = qMax(0, object.value(QStringLiteral("maxConcurrentDownloads")).toInt(0));
+    rule.speedLimitBytesPerSecond = qMax<qint64>(0, object.value(QStringLiteral("speedLimitBytesPerSecond")).toString().toLongLong());
+    rule.customUserAgent = object.value(QStringLiteral("customUserAgent")).toString().trimmed();
+    const auto headers = object.value(QStringLiteral("customHeaders")).toObject();
+    for (auto it = headers.begin(); it != headers.end(); ++it) {
+        rule.customHeaders.insert(it.key(), it.value().toVariant());
+    }
+    return rule;
 }
 
 QString extensionFromMime(const QString& mimeType)
@@ -460,6 +561,45 @@ QString resolveDownloadFilename(const QString& rawSuggested, const QUrl& url, co
     }
 
     return name;
+}
+
+const QVector<DohPreset>& defaultDohPresets()
+{
+    static const QVector<DohPreset> presets = {
+        { QStringLiteral("system"), QStringLiteral("System Default"), QString(),
+          QStringLiteral("Use local OS name servers (standard DNS).") },
+        { QStringLiteral("cloudflare"), QStringLiteral("Cloudflare (1.1.1.1)"), QStringLiteral("https://cloudflare-dns.com/dns-query"),
+          QStringLiteral("Fast, privacy-first DNS-over-HTTPS by Cloudflare.") },
+        { QStringLiteral("google"), QStringLiteral("Google (8.8.8.8)"), QStringLiteral("https://dns.google/dns-query"),
+          QStringLiteral("High-reliability global DNS-over-HTTPS by Google.") },
+        { QStringLiteral("quad9"), QStringLiteral("Quad9 (Recommended for Security)"), QStringLiteral("https://dns.quad9.net/dns-query"),
+          QStringLiteral("Privacy-friendly DNS with automatic threat and malicious domain blocking.") },
+        { QStringLiteral("adguard"), QStringLiteral("AdGuard DNS"), QStringLiteral("https://dns.adguard-dns.com/dns-query"),
+          QStringLiteral("Blocks ads, tracking domains, and phishing endpoints.") },
+        { QStringLiteral("opendns"), QStringLiteral("OpenDNS Home"), QStringLiteral("https://dns.opendns.com/dns-query"),
+          QStringLiteral("Cisco OpenDNS with anti-phishing protection.") },
+        { QStringLiteral("cloudflare_security"), QStringLiteral("Cloudflare Security"), QStringLiteral("https://security.cloudflare-dns.com/dns-query"),
+          QStringLiteral("Cloudflare 1.1.1.2 with automated malware blocking.") },
+        { QStringLiteral("custom"), QStringLiteral("Custom DoH URL…"), QString(),
+          QStringLiteral("Enter a custom RFC 8484 DNS-over-HTTPS endpoint.") }
+    };
+    return presets;
+}
+
+QString resolveDohUrl(const QString& presetOrUrl)
+{
+    const QString trimmed = presetOrUrl.trimmed();
+    if (trimmed.isEmpty() || trimmed.compare(QStringLiteral("system"), Qt::CaseInsensitive) == 0) {
+        return QString();
+    }
+    for (const auto& preset : defaultDohPresets()) {
+        if (preset.id.compare(trimmed, Qt::CaseInsensitive) == 0 ||
+            preset.name.compare(trimmed, Qt::CaseInsensitive) == 0 ||
+            preset.url.compare(trimmed, Qt::CaseInsensitive) == 0) {
+            return preset.url;
+        }
+    }
+    return trimmed;
 }
 
 }

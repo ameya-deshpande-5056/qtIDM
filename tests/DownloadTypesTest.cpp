@@ -34,6 +34,7 @@ private slots:
         request.username = QStringLiteral("user");
         request.password = QStringLiteral("pass");
         request.proxyUrl = QStringLiteral("http://proxy:8080");
+        request.dohUrl = QStringLiteral("https://cloudflare-dns.com/dns-query");
         request.httpMethod = QStringLiteral("POST");
         request.requestBody = QByteArray("report=weekly&format=csv");
         request.checksumAlgorithm = QStringLiteral("sha512");
@@ -90,6 +91,7 @@ private slots:
         QCOMPARE(copy.username, request.username);
         QCOMPARE(copy.password, request.password);
         QCOMPARE(copy.proxyUrl, request.proxyUrl);
+        QCOMPARE(copy.dohUrl, request.dohUrl);
         QCOMPARE(copy.httpMethod, QStringLiteral("POST"));
         QCOMPARE(copy.requestBody, request.requestBody);
         QCOMPARE(copy.checksumAlgorithm, request.checksumAlgorithm);
@@ -257,6 +259,21 @@ private slots:
         const auto dashName = qtidm::resolveDownloadFilename(
             QStringLiteral("Big Stream"), dashUrl, QStringLiteral("DASH"), true, QStringLiteral("application/dash+xml"));
         QCOMPARE(dashName, QStringLiteral("Big Stream.mkv"));
+    }
+
+    void dohPresetsResolve()
+    {
+        const auto& presets = qtidm::defaultDohPresets();
+        QVERIFY(presets.size() >= 7);
+        QCOMPARE(presets[0].id, QStringLiteral("system"));
+        QVERIFY(presets[0].url.isEmpty());
+
+        QCOMPARE(qtidm::resolveDohUrl(QStringLiteral("system")), QString());
+        QCOMPARE(qtidm::resolveDohUrl(QString()), QString());
+        QCOMPARE(qtidm::resolveDohUrl(QStringLiteral("cloudflare")), QStringLiteral("https://cloudflare-dns.com/dns-query"));
+        QCOMPARE(qtidm::resolveDohUrl(QStringLiteral("google")), QStringLiteral("https://dns.google/dns-query"));
+        QCOMPARE(qtidm::resolveDohUrl(QStringLiteral("quad9")), QStringLiteral("https://dns.quad9.net/dns-query"));
+        QCOMPARE(qtidm::resolveDohUrl(QStringLiteral("https://custom-doh.org/dns-query")), QStringLiteral("https://custom-doh.org/dns-query"));
     }
 };
 

@@ -44,6 +44,8 @@ public:
     MeteredNetworkPolicy meteredNetworkPolicy() const;
     void setNetworkMetered(bool metered);
     bool isNetworkMetered() const;
+    void setDomainRules(const QVector<DomainRule>& rules);
+    QVector<DomainRule> domainRules() const;
     static bool isAllowedAt(const DownloadRequest& request, const QDateTime& dateTime);
     QString lastError() const;
 
@@ -71,6 +73,9 @@ private:
     QHash<QString, QString> queueDisplayNames_;
     QHash<QString, int> activeByQueue_;
     QHash<QString, QString> downloadQueues_;
+    QHash<QString, int> activeByDomain_;
+    QHash<QString, QString> downloadRuleDomains_;
+    QVector<DomainRule> domainRules_;
     QHash<QString, DownloadRequest> activeRequests_;
     QSet<QString> meteredPausedIds_;
     QSet<QString> credentialBlocked_;

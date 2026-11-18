@@ -61,16 +61,47 @@ struct CookieRecord {
           path(std::move(p)), secure(sec), httpOnly(ho_only), session(sess), expirationDate(exp) {}
 };
 
+struct DohPreset {
+    QString id;
+    QString name;
+    QString url;
+    QString description;
+};
+
+const QVector<DohPreset>& defaultDohPresets();
+QString resolveDohUrl(const QString& presetOrUrl);
+
+struct DomainRule {
+    QString domain; // Normalized lowercase host (e.g. "archive.org")
+    bool includeSubdomains = true;
+    int maxSegments = 0;            // 0 = inherit global/request default
+    int maxConcurrentDownloads = 0; // 0 = unlimited
+    qint64 speedLimitBytesPerSecond = 0;
+    QString customUserAgent;
+    QVariantMap customHeaders;
+
+    static QString normalizeDomain(const QString& raw);
+    bool matchesHost(const QString& host) const;
+    static const DomainRule* findBestMatch(const QVector<DomainRule>& rules, const QString& host);
+};
+
 struct DownloadRequest {
     QString scheduleId;
     QString existingId;
     QUrl url;
+    QUrl refreshTarget;
+    QString siteAdapterToken;
+    QString siteAdapterHint;
+    QString pageTitle;
+    QString browserTlsProfile = QStringLiteral("auto");
+    bool enableSemanticNaming = true;
     QString targetPath;
     QString category;
     QString queueName = QStringLiteral("Main");
     QString username;
     QString password;
     QString proxyUrl;
+    QString dohUrl;
     QString checksumAlgorithm = QStringLiteral("sha256");
     QString expectedChecksum;
     // Kept for compatibility with queue files created before generic checksums.
@@ -138,6 +169,8 @@ QJsonObject requestToJson(const DownloadRequest& request);
 DownloadRequest requestFromJson(const QJsonObject& object);
 QJsonObject recordToJson(const DownloadRecord& record);
 DownloadRecord recordFromJson(const QJsonObject& object);
+QJsonObject domainRuleToJson(const DomainRule& rule);
+DomainRule domainRuleFromJson(const QJsonObject& object);
 
 QString extensionFromMime(const QString& mimeType);
 QString safeSuggestedFilename(QString value);
@@ -153,3 +186,5 @@ Q_DECLARE_METATYPE(qtidm::SegmentInfo)
 Q_DECLARE_METATYPE(QVector<qtidm::SegmentInfo>)
 Q_DECLARE_METATYPE(qtidm::CookieRecord)
 Q_DECLARE_METATYPE(QVector<qtidm::CookieRecord>)
+Q_DECLARE_METATYPE(qtidm::DomainRule)
+Q_DECLARE_METATYPE(QVector<qtidm::DomainRule>)

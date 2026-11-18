@@ -20,7 +20,7 @@ public:
     MediaStreamProxy(const MediaStreamProxy&) = delete;
     MediaStreamProxy& operator=(const MediaStreamProxy&) = delete;
 
-    bool start(const QUrl& rootUrl, const QVariantMap& headers);
+    bool start(const QUrl& rootUrl, const QVariantMap& headers, const QString& dohUrl = QString());
     void stop();
 
     bool isRunning() const;
@@ -34,6 +34,7 @@ private:
 
     QUrl rootUrl_;
     QVariantMap headers_;
+    QString dohUrl_;
     int listenFd_ = -1;
     quint16 port_ = 0;
     std::atomic_bool running_ { false };

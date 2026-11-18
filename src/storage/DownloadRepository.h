@@ -5,6 +5,8 @@
 #include <QList>
 #include <QRecursiveMutex>
 #include <QString>
+#include <QVector>
+#include <optional>
 #include <sqlite3.h>
 
 namespace qtidm {
@@ -23,6 +25,12 @@ public:
     bool checkpoint(const QString& id, const QVector<SegmentInfo>& segments);
     bool removeDownload(const QString& id);
     QList<DownloadRecord> listDownloads() const;
+
+    bool upsertDomainRule(const DomainRule& rule);
+    bool removeDomainRule(const QString& domain);
+    QVector<DomainRule> listDomainRules() const;
+    std::optional<DomainRule> matchDomainRule(const QString& host) const;
+
     QString lastError() const;
 
 private:

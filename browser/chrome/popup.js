@@ -21,6 +21,20 @@ function showPanel(id) {
   document.querySelectorAll(".panel").forEach((item) => item.classList.toggle("active", item.id === id));
 }
 
+function formatBytes(bytes) {
+  if (typeof bytes !== "number" || bytes <= 0 || !isFinite(bytes)) return "";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return unit === 0
+    ? `${bytes} B`
+    : `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
+}
+
 function displayName(value) {
   const tail = value.split("/").pop()?.split("?")[0] || value;
   try { return decodeURIComponent(tail); } catch (_) { return tail; }
@@ -108,7 +122,18 @@ async function refresh() {
     url.title = item.url;
     const host = document.createElement("span");
     host.className = "host";
-    try { host.textContent = new URL(item.url).host; } catch (_) { host.textContent = item.url; }
+    let hostText = "";
+    try {
+      const parsed = new URL(item.url);
+      hostText = parsed.protocol === "blob:" ? new URL(parsed.pathname).host : parsed.host;
+    } catch (_) {
+      hostText = item.url;
+    }
+    const metaParts = [];
+    if (item.size > 0) metaParts.push(formatBytes(item.size));
+    if (item.isSubframe) metaParts.push("iframe");
+    if (hostText) metaParts.push(hostText);
+    host.textContent = metaParts.join(" • ");
     details.append(url, host);
     const button = document.createElement("button");
     button.className = "download";
@@ -122,7 +147,7 @@ async function refresh() {
         url: item.url
       });
       button.disabled = false;
-      notice(result?.ok ? "Capture sent to qtIDM." : (result?.message || "Could not contact qtIDM."), !result?.ok);
+      notice(result?.ok ? (result.message || "Capture sent to qtIDM.") : (result?.message || "Could not contact qtIDM."), !result?.ok);
     });
     row.append(type, details, button);
     $("#items").append(row);

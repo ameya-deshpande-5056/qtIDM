@@ -1,5 +1,6 @@
 #include "app/Logger.h"
 #include "app/Paths.h"
+#include "integration/SwStreamSessionManager.h"
 
 #include <QCoreApplication>
 #include <QDBusConnection>
@@ -56,11 +57,20 @@ bool validUrl(const QString& value)
     return url.isValid() && (url.scheme() == QStringLiteral("http") || url.scheme() == QStringLiteral("https") || url.scheme() == QStringLiteral("ftp"));
 }
 
-QJsonObject handle(const QJsonObject& object)
+QJsonObject handle(const QJsonObject& object, qtidm::SwStreamSessionManager& swStreams)
 {
-    if (object.value(QStringLiteral("type")).toString() == QStringLiteral("status"))
-        return { { QStringLiteral("ok"), true }, { QStringLiteral("status"), QStringLiteral("ready") }, { QStringLiteral("persistent"), true } };
-    if (object.value(QStringLiteral("type")).toString() == QStringLiteral("extractSocialMedia")) {
+    const auto msgType = object.value(QStringLiteral("type")).toString();
+    if (msgType == QStringLiteral("status"))
+        return { { QStringLiteral("ok"), true }, { QStringLiteral("status"), QStringLiteral("ready") }, { QStringLiteral("persistent"), true }, { QStringLiteral("swStreamPuller"), true } };
+    if (msgType == QStringLiteral("swStreamBegin"))
+        return swStreams.handleBegin(object);
+    if (msgType == QStringLiteral("swStreamChunk"))
+        return swStreams.handleChunk(object);
+    if (msgType == QStringLiteral("swStreamFinish"))
+        return swStreams.handleFinish(object);
+    if (msgType == QStringLiteral("swStreamAbort"))
+        return swStreams.handleAbort(object);
+    if (msgType == QStringLiteral("extractSocialMedia")) {
         const auto url = object.value(QStringLiteral("url")).toString().trimmed();
         if (!validUrl(url)) return errorReply(QStringLiteral("invalid-url"), QStringLiteral("qtIDM can extract only valid HTTP or HTTPS URLs."));
         QString lastError;
@@ -167,13 +177,14 @@ int main(int argc, char** argv)
     qtidm::Logger::install();
     // Native messaging ports are streams, not one-request processes.  Keep the
     // host alive and correlate every response so browsers can safely pipeline.
+    qtidm::SwStreamSessionManager swStreams;
     while (true) {
         const auto payload = readNativeMessage();
         if (payload.isEmpty()) break;
         QJsonParseError parseError;
         const auto doc = QJsonDocument::fromJson(payload, &parseError);
         QJsonObject reply = parseError.error == QJsonParseError::NoError && doc.isObject()
-            ? handle(doc.object()) : errorReply(QStringLiteral("invalid-message"), QStringLiteral("Browser sent an invalid native-messaging request."));
+            ? handle(doc.object(), swStreams) : errorReply(QStringLiteral("invalid-message"), QStringLiteral("Browser sent an invalid native-messaging request."));
         if (doc.isObject() && doc.object().contains(QStringLiteral("id"))) reply.insert(QStringLiteral("id"), doc.object().value(QStringLiteral("id")));
         writeNativeMessage(reply);
     }

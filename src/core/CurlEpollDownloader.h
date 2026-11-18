@@ -35,6 +35,10 @@ public:
     qint64 alternateSpeedLimit() const;
     qint64 sessionBytesReceived() const;
     void resetSessionBytesReceived();
+    QString defaultDohUrl() const;
+    void setDefaultDohUrl(const QString& url);
+    void setDomainRules(const QVector<DomainRule>& rules);
+    QVector<DomainRule> domainRules() const;
     void acknowledgeCheckpoint(const QString& id, const QVector<SegmentInfo>& confirmedSegments);
     void setPersistenceHandler(std::function<bool(const QString& id, const QVector<SegmentInfo>& segments)> handler);
 
@@ -43,6 +47,7 @@ signals:
     void progressChanged(QString id, qint64 received, qint64 total, double bytesPerSecond);
     void segmentsChanged(QString id, QVector<qtidm::SegmentInfo> segments);
     void metadataChanged(QString id, qint64 total, QString entityTag, QString lastModified);
+    void targetPathChanged(QString id, QString targetPath);
     void statusChanged(QString id, qtidm::DownloadStatus status, QString message);
     void hostConnectionCountChanged(QString host, int activeConnections);
 
@@ -92,7 +97,11 @@ private:
     void applyRateLimits();
     void addProbedTransfer(ProbedRequest probed);
     void addSegmentTransfer(const std::shared_ptr<DownloadBatch>& batch, int segmentIndex, int attempt = 0, bool forceHttp1 = false);
+    bool preemptStalledSegment(const std::shared_ptr<DownloadBatch>& batch);
     bool splitActiveSegment(const std::shared_ptr<DownloadBatch>& batch);
+    bool tryRecoverExpiredUrl(const std::shared_ptr<DownloadBatch>& batch, int segmentIndex,
+                              long responseCode, const QString& contentType,
+                              const QUrl& redirectLocation, const QByteArray& bodyPreview);
     void refillQueuedSegments();
     void emitBatchProgress();
     void failBatch(const std::shared_ptr<DownloadBatch>& batch, const QString& message);
@@ -111,6 +120,10 @@ private:
     std::function<bool(const QString& id, const QVector<SegmentInfo>& segments)> persistenceHandler_;
     QMutex checkpointMutex_;
     QHash<QString, QVector<SegmentInfo>> pendingAcks_;
+    mutable QMutex dohMutex_;
+    QString defaultDohUrl_;
+    mutable QMutex domainRulesMutex_;
+    QVector<DomainRule> domainRules_;
 
     std::atomic_bool running_ = false;
     std::atomic<qint64> sessionBytesReceived_ = 0;

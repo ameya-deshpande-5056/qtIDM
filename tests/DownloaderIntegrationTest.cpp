@@ -1203,9 +1203,15 @@ void persistsDurableCheckpointsWithAcknowledgement()
         qtidm::CurlEpollDownloader downloader;
         std::atomic<int> splitsPersisted = 0;
         std::atomic<bool> injectFailure = false;
+        std::atomic<bool> allSplits4KiBAligned = true;
 
-        downloader.setPersistenceHandler([&repo, &splitsPersisted, &injectFailure](const QString& id, const QVector<qtidm::SegmentInfo>& segs) {
+        downloader.setPersistenceHandler([&repo, &splitsPersisted, &injectFailure, &allSplits4KiBAligned](const QString& id, const QVector<qtidm::SegmentInfo>& segs) {
             if (segs.size() > 1) {
+                for (int i = 1; i < segs.size(); ++i) {
+                    if (segs[i].start % 4096 != 0) {
+                        allSplits4KiBAligned.store(false);
+                    }
+                }
                 splitsPersisted++;
                 if (injectFailure.load()) {
                     return false; // Injected persistence failure
@@ -1233,6 +1239,7 @@ void persistsDurableCheckpointsWithAcknowledgement()
             const auto id = downloader.enqueue(request);
             QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Completed, 15000));
             QVERIFY(splitsPersisted.load() > 0);
+            QVERIFY(allSplits4KiBAligned.load());
         }
 
         // 2. Injected persistence failure safely rolls back split and completes download
@@ -1878,6 +1885,59 @@ void persistsDurableCheckpointsWithAcknowledgement()
             }
         }
         QCOMPARE(failedCount, 1);
+        downloader.stop();
+    }
+
+    void dnsOverHttpsConfigurationAndPresetResolution()
+    {
+        // 1. Verify default DoH presets contain Cloudflare, Google, Quad9, AdGuard, OpenDNS
+        const auto& presets = qtidm::defaultDohPresets();
+        QVERIFY(presets.size() >= 7);
+        bool foundCloudflare = false;
+        bool foundGoogle = false;
+        bool foundQuad9 = false;
+        for (const auto& p : presets) {
+            if (p.id == QStringLiteral("cloudflare")) foundCloudflare = true;
+            if (p.id == QStringLiteral("google")) foundGoogle = true;
+            if (p.id == QStringLiteral("quad9")) foundQuad9 = true;
+        }
+        QVERIFY(foundCloudflare);
+        QVERIFY(foundGoogle);
+        QVERIFY(foundQuad9);
+
+        // 2. Verify resolveDohUrl
+        QCOMPARE(qtidm::resolveDohUrl(QStringLiteral("cloudflare")), QStringLiteral("https://cloudflare-dns.com/dns-query"));
+        QCOMPARE(qtidm::resolveDohUrl(QStringLiteral("google")), QStringLiteral("https://dns.google/dns-query"));
+        QCOMPARE(qtidm::resolveDohUrl(QStringLiteral("system")), QString());
+        QCOMPARE(qtidm::resolveDohUrl(QString()), QString());
+        QCOMPARE(qtidm::resolveDohUrl(QStringLiteral("https://custom.dns/query")), QStringLiteral("https://custom.dns/query"));
+
+        // 3. Verify Downloader default DoH setting
+        qtidm::CurlEpollDownloader downloader;
+        QCOMPARE(downloader.defaultDohUrl(), QString());
+        downloader.setDefaultDohUrl(QStringLiteral("cloudflare"));
+        QCOMPARE(downloader.defaultDohUrl(), QStringLiteral("cloudflare"));
+        downloader.setDefaultDohUrl(QStringLiteral("https://1.1.1.1/dns-query"));
+        QCOMPARE(downloader.defaultDohUrl(), QStringLiteral("https://1.1.1.1/dns-query"));
+
+        // 4. Verify DoH blocks private/loopback destination when using hostname
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        downloader.start();
+        QSignalSpy statusSpy(&downloader, &qtidm::CurlEpollDownloader::statusChanged);
+
+        qtidm::DownloadRequest req;
+        req.url = QUrl(QStringLiteral("http://localhost:%1/range.bin").arg(port_));
+        req.targetPath = dir.path() + QStringLiteral("/doh_block_test.bin");
+        req.dohUrl = QStringLiteral("cloudflare");
+        req.allowPrivateNetworkRedirects = false;
+
+        const auto id = downloader.enqueue(req);
+        QString errorMsg;
+        QVERIFY(waitForStatus(statusSpy, id, qtidm::DownloadStatus::Failed, 10000, &errorMsg));
+        QVERIFY2(errorMsg.contains(QStringLiteral("private or loopback")),
+                 qPrintable(QStringLiteral("Expected private/loopback rejection, got: %1").arg(errorMsg)));
+
         downloader.stop();
     }
 
