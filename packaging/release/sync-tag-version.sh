@@ -91,6 +91,21 @@ if [ "$APPLY" -eq 1 ] && [ "$COMPARISON" -gt 0 ]; then
         exit 1
     fi
     mv "$TMP" "$CMAKE_FILE"
+
+    RPM_SPEC="$ROOT/packaging/rpm/qtidm.spec"
+    if [ -f "$RPM_SPEC" ]; then
+        TMP="$RPM_SPEC.tmp.$$"
+        sed 's/^\(Version:[[:space:]]*\)[^[:space:]]*/\1'"$TAG_VERSION"'/' "$RPM_SPEC" > "$TMP"
+        mv "$TMP" "$RPM_SPEC"
+    fi
+
+    ARCH_PKGBUILD="$ROOT/packaging/arch/PKGBUILD"
+    if [ -f "$ARCH_PKGBUILD" ]; then
+        TMP="$ARCH_PKGBUILD.tmp.$$"
+        sed 's/^pkgver=.*/pkgver='"$TAG_VERSION"'/' "$ARCH_PKGBUILD" > "$TMP"
+        mv "$TMP" "$ARCH_PKGBUILD"
+    fi
+
     trap - EXIT HUP INT TERM
     echo "Updated CI checkout from qtIDM $CMAKE_VERSION to tagged version $TAG_VERSION." >&2
 fi

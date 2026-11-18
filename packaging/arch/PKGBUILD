@@ -1,7 +1,7 @@
 # Maintainer: qtIDM Maintainers <maintainers@example.invalid>
 # The build script rewrites pkgver from CMakeLists.txt before calling makepkg.
 pkgname=qtidm
-pkgver=0.3.3
+pkgver=0.3.4
 pkgrel=1
 pkgdesc="Fast, native Internet Download Manager for Linux"
 arch=('x86_64' 'aarch64')

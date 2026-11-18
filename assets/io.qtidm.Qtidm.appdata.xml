@@ -30,6 +30,20 @@
   <launchable type="desktop-id">io.qtidm.Qtidm.desktop</launchable>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.3.4" date="2026-11-18">
+      <description>
+        <p>
+          Adds a native multi-threaded HLS/M3U8 chunk downloader with AES-128
+          decryption, DNS-over-HTTPS support, a 4 KiB-aligned dynamic segment
+          planner with stalled-connection preemption, automatic expired-URL
+          recovery site adapters (MediaFire, Google Drive, GoFile), SQLite
+          per-domain connection and throttling rules, magic-byte sniffing with
+          semantic file naming, browser-like TLS and HTTP header camouflage,
+          and browser extension upgrades for blobs, Shadow DOM, framework state
+          sniffing, cross-origin iframes, and ServiceWorker stream pulling.
+        </p>
+      </description>
+    </release>
     <release version="0.3.3" date="2026-11-15">
       <description>
         <p>
