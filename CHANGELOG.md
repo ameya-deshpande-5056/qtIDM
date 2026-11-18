@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.4
+
+### Core Engine & Protocols
+- Added a native multi-threaded HLS/M3U8 chunk downloader (`HlsPlaylistParser` and `HlsDownloader` in `src/core/`, integrated into `MediaDownloader`) that fetches media segments concurrently over libcurl epoll with AES-128 decryption, fMP4 `EXT-X-MAP` initialization segment support, resume state persistence, and local lossless FFmpeg remuxing (`-c copy`).
+- Added DNS-over-HTTPS (DoH) support via `CURLOPT_DOH_URL` (`dohUrl` on `DownloadRequest`, with Cloudflare, Google, Quad9, and custom resolver presets in Options) wired through `CurlEpollDownloader`, `HlsDownloader`, and `MediaStreamProxy`.
+- Added a 4 KiB page-aligned dynamic segment planner (`SegmentPlanner`) in `CurlEpollDownloader` with two-phase range locking (`claim` / `commit`), dynamic range splitting, and EWMA TTFB-guided preemption of stalled pending connections.
+
+### Network Resilience, Naming & Site Adapters
+- Added automatic expired-URL recovery (`src/integration/sites/`): persisted origin page (`refreshTarget`), token (`siteAdapterToken`), and adapter hint (`siteAdapterHint`) in `DownloadRequest` / SQLite (`request_json`), with `SiteAdapterRegistry` and built-in `MediaFireAdapter` (`/download_repair.php` & `downloadButton` extraction), `GoogleDriveAdapter` (virus-scan confirmation form parsing and OAuth 2.0 `refresh_token` exchange), and `GoFileAdapter` (`api.gofile.io` token re-query and `accountToken` cookie injection). Guarded `CurlEpollDownloader::writeCallback` against adopting HTML interstitial `Content-Length` headers before recovery.
+- Added per-domain connection limits and throttling rules (`DomainRule` and the `domain_rules` SQLite table in `DownloadRepository`), supporting subdomain-aware `max_segments`, `max_concurrent_downloads`, `speed_limit_bps`, `custom_user_agent`, and `custom_headers_json`, enforced in `DownloadScheduler` and `CurlEpollDownloader` and loaded on startup in `MainWindow`.
+- Added magic-byte format sniffing and semantic file naming (`FileNaming`), capturing the leading 64 bytes at offset 0 during download (supporting MKV, WebM, MP4, M4V, M4A, MOV, ZIP while preserving `.docx`/`.epub`/`.apk`/`.jar`, 7z, RAR, PDF, GZIP, XZ, ZSTD, BZIP2, PNG, JPEG, GIF, WebP, AVI, WAV, FLAC, OGG, MP3, FLV, SQLite, and TAR) and renaming meaningless URL filenames (`videoplayback`, `download.bin`, `download.php`, UUIDs, hashes) using the browser-forwarded page title (`_qtidmPageTitle`) plus the sniffed extension, emitting `targetPathChanged` to synchronize SQLite and the download table.
+- Added browser-like TLS and HTTP/2 camouflage (`BrowserCamouflage`) in `CurlEpollDownloader`, configuring OpenSSL TLS 1.2 cipher lists (`CURLOPT_SSL_CIPHER_LIST`), TLS 1.3 suites (`CURLOPT_TLS13_CIPHERS`), and EC curves (`CURLOPT_SSL_EC_CURVES`) for Chrome and Firefox profiles alongside strict browser HTTP header ordering and internal `_qtidm*` header stripping.
+
+### Browser Extensions & Native Stream Pulling
+- Added `blob:` and `URL.createObjectURL` / `URL.revokeObjectURL` interception across both Chrome and Firefox extensions (`content_bridge.js`, `service_worker.js`, `background.js`, `popup.js`) with Blob metadata capture, in-page refresh, and fallback downloads.
+- Added open, closed, and Declarative Shadow DOM traversal (`Element.prototype.attachShadow` hook, recursive media discovery, `event.composedPath()` click handling, and strict-CSP Isolated-World fallback).
+- Added multi-framework component state sniffing (`window.__qtidm_component_sniffer`) for React 16–19, Vue 2/3, Preact, Svelte, Angular Ivy, and attached player SDK references with Shadow DOM host crossing, SSRF/noise blocklisting, and bounded traversal budgets; also fixed double-escaped manifest regex literals in Main-World `fetch`/`XHR` hooks.
+- Added a cross-origin iframe agent and structured `postMessage` frame bridge (`match_about_blank`, `match_origin_as_fallback`, bounded `frameRegistry`, frame-scoped `blob:` refresh, iframe `Referer`/`Origin` preservation, `frameUnloaded` pruning, and popup `iframe` indicators).
+- Added a ServiceWorker stream puller (`window.__qtidm_sw_puller`, `pullServiceWorkerStream` in background scripts, and `SwStreamSessionManager` in `NativeMessagingHost`) streaming same-origin ServiceWorker `ReadableStream` responses in 32 KiB chunks over Native Messaging directly into `SparseFileWriter` with atomic `.qtidm-part` promotion and strict sequence/path validation.
+- Forwarded `_qtidmPageTitle` and `_qtidmRefreshTarget` from Chrome and Firefox background scripts to `MainWindow` for semantic naming and automatic expired-URL recovery.
+
+### Tests
+- Added `qtIDM_hls_parser_tests`, `qtIDM_hls_downloader_tests`, `qtIDM_sw_stream_tests`, `qtIDM_segment_planner_tests`, and `qtIDM_network_resilience_tests` (bringing the CTest suite to 30 targets) and expanded `tests/browser_interception_test.cjs` to cover blobs, Shadow DOM, framework sniffing, cross-origin iframes, and ServiceWorker stream pulling across both Chrome and Firefox.
+
 ## 0.3.3
 
 - Added multi-architecture release packaging for `arm64` (`aarch64`) alongside `amd64` (`x86_64`) across Debian (`.deb`), AppImage (`.AppImage`), and Flatpak (`.flatpak`) bundles, matching existing Fedora RPM and Arch Linux package support.

@@ -10,21 +10,24 @@ Firefox integrations.
 | Capability | qtIDM state |
 | --- | --- |
 | HTTP, HTTPS, FTP | Implemented |
-| Multipart transfer, dynamic part refill, up to 32 connections | Implemented |
+| Multipart transfer, 4 KiB-aligned dynamic planning, stalled-connection preemption, up to 32 connections | Implemented |
+| DNS-over-HTTPS (DoH) (`CURLOPT_DOH_URL`) | Implemented (Cloudflare, Google, Quad9, and custom resolvers) |
+| Browser-like TLS & HTTP header camouflage | Implemented (Chrome and Firefox OpenSSL TLS 1.2/1.3 cipher lists, EC curves, and strict browser header ordering) |
 | Pause, resume, cancel, retry, `Retry-After` | Implemented |
-| Persistent resume after restart | Implemented, including request headers, authentication, proxy, checksum, timeout, and retry options; transfers left queued, connecting, or downloading at exit are re-queued automatically on the next start |
-| Per-download and per-host connection limits | Implemented |
+| Persistent resume after restart | Implemented, including request headers, authentication, proxy, DoH, `refreshTarget`, checksum, timeout, and retry options; transfers left queued, connecting, or downloading at exit are re-queued automatically on the next start |
+| Per-download, per-host, and per-domain connection & throttling rules | Implemented (SQLite `domain_rules` supporting subdomains, `max_segments`, `max_concurrent_downloads`, speed limits, custom `User-Agent`, and custom headers) |
 | Global/queue concurrent download limits | Implemented |
 | Per-download and default speed limits | Implemented |
 | Configurable retries, retry delay, connect timeout, low-speed timeout, redirects | Implemented |
 | Basic/digest server authentication | Implemented through libcurl |
 | HTTP and SOCKS proxies, including proxy credentials in the URL | Implemented through libcurl |
-| Custom headers, cookies, referrer, User-Agent | Implemented; browser extensions forward browser context |
+| Custom headers, cookies, referrer, User-Agent | Implemented; browser extensions forward browser context, page title, and origin page URL |
+| Magic-byte format sniffing & semantic file naming | Implemented (64-byte magic header inspection combined with browser page title for generic/opaque filenames) |
 | Duplicate URL detection | Implemented |
 | Existing-file rename, overwrite, or skip | Implemented |
 | Disk-space preflight and atomic `.part` publication | Implemented |
 | MD5, SHA-1, SHA-256, SHA-512 validation | Implemented |
-| Replace expired URL while preserving ranges | Implemented |
+| Replace expired URL while preserving ranges | Implemented (both manual replacement and automatic site-adapter recovery for MediaFire, Google Drive, and GoFile) |
 | Named queues, priorities, time/day windows, repeat schedules | Implemented |
 | Post-download executable | Implemented without invoking a shell; `{file}`, `{dir}`, and `{url}` arguments are supported |
 | Move file or remove list entry after successful download | Implemented |
@@ -48,14 +51,15 @@ Firefox integrations.
 
 | Capability | qtIDM state |
 | --- | --- |
-| HLS and MPEG-DASH | Implemented through FFmpeg |
+| HLS and MPEG-DASH | Native multi-threaded HLS/M3U8 chunk downloader (`HlsDownloader`) with local FFmpeg remuxing; MPEG-DASH and fallback HLS via FFmpeg + HTTP/2 loopback proxy |
 | Separate adaptive audio/video download and mux | Implemented |
-| Browser manifest/direct media/subtitle capture | Implemented in Chrome and Firefox extensions |
+| Browser manifest/direct media/subtitle/blob capture | Implemented in Chrome and Firefox extensions (including `blob:` URLs, open/closed/Declarative Shadow DOM, React/Vue/Preact/Svelte/Angular component state sniffing, and cross-origin iframes) |
+| ServiceWorker synthesized stream downloads | Implemented via `window.__qtidm_sw_puller` and `SwStreamSessionManager` streaming over Native Messaging into `SparseFileWriter` |
 | Host and file-extension capture exclusions | Implemented in both browser extensions |
 | Cookies, referrer, User-Agent forwarding | Implemented |
-| AES-128 HLS described by the manifest | Delegated to FFmpeg |
+| AES-128 HLS described by the manifest | Implemented natively in `HlsDownloader` (OpenSSL AES-128-CBC) and supported via FFmpeg |
 | DRM media | Detection and explicit refusal are implemented; circumvention remains intentionally unsupported |
-| Site-specific social-network extractors | Implemented through the maintained `yt-dlp` provider for supported Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, Dailymotion, Twitch, and SoundCloud links; YouTube is intentionally excluded |
+| Site-specific social-network extractors | Implemented through the maintained `yt-dlp` provider for supported YouTube, Bilibili, Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, Dailymotion, Twitch, and SoundCloud links |
 | Built-in media player/stream action | Delegated to the desktop browser/media player |
 
 ## Browser and privacy

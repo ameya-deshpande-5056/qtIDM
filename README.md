@@ -54,7 +54,12 @@
 
 - Segmented HTTP, HTTPS, and FTP downloads through the libcurl multi-interface and Linux `epoll`, with asynchronous background DNS and metadata probing so new transfers never stall active downloads.
 - Up to 32 simultaneous connections per download with fair multi-download connection balancing and configurable per-host connection limits.
-- Dynamic range planning that keeps connections occupied as queued ranges complete.
+- 4 KiB page-aligned dynamic segment planner (`SegmentPlanner`) with two-phase range locking (`claim` / `commit`), dynamic range splitting, and EWMA TTFB-guided preemption of stalled pending connections.
+- DNS-over-HTTPS (DoH) support via `CURLOPT_DOH_URL` with Cloudflare, Google, Quad9, and custom resolver options across direct downloads, native HLS transfers, and the HTTP/2 stream proxy.
+- Browser-like TLS and HTTP/2 camouflage (`BrowserCamouflage`) matching Chrome and Firefox OpenSSL TLS 1.2/1.3 cipher lists, elliptic curves, and strict browser HTTP header ordering.
+- Automatic expired-URL recovery via built-in site adapters (`MediaFireAdapter`, `GoogleDriveAdapter`, and `GoFileAdapter`) using persisted origin pages (`refreshTarget`), virus-scan confirmation forms, OAuth 2.0 refresh tokens, and API token re-queries.
+- Per-domain connection limits and throttling rules stored in SQLite (`domain_rules`), supporting subdomain-aware `max_segments`, `max_concurrent_downloads`, speed limits, custom `User-Agent`, and custom headers enforced by both `DownloadScheduler` and `CurlEpollDownloader`.
+- Magic-byte format sniffing and semantic file naming (`FileNaming`), inspecting the first 64 bytes (`.mkv`, `.webm`, `.mp4`, `.m4v`, `.zip`, `.7z`, `.rar`, `.pdf`, and more) and combining browser-forwarded page titles with sniffed extensions when URL filenames are generic or opaque (e.g. `videoplayback`, `download.bin`, UUIDs, or hashes).
 - Sparse `.part` files using `mmap` windows with a `pwrite` fallback.
 - Atomic promotion from `.part` to the final destination after successful completion.
 - Pause, cancel, and range-based resume with remote-size validation.
@@ -71,13 +76,14 @@
 
 ### Streaming Media
 
-- Non-DRM HLS and MPEG-DASH downloading through FFmpeg.
+- Native multi-threaded HLS/M3U8 chunk downloader (`HlsPlaylistParser` + `HlsDownloader`) fetching media segments concurrently over libcurl epoll with AES-128 decryption, fMP4 `EXT-X-MAP` initialization segment handling, resume persistence, and local lossless FFmpeg remuxing (`-c copy`).
+- Non-DRM MPEG-DASH and fallback HLS downloading through FFmpeg.
 - Dedicated loopback HTTP/2 stream proxy (`MediaStreamProxy`) negotiating ALPN `h2` with browser header forwarding, unblocking HLS/DASH streams on HTTP/2-only CDNs and Cloudflare endpoints that reject FFmpeg's HTTP/1.1 client.
 - Virtual playlist rewriting in `MediaStreamProxy` normalizing disguised media extensions (e.g. `.jpg` segment files) to virtual `.ts` paths.
 - Explicit Widevine, PlayReady, FairPlay, and SAMPLE-AES detection with a clear refusal instead of attempting DRM circumvention.
 - Separate adaptive and progressive audio and video track downloading and remuxing into unified `.mp4` or `.webm` containers via FFmpeg without quality loss (`-c copy`).
 - Maintained social-site extraction through `yt-dlp` for supported YouTube, Bilibili, Instagram, Facebook, X/Twitter, TikTok, Reddit, Vimeo, Dailymotion, Twitch, and SoundCloud links, with automatic combined audio+video pairing and dynamic discovery prioritizing the newest version across user pip (`~/.local/bin`), pyenv (`~/.pyenv/shims`), Python 3 modules (`python3 -m yt_dlp`), and system packages.
-- Browser detection of HLS, DASH, direct audio/video, and common subtitle responses, with YouTube/Bilibili extension popup awareness and smart URL routing.
+- Browser detection of HLS, DASH, direct audio/video, `blob:` object URLs, and common subtitle responses, with YouTube/Bilibili extension popup awareness and smart URL routing.
 - Accurate stream title preservation capturing complete names and numbers (e.g. `Ep. 7`) without truncation at periods before the file extension.
 - Pause, resume, cancel, progress reporting, and persisted history for media downloads.
 
@@ -119,9 +125,11 @@ See [Queues and Scheduler](#queues-and-scheduler) below for dialog usage, workfl
 - Persistent, request-correlated native messaging with explicit desktop acceptance; a failed handoff resumes or recreates the browser download.
 - Browser-download interception policy controls for included/excluded extensions, excluded hosts, minimum size, pause, current-site exclusion, and an optional Alt-key bypass.
 - Context-menu capture for links, images, audio, video, all page links/images, and selected links; batches are limited to 100 URLs.
-- Cookies, referrer, browser user agent, resolved `Content-Disposition` filenames, and per-URL request headers forwarding; redirected browser files are removed before qtIDM presents its download-options dialog to avoid false filename collisions.
+- Cookies, referrer, browser user agent, page title (`_qtidmPageTitle`), origin page URL (`_qtidmRefreshTarget`), resolved `Content-Disposition` filenames, and per-URL request headers forwarding; redirected browser files are removed before qtIDM presents its download-options dialog to avoid false filename collisions.
 - POST forwarding for form data and raw/binary request bodies up to 4 MiB; POST downloads use one safe connection rather than ranged segments.
-- Captured HLS, DASH, direct audio/video, and subtitle requests are retained in bounded per-tab storage for review and submission, with real-time popup refresh and DOM observers capturing streams inside embedded player iframes.
+- Deep media discovery across `blob:` / `URL.createObjectURL` object URLs, open/closed/Declarative Shadow DOM trees (with strict-CSP fallback), framework component state (React 16–19, Vue 2/3, Preact, Svelte, Angular Ivy), and cross-origin / `about:blank` / `about:srcdoc` iframes via a structured frame bridge.
+- ServiceWorker stream pulling (`SwStreamSessionManager` + `window.__qtidm_sw_puller`) streaming same-origin ServiceWorker `ReadableStream` responses in 32 KiB chunks over Native Messaging directly into `SparseFileWriter` for sites that synthesize downloads client-side.
+- Captured HLS, DASH, `blob:`, direct audio/video, and subtitle requests are retained in bounded per-tab storage for review and submission, with real-time popup refresh and iframe-aware metadata.
 - `qtidm:` links can explicitly send an HTTP, HTTPS, or FTP URL to qtIDM.
 - Manual single-URL and batch submission of up to 100 addresses, with one shared application-side batch-options dialog for destination, queue, scheduling, connections, and conflict handling.
 - Real Chrome and Firefox E2E tests verify interception, browser context forwarding, and persistent native-messaging sessions.
@@ -423,15 +431,21 @@ Downloads stay in the **Scheduler** table while any of these apply:
 ctest --test-dir build --output-on-failure
 ```
 
-The automated suite covers persistence, scheduling, queue controls, segmented
-and resumed transfers, retries, checksums, conflict policies, per-host limits,
-metered-network dispatch, archive safety and extraction, credential-vault
-transport, social metadata and DRM filtering, adaptive-media handling,
-ZIP/ZIP64 parsing, main window UI behavior, packaging metadata,
-JavaScript-rendered site grabbing, automation answers, the `ipc.json` discovery
-file, the portable data-directory override, and performance smoke tests. The downloader and browser-extension integration
-suites start localhost HTTP fixture servers, so restricted sandboxes must
-permit localhost port binding.
+The automated suite covers persistence, scheduling, queue controls, per-domain
+connection and throttling rules, segmented and resumed transfers, 4 KiB-aligned
+segment planning and stalled-connection preemption, native multi-threaded HLS
+parsing and chunk downloading, DNS-over-HTTPS, site-adapter expired-URL recovery
+(MediaFire, Google Drive, GoFile), magic-byte sniffing and semantic naming,
+browser-like TLS/header camouflage, ServiceWorker stream pulling, retries,
+checksums, conflict policies, per-host limits, metered-network dispatch, archive
+safety and extraction, credential-vault transport, social metadata and DRM
+filtering, adaptive-media handling, ZIP/ZIP64 parsing, main window UI behavior,
+packaging metadata, JavaScript-rendered site grabbing, browser interception
+(blobs, Shadow DOM, framework state, cross-origin iframes, ServiceWorkers),
+automation answers, the `ipc.json` discovery file, the portable data-directory
+override, crash recovery, and performance smoke tests. The downloader and
+browser-extension integration suites start localhost HTTP fixture servers, so
+restricted sandboxes must permit localhost port binding.
 
 Browser extension tests skip when their optional local tooling is unavailable; CI runs them strictly with Chrome for Testing plus Puppeteer, and Firefox plus `web-ext`. To run the same required checks locally, make Node available on `PATH`, install the tools, build the tests, and run:
 

@@ -70,9 +70,17 @@
   - Map NetworkManager metered-state values to policy state.
 
 - `qtIDM_social_media_extractor_tests`
-  - Recognize the supported social hosts and exclude YouTube.
-  - Parse direct formats and HTTP headers from yt-dlp metadata.
+  - Recognize supported social hosts (including YouTube and Bilibili `/en` path normalization).
+  - Parse direct and combined video+audio formats and HTTP headers from yt-dlp metadata.
   - Reject metadata explicitly marked as DRM-protected.
+
+- `qtIDM_update_checker_tests`
+  - Compare application and external-tool versions against release metadata.
+  - Parse upstream release responses for qtIDM, `yt-dlp`, and Deno.
+
+- `qtIDM_browser_interception_tests`
+  - Exercise Chrome and Firefox content bridge and background orchestration in Node VM harnesses.
+  - Verify `blob:` / `URL.createObjectURL` interception, open/closed/Declarative Shadow DOM traversal and strict-CSP fallback, React/Vue/Preact/Svelte/Angular component state sniffing, cross-origin iframe `postMessage` bridging and frame-scoped blob refresh, and ServiceWorker `ReadableStream` chunk pulling.
 
 - `qtIDM_automation_tests`
   - List downloads and queues as JSON, including unknown sizes as `null`.
@@ -132,6 +140,29 @@
   - Recognize HLS and MPEG-DASH manifest URLs.
   - Download and mux separate DASH audio/video tracks with FFmpeg.
   - Detect explicit Widevine, PlayReady, FairPlay, and SAMPLE-AES manifests.
+
+- `qtIDM_hls_parser_tests`
+  - Parse HLS master playlists, variant bandwidth/codec selection, media segments, `EXT-X-MAP` initialization segments, `EXT-X-BYTERANGE`, AES-128 `EXT-X-KEY` entries, and DRM refusal.
+
+- `qtIDM_hls_downloader_tests`
+  - Download multi-threaded HLS segments concurrently against a local HTTP server, decrypt AES-128 segments, persist/resume partial segment sets, and remux cleanly into the final container.
+
+- `qtIDM_crash_injection_tests`
+  - Terminate an active segmented worker process with `SIGKILL` and verify byte-exact recovery from durable SQLite checkpoints.
+
+- `qtIDM_sw_stream_tests`
+  - Stream 32 KiB base64 chunks through `SwStreamSessionManager` into `SparseFileWriter` for both known-length and unknown-length transfers.
+  - Enforce filename sanitization, collision-safe numbering, sequence/offset validation, strict base64 decoding, concurrency caps, and `.qtidm-part` cleanup on abort.
+
+- `qtIDM_segment_planner_tests`
+  - Verify 4 KiB page-aligned initial segment layout, dynamic range splitting, two-phase range locking (`claim` / `commit`), and EWMA TTFB-guided preemption of stalled pending connections.
+
+- `qtIDM_network_resilience_tests`
+  - Verify `MediaFireAdapter`, `GoogleDriveAdapter` (virus-scan confirmation form + OAuth 2.0 `refresh_token`), and `GoFileAdapter` (`api.gofile.io` token re-query).
+  - Verify SQLite persistence and subdomain specificity for `domain_rules` and `DownloadRecord` `refreshTarget` round-trips.
+  - Verify 64-byte magic-byte format sniffing and semantic file naming (including ZIP container preservation for `.docx`).
+  - Verify Chrome/Firefox OpenSSL TLS cipher profiles and strict browser HTTP header ordering.
+  - Exercise live local HTTP recovery for MediaFire repair redirects, Google Drive HTML virus-scan prompts, magic-byte renaming, header camouflage, and `DownloadScheduler` per-domain concurrency caps.
 
 - `qtIDM_main_window_tests`
   - Synchronize status and progress updates between the download table and details pane.

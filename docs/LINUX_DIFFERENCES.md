@@ -11,9 +11,11 @@ Linux-specific behavior:
 
 Implemented original Linux-native functionality:
 
-- Segmented HTTP/HTTPS/FTP transfers through libcurl multi and Linux `epoll`.
+- Segmented HTTP/HTTPS/FTP transfers through libcurl multi and Linux `epoll` with 4 KiB-aligned dynamic planning, stalled-connection preemption, DNS-over-HTTPS (`CURLOPT_DOH_URL`), and Chrome/Firefox TLS & header camouflage.
+- Native multi-threaded HLS/M3U8 chunk downloading with AES-128 decryption and local FFmpeg remuxing.
+- Automatic expired-URL recovery via site adapters (MediaFire, Google Drive, GoFile), SQLite per-domain connection/throttling rules (`domain_rules`), and magic-byte sniffing with semantic file naming.
 - Up to 32 segments per download.
-- Sparse file allocation with mmap-backed window writes and `pwrite` fallback.
+- Sparse file allocation with mmap-backed window writes and `pwrite` fallback, including ServiceWorker `ReadableStream` chunk ingestion through `qtIDM-native-host`.
 - Persisted SQLite download, segment, queue, and history state.
 - Crash recovery through persisted segment offsets and selected-download resume.
 - Scheduler UI and persistent scheduled queue.
