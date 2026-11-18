@@ -2,7 +2,7 @@ Source: qtidm
 Section: net
 Priority: optional
 Maintainer: qtIDM Maintainers <maintainers@example.invalid>
-Build-Depends: debhelper-compat (= 13), cmake, ninja-build, pkg-config, qt6-base-dev, qt6-base-dev-tools, libcurl4-openssl-dev, libsqlite3-dev
+Build-Depends: debhelper-compat (= 13), cmake, ninja-build, pkg-config, qt6-base-dev, qt6-base-dev-tools, libcurl4-openssl-dev, libsqlite3-dev, libssl-dev
 Standards-Version: 4.6.2
 
 Package: qtidm

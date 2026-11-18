@@ -7,7 +7,7 @@ pkgdesc="Fast, native Internet Download Manager for Linux"
 arch=('x86_64' 'aarch64')
 url="https://github.com/ameya-deshpande-5056/qtIDM"
 license=('MIT')
-depends=('qt6-base' 'curl' 'sqlite' 'hicolor-icon-theme')
+depends=('qt6-base' 'curl' 'sqlite' 'openssl' 'hicolor-icon-theme')
 makedepends=('cmake' 'ninja' 'gcc')
 optdepends=(
   'ffmpeg: HLS and DASH downloads'

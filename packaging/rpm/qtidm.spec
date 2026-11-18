@@ -19,10 +19,12 @@ BuildRequires:  gcc-c++
 BuildRequires:  qt6-qtbase-devel
 BuildRequires:  libcurl-devel
 BuildRequires:  sqlite-devel
+BuildRequires:  openssl-devel
 
 Requires:       qt6-qtbase
 Requires:       libcurl
 Requires:       sqlite-libs
+Requires:       openssl-libs
 Recommends:     ffmpeg-free
 Recommends:     p7zip
 Recommends:     libsecret

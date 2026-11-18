@@ -320,6 +320,31 @@ private slots:
         QVERIFY(workflow.contains(QStringLiteral("! -name \"*-debug-*\"")));
         QVERIFY(workflow.contains(QStringLiteral("publish-release")));
     }
+
+    void distroPackagingDeclaresOpenSslDependency()
+    {
+        const auto read = [](const QString& path) {
+            QFile file(path);
+            if (!file.open(QIODevice::ReadOnly)) {
+                return QString();
+            }
+            return QString::fromUtf8(file.readAll());
+        };
+        const auto source = QStringLiteral(QTIDM_SOURCE_DIR) + QLatin1Char('/');
+
+        const auto spec = read(source + QStringLiteral("packaging/rpm/qtidm.spec"));
+        QVERIFY(spec.contains(QStringLiteral("BuildRequires:  openssl-devel")));
+        QVERIFY(spec.contains(QStringLiteral("Requires:       openssl-libs")));
+
+        const auto debianControl = read(source + QStringLiteral("packaging/debian/control"));
+        QVERIFY(debianControl.contains(QStringLiteral("libssl-dev")));
+
+        const auto pkgbuild = read(source + QStringLiteral("packaging/arch/PKGBUILD"));
+        QVERIFY(pkgbuild.contains(QStringLiteral("'openssl'")));
+
+        const auto workflow = read(source + QStringLiteral(".github/workflows/build-release.yml"));
+        QVERIFY(workflow.contains(QStringLiteral("openssl-devel")));
+    }
 };
 
 QTEST_MAIN(PackagingMetadataTest)

@@ -163,7 +163,7 @@ ordinary HTTP, HTTPS, or FTP downloads.
 Linux only:
 
 ```bash
-sudo apt-get install -y cmake ninja-build g++ qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config
+sudo apt-get install -y cmake ninja-build g++ qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev libssl-dev pkg-config
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
@@ -479,7 +479,7 @@ Local package prerequisites on Ubuntu:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev pkg-config debhelper-compat devscripts appstream desktop-file-utils flatpak flatpak-builder libfuse2 ffmpeg 7zip libsecret-tools
+sudo apt-get install -y build-essential cmake ninja-build qt6-base-dev qt6-base-dev-tools libcurl4-openssl-dev libsqlite3-dev libssl-dev pkg-config debhelper-compat devscripts appstream desktop-file-utils flatpak flatpak-builder libfuse2 ffmpeg 7zip libsecret-tools
 ```
 
 Build and test the Debian package:
@@ -537,7 +537,7 @@ support both x86_64 and aarch64 release architectures.
 Build and test the RPM (Fedora):
 
 ```bash
-sudo dnf install -y rpm-build cmake ninja-build gcc-c++ qt6-qtbase-devel libcurl-devel sqlite-devel
+sudo dnf install -y rpm-build cmake ninja-build gcc-c++ qt6-qtbase-devel libcurl-devel sqlite-devel openssl-devel
 sh packaging/build-rpm.sh                    # the machine's own architecture
 sh packaging/build-rpm.sh --arch arm64       # arm64, on an arm64 machine
 sudo dnf install -y ./dist/qtidm-0.3.4-1.fc40.x86_64.rpm
@@ -557,7 +557,7 @@ package. Artifacts are written to `dist/`; the `Version:` line is rewritten from
 Build and test the Arch package:
 
 ```bash
-sudo pacman -S --needed base-devel cmake ninja qt6-base curl sqlite
+sudo pacman -S --needed base-devel cmake ninja qt6-base curl sqlite openssl
 sh packaging/build-arch.sh                 # dist/qtidm-0.3.4-1-x86_64.pkg.tar.zst
 sh packaging/build-arch.sh --pkg-ext xz    # the same package as .pkg.tar.xz
 sh packaging/build-arch.sh --arch arm64    # dist/qtidm-0.3.4-1-aarch64.pkg.tar.zst
